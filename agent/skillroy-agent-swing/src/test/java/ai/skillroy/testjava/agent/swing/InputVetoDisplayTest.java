@@ -67,7 +67,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code INPUT_REJECTED vetoed}, {@code force} or not, with the data of rule 5; the firer never fires; a focused
  * vetoed button gets no SPACE from a target-less {@code swing.key}; ENTER's default button is asked; readers flag the
  * components; the in-task re-ask withholds a click a veto switched on between the read and the task (one warning,
- * {@code vetoWithheld} 1); the routed pointer's per-event check refuses a release the press made vetoed.
+ * {@code vetoWithheld} 1); the routed pointer's per-event check refuses a release the press made vetoed. The fix wave of
+ * the Phase 8 review (FA) adds: a {@code '\n'} in DISPATCH text asks the default button as ENTER does, for a text and a
+ * non-text target (L1-F1, L2-F1), and COMPONENT asks again in the read that follows the window activation, before the
+ * component's focus request (L2-F5).
  */
 class InputVetoDisplayTest extends DisplayTestBase {
 
@@ -82,6 +85,9 @@ class InputVetoDisplayTest extends DisplayTestBase {
     static JButton printTestSlip;
     static JButton pressArms;
     static JTextField toolsNote;
+    static JButton focusArms;
+    static final AtomicInteger focusArmsFocused = new AtomicInteger();
+    static final AtomicInteger focusArmsFired = new AtomicInteger();
     static final AtomicInteger closeRequests = new AtomicInteger();
     static final AtomicInteger testSlips = new AtomicInteger();
     static final AtomicInteger pressArmsFired = new AtomicInteger();
@@ -127,12 +133,15 @@ class InputVetoDisplayTest extends DisplayTestBase {
     /**
      * Refuses by name: {@code closeMenu} and the dialog {@code vetoedDialog} on every route; {@code fallbackOnly} on
      * ACTION and ANY only; {@code printTestSlip} on ACTION from its second ask (the in-task re-ask) while
-     * {@code armTask}; {@code pressArms} on the routed pointer once it was pressed.
+     * {@code armTask}; {@code pressArms} on the routed pointer once it was pressed; {@code focusArms} on COMPONENT and
+     * ANY once the fixture frame became the focused window while {@code armOnActivation} (application state).
      */
     static final class TestVeto implements InputVeto {
         final Set<String> always = Collections.synchronizedSet(new HashSet<String>());
         final AtomicBoolean armTask = new AtomicBoolean();
         final AtomicInteger slipAsks = new AtomicInteger();
+        final AtomicBoolean armOnActivation = new AtomicBoolean();
+        final AtomicBoolean activationArmed = new AtomicBoolean();
 
         @Override
         public String refuse(Component c, String route) {
@@ -152,6 +161,10 @@ class InputVetoDisplayTest extends DisplayTestBase {
             }
             if ("pressArms".equals(n) && (POINTER_ROUTED.equals(route) || ANY.equals(route)) && pressed.get()) {
                 return "the press armed it";
+            }
+            if ("focusArms".equals(n) && (CLICK_COMPONENT.equals(route) || ANY.equals(route))
+                    && activationArmed.get()) {
+                return "the window's activation armed it";
             }
             return null;
         }
@@ -200,12 +213,30 @@ class InputVetoDisplayTest extends DisplayTestBase {
             });
             JTextField tools = new JTextField(10);
             tools.setName("toolsNote");
+            JButton focusing = new JButton("Focus arms");
+            focusing.setName("focusArms");
+            focusing.addActionListener(e -> focusArmsFired.incrementAndGet());
+            focusing.addFocusListener(new java.awt.event.FocusAdapter() {
+                @Override
+                public void focusGained(java.awt.event.FocusEvent e) {
+                    focusArmsFocused.incrementAndGet();
+                }
+            });
             content.add(menu);
             content.add(fallback);
             content.add(slip);
             content.add(arms);
             content.add(tools);
+            content.add(focusing); // last: never the frame's first focus component
             f.setContentPane(content);
+            f.addWindowFocusListener(new java.awt.event.WindowAdapter() {
+                @Override
+                public void windowGainedFocus(java.awt.event.WindowEvent e) {
+                    if (veto.armOnActivation.get()) {
+                        veto.activationArmed.set(true); // application state the activation changed
+                    }
+                }
+            });
             f.getRootPane().setDefaultButton(close);
             f.setBounds(420, 300, 560, 260);
             f.setVisible(true);
@@ -218,6 +249,7 @@ class InputVetoDisplayTest extends DisplayTestBase {
             printTestSlip = slip;
             pressArms = arms;
             toolsNote = tools;
+            focusArms = focusing;
             return null;
         });
         await("veto fixture showing", WAIT_MS, () -> printTestSlip.isShowing() && closeDesk.isShowing());
@@ -288,6 +320,36 @@ class InputVetoDisplayTest extends DisplayTestBase {
         assertEquals(before, closeRequests.get(), "nothing reached the close controls");
     }
 
+    /**
+     * Fix wave of the Phase 8 review (FA, L2-F5): a veto that switches on with application state while COMPONENT
+     * waits for the window activation is asked again in the read that follows it, before the component's focus request
+     * (which would run the vetoed component's focus listeners): {@code INPUT_REJECTED vetoed}, the component never
+     * gets the focus and nothing fires.
+     */
+    @Test
+    void componentAsksAgainBeforeTheFocusRequestThatFollowsTheActivation() throws Exception {
+        activate("the test frame is the focused window", ui.frame);
+        settle();
+        assertFalse(onEdt(() -> frame.isFocused()), "the fixture frame must be activated by the call");
+        int focused = focusArmsFocused.get();
+        veto.activationArmed.set(false);
+        veto.armOnActivation.set(true);
+        try {
+            RpcException e = vetoed("swing.click", InputVeto.CLICK_COMPONENT, "target", ref(focusArms), "rung",
+                    "COMPONENT", "activateWindow", true, "focusTimeoutMs", 15000L);
+            assertEquals(ref(focusArms), e.error().data().get("vetoed"));
+            assertEquals("the window's activation armed it", e.error().data().get("veto"));
+            settle();
+            assertEquals(focused, focusArmsFocused.get(), "the vetoed component's focus listeners never ran");
+            assertEquals(0, focusArmsFired.get(), "nothing fired");
+        } finally {
+            veto.armOnActivation.set(false);
+            veto.activationArmed.set(false);
+            activate("the test frame is the focused window again", ui.frame);
+            settle();
+        }
+    }
+
     @Test
     void theFallBackToActionAsksTheVetoAgain() throws Exception {
         vetoed("swing.click", InputVeto.CLICK_ACTION, "target", ref(fallbackOnly), "rung", "COMPONENT", "fallback",
@@ -322,6 +384,15 @@ class InputVetoDisplayTest extends DisplayTestBase {
         RpcException ctrl = vetoed("swing.key", InputVeto.KEY, "target", ref(toolsNote), "key", "ENTER",
                 "modifiers", java.util.Arrays.asList("CTRL"));
         assertEquals(ref(closeDesk), ctrl.error().data().get("defaultButton"), "ctrl ENTER presses it too");
+        // fix wave of the Phase 8 review (FA, L1-F1, L2-F1): a '\n' in DISPATCH text is the ENTER key stroke
+        RpcException newline = vetoed("swing.type", InputVeto.TYPE_DISPATCH, "target", ref(toolsNote), "text", "x\n",
+                "mode", "DISPATCH");
+        assertEquals(ref(closeDesk), newline.error().data().get("defaultButton"), String.valueOf(newline.error()
+                .data()));
+        RpcException onAButton = vetoed("swing.type", InputVeto.TYPE_DISPATCH, "target", ref(printTestSlip), "text",
+                "\n", "mode", "DISPATCH");
+        assertEquals(ref(closeDesk), onAButton.error().data().get("defaultButton"),
+                "a non-text target: Swing presses the default button whatever the focus history");
         call("swing.type", "target", ref(toolsNote), "text", "typed");
         settle();
         assertEquals("typed", onEdt(() -> toolsNote.getText()), "typing without ENTER goes in");

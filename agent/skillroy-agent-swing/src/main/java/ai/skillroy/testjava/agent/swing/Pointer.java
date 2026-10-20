@@ -461,7 +461,7 @@ final class Pointer {
                 p.source = source;
                 p.sourceLeaf = source != t.window && HitTest.heavyweightLeaf(source);
                 if (view.vetoes().any()) {
-                    p.veto = new RoutedVeto();
+                    p.veto = new RoutedVeto(t.window);
                 }
                 final Window w = t.window;
                 p.blocked = new BooleanSupplier() {
@@ -713,8 +713,8 @@ final class Pointer {
         }
     }
 
-    /** {@code {ref, veto, route}} of a per-event refusal (the result's {@code vetoed}). */
-    private Map<String, Object> vetoedJson(InputVetoes.Refusal r) {
+    /** {@code {ref, veto, route}} of a per-event refusal (the result's {@code vetoed}; the Robot release's too). */
+    Map<String, Object> vetoedJson(InputVetoes.Refusal r) {
         Map<String, Object> m = new LinkedHashMap<String, Object>();
         m.put("ref", r.component == null ? null : ref(r.component));
         m.put("veto", r.text);
@@ -725,17 +725,28 @@ final class Pointer {
     /**
      * The production per-event veto (D505): the component AWT will deliver the event to (while a press of this call
      * is down, the component the press went to; otherwise the one under the event's point in its source), asked with
-     * a fresh evaluator per event, so that a veto that depends on state the press changed is seen. EDT only.
+     * a fresh evaluator per event, so that a veto that depends on state the press changed is seen. The release of a
+     * press of this call also asks the components at the release's screen point ({@link HitTest#releaseTargets}: the
+     * window's, a heavyweight popup's, a window shown while the button was down), since Swing's menu selection and a
+     * popup's mouse grabber hand that release to the menu item under it (Phase 8 security fix, S155, FA); the
+     * covering list full refuses. EDT only.
      */
     private final class RoutedVeto implements InputVetoes.EventVeto {
+        private final Window window;
         private Component pressed;
+
+        RoutedVeto(Window window) {
+            this.window = window;
+        }
 
         @Override
         public InputVetoes.Refusal check(MouseEvent e) {
             int id = e.getID();
             Component at;
+            boolean releaseOfPress = false;
             if (pressed != null && (id == MouseEvent.MOUSE_DRAGGED || id == MouseEvent.MOUSE_RELEASED)) {
                 at = pressed;
+                releaseOfPress = id == MouseEvent.MOUSE_RELEASED;
             } else {
                 at = HitTest.deliveryTarget(e.getComponent(), e.getX(), e.getY());
             }
@@ -744,7 +755,43 @@ final class Pointer {
             } else if (id == MouseEvent.MOUSE_RELEASED) {
                 pressed = null;
             }
-            return new InputVetoes(ctx).check(at, InputVeto.POINTER_ROUTED);
+            InputVetoes vetoes = new InputVetoes(ctx);
+            InputVetoes.Refusal r = vetoes.check(at, InputVeto.POINTER_ROUTED);
+            if (r != null || !releaseOfPress || window == null) {
+                return r;
+            }
+            return releaseRefusal(vetoes, e);
+        }
+
+        /** The release point's question (S155): the components there, or the full covering list, refuse. EDT only. */
+        private InputVetoes.Refusal releaseRefusal(InputVetoes vetoes, MouseEvent e) {
+            Component source = e.getComponent() != null ? e.getComponent() : window;
+            Point screen;
+            try {
+                Point o = source.getLocationOnScreen();
+                screen = new Point(o.x + e.getX(), o.y + e.getY());
+            } catch (RuntimeException notShowing) {
+                screen = new Point(e.getXOnScreen(), e.getYOnScreen());
+            }
+            List<Component> there;
+            try {
+                there = HitTest.releaseTargets(new SwingSpis(ctx), windows, window, screen, false);
+            } catch (RuntimeException unreadable) {
+                // the window stopped showing, or the point could not be read: the release is not judged, so refused
+                return new InputVetoes.Refusal(window, "the release point could not be read ("
+                        + unreadable.getClass().getSimpleName() + "); the release is withheld",
+                        InputVeto.POINTER_ROUTED);
+            }
+            if (there == null) {
+                return new InputVetoes.Refusal(window, InputVetoes.TOO_MANY_WINDOWS, InputVeto.POINTER_ROUTED);
+            }
+            for (Component c : there) {
+                InputVetoes.Refusal r = vetoes.check(c, InputVeto.POINTER_ROUTED);
+                if (r != null) {
+                    return r;
+                }
+            }
+            return null;
         }
     }
 

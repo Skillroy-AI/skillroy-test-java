@@ -210,8 +210,10 @@ final class SwingSpis {
         }
         if (LOGGED.put(impl, Boolean.TRUE) == null) {
             try {
-                ctx.log().warn("swing: " + impl.getClass().getName() + "." + what + " failed and is ignored: " + t,
-                        t);
+                // the exception's class only: its message may quote the application's text, and the agent log is
+                // served by agent.log (fix wave of the Phase 8 review, FA; security review L8-F6)
+                ctx.log().warn("swing: " + impl.getClass().getName() + "." + what + " failed and is ignored ("
+                        + t.getClass().getName() + ")");
             } catch (Throwable ignored) {
                 // never the reason a read fails
             }

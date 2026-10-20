@@ -303,6 +303,81 @@ final class HitTest {
         return coveringJson(view, out, ranked);
     }
 
+    /**
+     * The components at a screen point of the JVM's other showing windows that hold it ({@link #covering}), for the
+     * input veto (Phase 8 security fixes, S155, S156, FA): the target and the deepest component at the point of each
+     * such window ({@link #targetsAt}); with {@code every}, of all of them (the Robot presses and releases on whatever
+     * window is really on top, so an owner exempted from the covering rule, gap 101, or a window {@code force} acts
+     * past is asked too); otherwise of those ranked above the window and those of type {@code POPUP} (a heavyweight
+     * popup, a window the application showed while a button was down: the routed release's question). EDT only.
+     *
+     * @return the components (none null), or null when {@value #MAX_COVERING} windows hold the point: the list is
+     *     full and a further window, unasked, could be the one on top (the caller refuses, fail closed)
+     */
+    static List<Component> coveringTargets(SwingSpis spis, Windows windows, Window window, Point screen,
+                                           boolean every) {
+        List<Window> others = new ArrayList<Window>();
+        List<Boolean> ranked = new ArrayList<Boolean>();
+        covering(windows, window, screen, others, ranked);
+        if (others.size() >= MAX_COVERING) {
+            return null;
+        }
+        List<Component> out = new ArrayList<Component>();
+        for (int i = 0; i < others.size(); i++) {
+            Window other = others.get(i);
+            if (!every && !ranked.get(i).booleanValue() && other.getType() != Window.Type.POPUP) {
+                continue;
+            }
+            Point o;
+            try {
+                o = other.getLocationOnScreen();
+            } catch (RuntimeException e) {
+                continue; // stopped showing in between: nothing of it is on the glass
+            }
+            Point local = new Point(screen.x - o.x, screen.y - o.y);
+            for (Component c : targetsAt(spis, other, local)) {
+                if (c != null && !out.contains(c)) {
+                    out.add(c);
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The components a release at a screen point may act on besides the component the press went to
+     * (phase8-contracts.md 3.2 rule 6; Phase 8 security fix, S155, FA): the target and the deepest component at the
+     * point in the window (a lightweight popup lies in its layered pane), then {@link #coveringTargets} (a
+     * heavyweight popup is a window of its own). Swing's menu selection and a popup's mouse grabber hand the release
+     * of a press on a menu or on a popup's invoker to the item under the release's screen point, which the pressed
+     * component's chain does not hold. EDT only.
+     *
+     * @return the components (none null), or null when the covering list is full (the caller refuses)
+     */
+    static List<Component> releaseTargets(SwingSpis spis, Windows windows, Window window, Point screen,
+                                          boolean every) {
+        List<Component> out = new ArrayList<Component>();
+        Point o = window.getLocationOnScreen();
+        Point local = new Point(screen.x - o.x, screen.y - o.y);
+        if (window.contains(local)) {
+            for (Component c : targetsAt(spis, window, local)) {
+                if (c != null && !out.contains(c)) {
+                    out.add(c);
+                }
+            }
+        }
+        List<Component> others = coveringTargets(spis, windows, window, screen, every);
+        if (others == null) {
+            return null;
+        }
+        for (Component c : others) {
+            if (!out.contains(c)) {
+                out.add(c);
+            }
+        }
+        return out;
+    }
+
     private static List<Object> coveringJson(ComponentView view, List<Window> windows, List<Boolean> ranked) {
         List<Object> covering = new ArrayList<Object>();
         for (int i = 0; i < windows.size(); i++) {

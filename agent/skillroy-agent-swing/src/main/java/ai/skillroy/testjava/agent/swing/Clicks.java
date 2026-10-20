@@ -68,7 +68,8 @@ import javax.swing.AbstractButton;
  * <p>Phase 8 (phase8-contracts.md 3.1, 3.2, 3.3, 3.5): every rung checks, in the EDT read that resolves the target,
  * clickable (not showing, then collapsed, then disabled: {@code INVALID_PARAMS}), then the input veto
  * ({@code INPUT_REJECTED vetoed}, never skipped by {@code force}; COMPONENT asks before the window activation and the
- * focus request), then the modal state; every posted click asks the veto again immediately before it acts (a refusal
+ * focus request, again in each re-issued activation and in the second read before its focus request), then the modal
+ * state; every posted click asks the veto again immediately before it acts (a refusal
  * there acts on nothing and is logged and counted, {@link InputVetoes.Withheld}). ACTION and COMPONENT fire an AWT
  * {@code Button} or {@code Checkbox} semantically ({@link #semantic}).
  *
@@ -178,6 +179,8 @@ final class Clicks {
         final AtomicReference<Component> listenedTo = new AtomicReference<Component>();
         final AtomicReference<Window> activated = new AtomicReference<Window>();
         final String[] refusal = new String[1];
+        // one in-task re-ask per call (D503): the re-activation tasks and the final click count once together
+        final InputVetoes.Withheld task = new InputVetoes.Withheld(ctx, withheld);
         try {
             Boolean accepted;
             try {
@@ -243,6 +246,12 @@ final class Clicks {
                                 if (wait.cancelled.get() || windowWait.hasArrived() || !w.isDisplayable()) {
                                     return;
                                 }
+                                // fix wave of the Phase 8 review (FA, L2-F5): the re-issued activation runs the
+                                // application's focus listeners too, so it asks the veto again first; a refusal
+                                // skips it (counted once per call), the wait runs out and FOCUS_FAILED follows
+                                if (!task.allows(InputVeto.CLICK_COMPONENT, listenedTo.get())) {
+                                    return;
+                                }
                                 if (!w.isFocused()) {
                                     w.toFront();
                                     w.requestFocus();
@@ -268,6 +277,10 @@ final class Clicks {
                             if (wait.cancelled.get()) {
                                 return Boolean.FALSE;
                             }
+                            // fix wave of the Phase 8 review (FA, L2-F5): the focus request runs the component's
+                            // focus listeners, and the window wait may have taken up to focusTimeoutMs since the
+                            // first read: ask again, as the first read does (INPUT_REJECTED vetoed)
+                            requireNotVetoed(new ComponentView(ctx), listenedTo.get(), InputVeto.CLICK_COMPONENT);
                             return requestFocus(listenedTo.get(), wait);
                         }
                     });
@@ -287,7 +300,6 @@ final class Clicks {
                 }
             }
             final Component c = listenedTo.get();
-            final InputVetoes.Withheld task = new InputVetoes.Withheld(ctx, withheld);
             Edt.post(ctx, inv.remainingMs(), "swing.click COMPONENT", InputVetoes.guarded(task,
                     InputVeto.CLICK_COMPONENT, new Edt.Action() {
                         @Override

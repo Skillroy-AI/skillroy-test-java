@@ -407,7 +407,16 @@ enforced but invisible to the recorder until it acts.
    (at most 64 levels, `Windows.hidden`'s bound, `Windows.java:139-148`); the first refusal, nearest the component,
    wins and names the component that refused (`vetoed` below). A layer vetoes a whole panel or window with one
    answer. Memoised per call and route (`ComponentView` holds the evaluator as it holds `Redaction`,
-   `ComponentView.java:65-69`; the chain mirrors `masked`'s, `:84-97`).
+   `ComponentView.java:65-69`; the chain mirrors `masked`'s, `:84-97`). **Fix wave (Phase 8 review, FA, 2026-10-19):
+   a popup is asked with its invoker's chain** (L2-F2): the walk continues from a `JPopupMenu` with an invoker to the
+   invoker, and from a window of type `Window.Type.POPUP` with an owner (Swing's heavyweight popup window, which also
+   hands its owner its window-wide key bindings) to the owner; anything else continues with its parent and stops at
+   any other window. One successor (`InputVetoes.next`) serves the depth bound, the memoised chain, the readers and
+   rule 2's root-pane walk, and the 64-level bound applies across the hops (a cycle, an invoker inside its own popup,
+   is refused at the bound). So a window veto covers the items of its menus whether their popup is drawn in the layered
+   pane or as a window of its own (a popup that does not fit, a cascaded submenu, `setLightWeightPopupEnabled(false)`),
+   a vetoed `JComboBox` covers its open popup list (a click there sets the vetoed combo's selection), and a veto on a
+   `JMenu` or on a context menu's invoker covers that popup's items.
 2. **Where it is asked (D502)**, in every route, after `requireClickable` and before the modal test (§3.1):
    - R1/R4 (`swing.click` ACTION, AUTO, DISPATCH) in `Clicks.click`'s read (`Clicks.java:133-144`) with
      `CLICK_ACTION` / `CLICK_DISPATCH`;
@@ -419,13 +428,28 @@ enforced but invisible to the recorder until it acts.
      (`Typing.defaultKeyTarget`, `Typing.java:220-232`; a window's root pane included): a focused vetoed key takes
      SPACE or ENTER like a click. For `swing.key` with `ENTER` (no CTRL/ALT/META) and for `swing.type` with `enter`,
      also the target's root pane's default button (`SwingUtilities.getRootPane(c).getDefaultButton()`, when not
-     null), since Swing's `WHEN_IN_FOCUSED_WINDOW` binding fires it; route `KEY` / `TYPE_SET` / `TYPE_DISPATCH`;
+     null), since Swing's `WHEN_IN_FOCUSED_WINDOW` binding fires it; route `KEY` / `TYPE_SET` / `TYPE_DISPATCH`.
+     **Fix wave (Phase 8 review, FA, 2026-10-19):** (i) the default buttons asked are those of **every** `JRootPane`
+     on rule 1's walk from the target up to its window, nearest first, each once (L2-S1): a `JInternalFrame`'s root
+     pane registers its ENTER under the internal frame only while it has a default button, and Swing then offers the
+     key to the window's own bindings, so ENTER into an internal frame without a default button presses the enclosing
+     window's; asking the outer button while a nearer one exists refuses on the safe side, and the error's
+     `defaultButton` names the button whose veto refused; (ii) a `'\n'` in `swing.type` DISPATCH text is the ENTER key
+     stroke (`Keys.type` dispatches `KEY_PRESSED VK_ENTER` for it, the same three events as `Keys.press(c, VK_ENTER,
+     0)`), so it asks the default buttons as `enter` does, in the read and in that character's task (L1-F1, L2-F1);
+     multi-line DISPATCH text into a `JTextArea` is therefore refused while a default button on the walk is vetoed
+     (SET is the way around it); `'\r'` maps to no key code and asks nothing more;
    - R9/R10 (the routed pointer) in `precheck` (`Pointer.java:731-760`, routed only) for the hit's `target` and
      `deepest` (both chains), for the component form additionally the addressed component (`:300-325`), and for
      `DRAG` the `target` and `deepest` of a second hit-test at `to`; route `POINTER_ROUTED`; **per event** in
      `Pointer.dispatch` (rule 6);
    - R11 (Robot) in `RobotPath.check` (`RobotPath.java:357-404`, both reads: the probe's `:269-277` and the press's
      `:282-287`) for `target`, `deepest` and the drag's `to`; route `POINTER_ROBOT`; refused before anything moves;
+     **(Phase 8 security fix, S156, FA)** and the target and deepest component at the point, and at the drag's end, of
+     every other window of the JVM whose screen rectangle holds it (`HitTest.coveringTargets`), since a Robot press
+     lands on whichever window is really on top: an owner gap 101 exempts from the covering rule, and every covering
+     window under `force`; a covering list that is full (`HitTest.MAX_COVERING`, 32) refuses, since a further window
+     could be the one on top; `force` acts past the covering rule, never past a veto;
    - R12 (`swing.dismiss {button}`) for the button after `requireClickable` (`SwingPrimitives.java:811`), route
      `DISMISS_BUTTON`; R13 (`{close}`) for the dialog window itself, route `DISMISS_CLOSE`, before the
      `WINDOW_CLOSING` is planned (`:791-796`).
@@ -434,7 +458,12 @@ enforced but invisible to the recorder until it acts.
 4. **Atomic with the action (D503).** Every posted input task re-asks the veto on the EDT immediately before it
    acts, with a fresh evaluator and the task's route: `Clicks.actionPlan`'s chosen action (the `ActionFirer`, the
    semantic click of §3.5, the mouse click), COMPONENT's final click, every `swing.type` task (the SET task; the
-   prepare task; each character's task; the ENTER task) and `swing.key`'s task, `swing.dismiss`'s task. A refusal
+   prepare task; each character's task; the ENTER task) and `swing.key`'s task, `swing.dismiss`'s task;
+   **fix wave (Phase 8 review, FA, 2026-10-19; L2-F5)** COMPONENT's re-issued activation (A39, `toFront()` and
+   `requestFocus()` run the application's focus listeners: a refusal skips it, counted once per call with the final
+   click, the wait runs out and `FOCUS_FAILED` follows, or the fall-back's own `CLICK_ACTION` read) and its second
+   read, before the component's `requestFocusInWindow()` (a read, not a task: it answers `INPUT_REJECTED vetoed` as
+   the first read does), since up to `focusTimeoutMs` lies between the first read and either. A refusal
    there acts on nothing, is logged once per call at `warn` ("swing: <route> withheld inside the task: <text>"), is
    counted (`vetoWithheld: <n>` in the Swing module's `info()`, which `agent.info.modules[]` shows as the record's
    `info` entry when non-empty through the new additive default `AgentModule.info()`, `Map<String, Object>`, empty by
@@ -462,7 +491,25 @@ enforced but invisible to the recorder until it acts.
    down (`MOUSE_DRAGGED`, the drag's `MOUSE_RELEASED`), the component the press went to (the one under the press's
    point, kept from the press's own check); otherwise the component under the event's point in the event's source
    (`HitTest.mouseTarget(source, x, y)`, else `SwingUtilities.getDeepestComponentAt(source, x, y)`); the ancestor
-   rule covers the rest. A refusal stops the sequence as a modal dialog does: `st.stopped`, `fired: false`,
+   rule covers the rest. **(Phase 8 security fix, S155, FA)** The `MOUSE_RELEASED` of a press of this call also asks
+   the target and the deepest component at the release's screen point in the window (a lightweight popup lies in its
+   layered pane) and in every other window of the JVM that holds the point and is ranked above the window or is of
+   type `POPUP` (a heavyweight popup, a window the application showed while the button was down;
+   `HitTest.releaseTargets`), a full covering list refusing: Swing's `MenuSelectionManager` and a popup's
+   `MouseGrabber` hand the drag and the release of a press on a `JMenu`, or on a popup's invoker, to the item under the
+   release's screen point, so a drag pressed on an allowed menu and released on a vetoed item would otherwise fire it.
+   The release is enough: the balance's drag and release land at (-1, -1) of the source, where no item lies, and the
+   menu clears its path. For a click the release point is the press point, so it refuses only what the press put
+   there. **The Robot route** (`RobotPath.act`) asks a `DRAG`'s release again on the worker after the press and the
+   moves, immediately before the release: once the press was observed (bounded, 1000 ms) and the event queue has
+   passed twice (what the press posted, such as a lightweight popup's layout, runs first), one bounded EDT read asks
+   the same question at the end point over every window of the JVM that holds it; unless it allows (a refusal, a read
+   that fails or times out, an interruption, a press never observed), the pointer moves back to the press point and
+   the release lands there (on a menu the menu stays open and nothing fires; a drag and drop drops on its source; a
+   button pressed there may fire, the press point being allowed), and a refusal answers `fired: false, reason:
+   "VETOED"` with `vetoed {ref, veto, route}`. **Residual, stated:** the Robot's read is not atomic with the native
+   release, so a popup or drop zone the application shows after it (a submenu's open delay, a timer, a native drag's
+   own window) is not seen on that route. A refusal stops the sequence as a modal dialog does: `st.stopped`, `fired: false`,
    `reason: "VETOED"` (beside `EDT_BUSY`, `MODAL_OPENED`), result field `vetoed: {ref, veto, route}`, a dispatched
    press balanced (D352, `:629-645`), `dispatched {sent, of}` honest; the executor's A29 rule fails the step. The
    per-event check is **not** skipped by `force` (the modal re-read is, `:576`). Seam for the headless test:
@@ -488,7 +535,13 @@ enforced but invisible to the recorder until it acts.
    module serves **without its veto** (`AgentRuntime.java:788-802`); the agent logs the failed module as today.
 10. **Not covered, stated.** Swing's key bindings, mnemonics and menu accelerators can route a key dispatched to
     one component to an action another component owns; only the delivery target's chain and ENTER's default button
-    are asked. The guide's rule (§6.7, §7 rule 4): *veto the window, or the bound control*. `web.*` input into a
+    are asked. The guide's rule (§6.7, §7 rule 4): *veto the window, or the bound control*. **Fix wave (Phase 8
+    review, FA, 2026-10-19):** a menu item's own veto does not cover the keyboard of an open menu (`swing.key DOWN`
+    and `ENTER` to the focus owner select and fire the armed item): veto the window; the control characters of DISPATCH
+    text other than `'\n'` (`'\t'` moves the focus, ESC fires a window-wide "close" binding) are key strokes this rule
+    leaves to the bindings; a `JRootPane` placed in a window off the target's walk and outside a `JInternalFrame`
+    (rare: a root pane embedded in a plain panel) registers its default button under the window and is not asked.
+    `web.*` input into a
     browser component a veto names is not refused (gap 126, **medium**; Q3): the web routes act through the page;
     only `web.pointer` reads the browser's AWT component, for the modal check (`agent-web/.../Pointing.java:218-227`
     → `ComponentReads.stateOf`, `ComponentReads.java:45-57`, which already walks the ancestor chain for `masked`:
@@ -522,7 +575,8 @@ button, not only an ENTER without CTRL, ALT or META (rule 2): the Basic look and
 pane's default button as well as `ENTER` (`RootPane.defaultButtonWindowKeyBindings`), so the narrower rule would let
 `swing.key {key: ENTER, modifiers: [CTRL]}` press a vetoed default button; a refusal through the default button is the
 rule-5 error with `ref` the key's target, `vetoed` the component whose veto refused (the button or an ancestor, by the
-ancestor rule) and the added key **`defaultButton`** (the button's ref), message "… takes no input from the agent
+ancestor rule) and the added key **`defaultButton`** (the button's ref; since the fix wave, FA, the ref of the default
+button whose veto refused, rule 2 (i)), message "… takes no input from the agent
 (<route>): ENTER would press the default button <describe(button)>: <text>"; `swing.type {enter: true}` asks the
 default button in both modes (SET's `postActionEvent` does not press it, the safe side). (b) **Deeper than 64
 levels is refused** (rule 1's bound): a component whose chain from itself to its window holds more than 64
@@ -3464,12 +3518,17 @@ place):
 1. **A component a layer vetoes is never acted on, for any origin, on any route, `force` included** (§3.2). The veto
    is asked on the EDT inside the read of every input route that resolves a target (twelve of the thirteen; the
    `ROBOT` click rung is refused before resolution) after the clickable test, again inside every posted task
-   immediately before it acts, and per event in the routed pointer (the pressed component while a press is down); the
-   Robot path refuses before anything moves; default type and key targets and ENTER's default button are asked; a veto
-   that throws refuses; nothing a model, a client or a person passes skips it (`force` acts past a dialog, never past a
-   veto). The recorder and V2's raw pointer refuse a vetoed component as they refuse a masked one (it becomes no step,
+   immediately before it acts, and per event in the routed pointer (the pressed component while a press is down, and at
+   that press's release also the components at the release's screen point, S155); the Robot path refuses before
+   anything moves, asks the components of every window of the JVM at its point (S156) and asks a drag's release again
+   before it releases (S155); default type and key targets and ENTER's default buttons (every root pane up to the
+   window, a `'\n'` in DISPATCH text included) are asked; a popup is asked with its invoker's chain; a veto that throws
+   refuses; nothing a model, a client or a person passes skips it (`force` acts past a dialog, never past a veto). The
+   recorder and V2's raw pointer refuse a vetoed component as they refuse a masked one (it becomes no step,
    journal line or export); the text snapshot flags it `vetoed`, its text kept (a veto is safety, not privacy). Not
-   covered, stated: Swing key bindings, mnemonics and accelerators (veto the window or the bound control); `web.*`
+   covered, stated: Swing key bindings, mnemonics and accelerators (veto the window or the bound control; a menu item's
+   own veto does not cover the keyboard of an open menu: veto the window); a popup or drop zone the application shows
+   after the Robot route's release read (fix wave of the Phase 8 review, FA); `web.*`
    input into a vetoed browser component (gap 126, medium), so that **a veto on a window or panel does not cover page
    input into a browser inside it**; a step whose control's veto can change with application state passes with `fired:
    true` when the veto refuses inside the posted task, counted in `agent.info` and failed only by the step's `sync` or
@@ -3938,7 +3997,13 @@ named per item host the agent-level half of a proof.
    veto, routes R1-R4, R6-R13, a registered `ActionFirer` accepting the component never fires, a focused vetoed
    button gets no SPACE from a target-less `swing.key`, dismiss of a vetoed dialog's button and `close`, the in-task
    re-check with a veto switched on between the read and the task: nothing fires, one warning, `vetoWithheld` 1 in the
-   module's `info()`). End to end against
+   module's `info()`; **fix wave of the Phase 8 review and security fixes (FA, 2026-10-19)**: COMPONENT's second read
+   refuses a veto that switched on with the window's activation, the component never focused (L2-F5);
+   `PopupVetoDisplayTest`, its own frames: a frame veto covers a heavyweight menu popup's item the application opened,
+   a vetoed combo its open list (L2-F2); a routed `DRAG` from a menu, from a menu whose popup is heavyweight, and a
+   right-button drag on a panel with a context menu, each released on a vetoed item, answers `VETOED` with the press
+   balanced and nothing fired (S155; each fired the item on the old code); `InputVetoesTest`: a popup's item asked with
+   the invoker's chain, a cycle refused at the bound, the throwing veto's log line naming the class only). End to end against
    `closeDesk` and `{action: CLOSE}`: `swing.click` ACTION, AUTO, COMPONENT with `activateWindow`, COMPONENT with
    `fallback: ACTION`, DISPATCH, each also with `force: true`; `swing.key SPACE` and `ENTER` with the target;
    `swing.pointer` CLICK by `{id: closeDesk}`, by window point, by `{captureId}` point of a capture of the tools
@@ -3947,7 +4012,11 @@ named per item host the agent-level half of a proof.
    ref, `data.route` the route; then `closeRequests == 0`.
 3. **ENTER's default button** (EA). `swing.key {key: ENTER, target: {id: toolsNote}}` is refused naming `closeDesk` in
    `vetoed` (route `swing.key`); `swing.type {target: {id: toolsNote}, text: "x", enter: true}` likewise;
-   `swing.type` without `enter` into `toolsNote` succeeds.
+   `swing.type` without `enter` into `toolsNote` succeeds. **Fix wave (Phase 8 review, FA, 2026-10-19)**, agent half
+   only: `InputVetoDisplayTest` refuses `swing.type {mode: DISPATCH}` with `"x\n"` into `toolsNote` and with `"\n"`
+   into the non-text `printTestSlip`, `defaultButton` naming `closeDesk` (L1-F1, L2-F1); `PopupVetoDisplayTest`
+   refuses ENTER and a DISPATCH `'\n'` into a field of a `JInternalFrame` without a default button, `defaultButton`
+   naming the window's (L2-S1); `InputVetoesTest` asks the outer default button headless.
 4. **Readers** (EA). `swing.hitTest {target: {id: closeDesk}}` and at the key's centre answer `vetoed: true`;
    `swing.snapshot {root: <tools frame>}` nodes of `closeMenu`, `closeDesk` and the icon key carry `vetoed: true`,
    `printTestSlip` carries no such key; `swing.find {by: {id: closeDesk}}` likewise; `swing.capture {target: <tools
@@ -3991,7 +4060,10 @@ named per item host the agent-level half of a proof.
    `FailureKind.ASSERTION`, `failedStepId` `s2`, the message contains `INPUT_REJECTED` and `vetoed`, the detail
    carries `veto`, `recover` ran and succeeded (the run log), `closeRequests == 0`, the desk signed off.
 10. **The Robot route refuses before anything moves** (EA). (agent half: `RobotPathDisplayTest` with `FakeOs`: a vetoed
-    point, and a drag ending on one, refused with `os.calls` empty, as `:393-404`). End to end: item 2's
+    point, and a drag ending on one, refused with `os.calls` empty, as `:393-404`; **Phase 8 security fixes (FA)**: a
+    vetoed owner under its active owned dialog's point refuses the Robot with and without `force`, nothing moved
+    (S156); a press that shows a vetoed component under a drag's end sends the release to the press point and answers
+    `VETOED` (S155); `RobotPathTest` the release question's three outcomes headless). End to end: item 2's
     `via: ROBOT` call, and `swing.pointer {by: {id: printTestSlip}, via: ROBOT, requireFocus: false}` fires on this
     leg (`testSlips` +1), proving the leg's Robot works.
 

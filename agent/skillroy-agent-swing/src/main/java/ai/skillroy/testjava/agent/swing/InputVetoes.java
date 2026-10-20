@@ -30,12 +30,19 @@ import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import javax.swing.JPopupMenu;
 
 /**
  * The registered {@link InputVeto}s as the module asks them (Phase 8, phase8-contracts.md 3.2, D501-D506): for a
  * component and each of its ancestors up to and including its window, nearest first; the first refusal wins and names
  * the component that refused. Memoised per instance and route, so a walk asks each veto once per component; one
  * instance serves one call's read (a posted task and a pointer event take a fresh one).
+ *
+ * <p>A popup is asked with its invoker's chain (fix wave of the Phase 8 review, FA, L2-F2): the walk continues from a
+ * {@code JPopupMenu} with an invoker to the invoker, and from a {@code Window.Type.POPUP} window with an owner to the
+ * owner, so a window, combo or menu veto covers the items of the popups drawn as windows of their own or in the
+ * layered pane; {@link #next} is the one successor every walk of the module uses (the depth bound, the chain, the
+ * default buttons of {@code Typing}).
  *
  * <p>Fail closed: a veto that throws refuses with the text {@code "veto <SimpleClassName> failed"}, logged once per
  * instance ({@code VirtualMachineError}s other than {@code StackOverflowError} are rethrown); a component that lies
@@ -51,6 +58,12 @@ final class InputVetoes {
     static final int MAX_DEPTH = 64;
     /** Longest veto text kept. */
     static final int MAX_TEXT = 200;
+    /**
+     * The agent's own refusal when the covering list at a pointer's point is full (Phase 8 security fixes, S155,
+     * S156, FA): a further window, unasked, could be the one on top.
+     */
+    static final String TOO_MANY_WINDOWS = "at least " + HitTest.MAX_COVERING + " other windows of the JVM lie at "
+            + "the point; the input veto cannot be asked for every one";
 
     /** Vetoes that have thrown once already (logged once per instance, never again). */
     private static final Map<InputVeto, Boolean> LOGGED =
@@ -108,14 +121,11 @@ final class InputVetoes {
             memo.put(route, known);
         }
         int depth = 0;
-        for (Component p = c; p != null; p = p.getParent()) {
+        for (Component p = c; p != null; p = next(p)) {
             depth++;
             if (depth > MAX_DEPTH) {
                 return new Refusal(c, "the component lies more than " + MAX_DEPTH + " levels below its window; the "
                         + "input veto cannot be asked for every ancestor", route);
-            }
-            if (p instanceof Window) {
-                break;
             }
         }
         Refusal r = chain(c, route, known);
@@ -134,11 +144,35 @@ final class InputVetoes {
         }
         r = own(c, route);
         if (r == null) {
-            Component parent = c.getParent();
-            r = c instanceof Window || parent == null ? ALLOWED : chain(parent, route, known);
+            Component up = next(c);
+            r = up == null ? ALLOWED : chain(up, route, known);
         }
         known.put(c, r);
         return r;
+    }
+
+    /**
+     * The next component the veto is asked about after {@code c} (phase8-contracts.md 3.2 rule 1; fix wave of the
+     * Phase 8 review, FA, L2-F2), or null where the walk ends: a {@code JPopupMenu} with an invoker continues with the
+     * invoker (a popup menu, a combo's list, a context menu: its items are asked with the chain of the component that
+     * opened it, whether the popup is drawn in the layered pane or as a window of its own); a window of type
+     * {@code POPUP} with an owner (Swing's heavyweight popup window, which also passes the owner its window-wide key
+     * bindings) continues with the owner; any other window ends the walk; anything else continues with its parent.
+     * Both walks of {@link #check} use it, so the depth bound and the memoised chain agree; a cycle (an invoker inside
+     * its own popup) ends at the depth bound, refused. EDT only.
+     */
+    static Component next(Component c) {
+        if (c instanceof JPopupMenu) {
+            Component invoker = ((JPopupMenu) c).getInvoker();
+            if (invoker != null) {
+                return invoker;
+            }
+        }
+        if (c instanceof Window) {
+            Window w = (Window) c;
+            return w.getType() == Window.Type.POPUP ? w.getOwner() : null;
+        }
+        return c.getParent();
     }
 
     private Refusal own(Component c, String route) {
@@ -192,8 +226,10 @@ final class InputVetoes {
         }
         if (LOGGED.put(veto, Boolean.TRUE) == null && ctx != null) {
             try {
-                ctx.log().warn("swing: InputVeto " + veto.getClass().getName() + " failed; the input is refused: "
-                        + t, t);
+                // the exception's class only: its message may quote the application's text, and the agent log is
+                // served by agent.log (fix wave of the Phase 8 review, FA; security review L8-F6)
+                ctx.log().warn("swing: InputVeto " + veto.getClass().getName() + " failed ("
+                        + t.getClass().getName() + "); the input is refused");
             } catch (Throwable ignored) {
                 // the log must never be the reason a read fails
             }

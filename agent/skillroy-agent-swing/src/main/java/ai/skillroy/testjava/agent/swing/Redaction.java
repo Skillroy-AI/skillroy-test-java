@@ -158,8 +158,10 @@ final class Redaction {
         }
         if (LOGGED.put(mask, Boolean.TRUE) == null && ctx != null) {
             try {
-                ctx.log().warn("swing: CaptureMask " + mask.getClass().getName() + " failed; the component is "
-                        + "blanked and its text withheld: " + t, t);
+                // the exception's class only: its message may quote the application's text, and the agent log is
+                // served by agent.log (fix wave of the Phase 8 review, FA; security review L8-F6)
+                ctx.log().warn("swing: CaptureMask " + mask.getClass().getName() + " failed ("
+                        + t.getClass().getName() + "); the component is blanked and its text withheld");
             } catch (Throwable ignored) {
                 // the log must never be the reason a read fails
             }

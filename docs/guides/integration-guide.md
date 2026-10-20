@@ -680,13 +680,20 @@ activation on request, `DISPATCH`) are the base's; the scenario key `ui` chooses
 - Register an `InputVeto` for every control whose action ends the JVM or cannot be undone in a test (§7 rule 4).
   `refuse(component, route)` answers null to allow, else one line why (cut at 200 characters); it is asked on the EDT
   for the component and each ancestor up to its window, so one answer for a panel or a window vetoes everything in it.
-  A veto that discriminates routes **must answer the route `ANY` with a refusal whenever it refuses any route**: the
+  A popup is asked with its invoker's chain (fix wave of the Phase 8 review, FA): a window veto covers its menus'
+  items whether their popup is drawn inside the window or as a window of its own, a vetoed combo covers its open
+  list, and a vetoed menu covers its items. A veto that discriminates routes **must answer the route `ANY` with a refusal whenever it refuses any route**: the
   readers ask `ANY` to flag `vetoed: true`, so that the recorder and a model are never offered the component; a veto
   that answers `ANY` with null is still enforced, but invisible until it acts. Keep it fast and lock-free: it runs
   inside the agent's bounded EDT read, and a throwing veto refuses (fail closed, logged once).
 - Key bindings, mnemonics and menu accelerators are not followed: a key delivered to one component may fire an action
-  another component owns (only the delivery target's chain and ENTER's default button are asked), so **veto the
-  window, or the bound control**. **A veto on a window or panel does not cover `web.*` input into a browser inside
+  another component owns (only the delivery target's chain and ENTER's default buttons are asked: every root pane's
+  up to the window, for `swing.key ENTER`, `swing.type {enter}` and a newline in DISPATCH text), so **veto the
+  window, or the bound control**; a menu item's own veto does not cover the keyboard of an open menu, so for a menu
+  item veto the window (fix wave of the Phase 8 review, FA). A drag released on a vetoed item of an open menu is
+  refused at the release (Phase 8 security fix, S155); on the Robot route the release is asked again just before it
+  happens and goes to the press point unless allowed, and a popup the application shows after that question is not
+  seen. **A veto on a window or panel does not cover `web.*` input into a browser inside
   it**; a layer that must keep page input out vetoes nothing more for that in Phase 8 (gap 126).
 - A veto that depends on application state and refuses inside the posted task leaves the step `fired: true` (the
   call already answered "posted"; the refusal is logged and counted in the Swing module's `vetoWithheld`, which

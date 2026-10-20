@@ -76,7 +76,11 @@ import javax.swing.SwingUtilities;
  *       is refused ({@code NOT_FOUND "off-screen"}: the platform would press at the nearest screen edge; Phase 7
  *       security fix, S104, S105); {@code requireFocus} (default true) refuses a JVM without a focused window
  *       ({@code INPUT_REJECTED "not focused"}); any covering window of the JVM refuses the point unless
- *       {@code force}, but an owner of the target's window while that window is the active one (gap 101). {@code modifiers} are refused (the Robot path holds no key; S124).</li>
+ *       {@code force}, but an owner of the target's window while that window is the active one (gap 101). {@code modifiers} are refused (the Robot path holds no key; S124).
+ *       Phase 8: the input veto for the hit, the drag's end and the components at the point (and the end) of every
+ *       other window of the JVM that holds it, the window that is really on top being unknown (S156; a full covering
+ *       list refuses), never skipped by {@code force}; a drag's release is asked again after the press, before the
+ *       release, and goes to the press point unless allowed (S155, {@link ReleaseCheck}).</li>
  *   <li><b>The press</b>: {@code PRESS} and {@code RELEASE} are refused; a press and its release run in one worker task
  *       with no wait between them, a {@code finally} releases every button the call pressed before anything else, and
  *       the pointer is restored only afterwards (D343).</li>
@@ -255,6 +259,17 @@ final class RobotPath {
         Point screen;
         Point screenTo;
         boolean wasFocused;
+        /** Whether an input veto is registered (a drag's release is then asked again, S155). */
+        boolean vetoes;
+    }
+
+    /**
+     * The Robot drag's release re-check (Phase 8 security fix, S155, FA), asked by {@link #act} on the worker after
+     * the press and the moves, immediately before the release. Package-private for the headless tests.
+     */
+    interface ReleaseCheck {
+        /** @return true to release at the drag's end; false to move back to the press point and release there */
+        boolean allows();
     }
 
     /** {@code swing.pointer {via: ROBOT}} (the capability is checked by the caller). */
@@ -290,6 +305,7 @@ final class RobotPath {
                 : r.kind == Pointer.Kind.WHEEL ? MouseEvent.MOUSE_WHEEL : MouseEvent.MOUSE_PRESSED;
         final AtomicReference<Component> received = new AtomicReference<Component>();
         final CountDownLatch got = new CountDownLatch(1);
+        final RobotRelease release = plan.screenTo != null && plan.vetoes ? new RobotRelease(inv, plan, got) : null;
         AWTEventListener listener = new AWTEventListener() {
             @Override
             public void eventDispatched(AWTEvent event) {
@@ -310,7 +326,7 @@ final class RobotPath {
             ctx.threads().call(ThreadPolicy.WORKER, new Callable<Object>() {
                 @Override
                 public Object call() {
-                    act(port, r, plan.screen, plan.screenTo);
+                    act(port, r, plan.screen, plan.screenTo, release);
                     return null;
                 }
             }, Math.max(1, inv.remainingMs() - Pointer.SAFETY_MS));
@@ -322,6 +338,7 @@ final class RobotPath {
         }
         Component target = plan.hit.target;
         Component in = received.get();
+        InputVetoes.Refusal withheld = release == null ? null : release.refusal;
         Map<String, Object> m = new LinkedHashMap<String, Object>();
         m.put("via", Pointer.ROBOT);
         m.put("window", pointer.ref(plan.window));
@@ -330,14 +347,25 @@ final class RobotPath {
             deliveryOk = false;
             m.put("fired", Boolean.FALSE);
             m.put("reason", NOT_DELIVERED);
-        } else if (target != null && in != target && !SwingUtilities.isDescendingFrom(in, target)) {
-            // an unexplained receiver is probed again before the next press, never repeated without a probe (Phase 7
-            // security fix, S105: a point the platform moved to a screen's edge lands on another component)
-            deliveryOk = false;
-            m.put("fired", Boolean.FALSE);
-            m.put("reason", RECEIVED_ELSEWHERE);
         } else {
-            m.put("fired", Boolean.TRUE);
+            boolean elsewhere = target != null && in != target && !SwingUtilities.isDescendingFrom(in, target);
+            if (elsewhere) {
+                // an unexplained receiver is probed again before the next press, never repeated without a probe
+                // (Phase 7 security fix, S105: a point the platform moved to a screen's edge lands on another
+                // component)
+                deliveryOk = false;
+            }
+            if (withheld != null) {
+                // S155: the release was asked again and refused; it went to the press point instead
+                m.put("fired", Boolean.FALSE);
+                m.put("reason", Pointer.VETOED);
+                m.put("vetoed", pointer.vetoedJson(withheld));
+            } else if (elsewhere) {
+                m.put("fired", Boolean.FALSE);
+                m.put("reason", RECEIVED_ELSEWHERE);
+            } else {
+                m.put("fired", Boolean.TRUE);
+            }
         }
         m.put("received", in == null ? null : pointer.ref(in));
         Object[] after = pointer.afterRead(inv, plan.window, plan.wasFocused, true);
@@ -387,6 +415,14 @@ final class RobotPath {
         // the component form's component and a drag's end, before anything moves; never skipped by force
         Pointer.requireNotVetoed(view, hit, InputVeto.POINTER_ROBOT, t.component,
                 t.to == null ? null : HitTest.targetsAt(spis, t.window, t.to));
+        // Phase 8 security fix (S156, FA): the Robot presses and releases on the window really on top, so the
+        // components at the point (and at a drag's end) of every other window of the JVM that holds it are asked too:
+        // an owner exempted from the covering rule (gap 101) and a window force acts past; a full covering list
+        // refuses; never skipped by force
+        requireCoveringNotVetoed(view, spis, hit, t.window, screen);
+        if (screenTo != null) {
+            requireCoveringNotVetoed(view, spis, hit, t.window, screenTo);
+        }
         if (r.requireFocus && KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() == null) {
             throw new RpcException(ErrorCodes.INPUT_REJECTED, "the target JVM holds no focused window, so its windows "
                     + "may not be in front; bring it to the front (requireFocus)", Errors.data("reason",
@@ -407,7 +443,102 @@ final class RobotPath {
         p.wasFocused = t.window.isFocused();
         p.screen = screen;
         p.screenTo = screenTo;
+        p.vetoes = view.vetoes().any();
         return p;
+    }
+
+    /**
+     * The input veto for the components at a screen point of the JVM's other windows that hold it (Phase 8 security
+     * fix, S156, FA; {@link HitTest#coveringTargets}, every window), since the Robot acts on whichever is really on
+     * top. EDT only.
+     *
+     * @throws RpcException INPUT_REJECTED {@code vetoed} (the hit subset; {@code vetoed} names the covering window's
+     *     component, or the window when the covering list is full)
+     */
+    private void requireCoveringNotVetoed(ComponentView view, SwingSpis spis, HitTest.Hit hit, Window window,
+                                          Point screen) {
+        InputVetoes vetoes = view.vetoes();
+        if (!vetoes.any()) {
+            return;
+        }
+        Component aimed = hit.target != null ? hit.target : hit.window;
+        List<Component> there = HitTest.coveringTargets(spis, windows, window, screen, true);
+        if (there == null) {
+            throw Errors.vetoed(view, aimed, new InputVetoes.Refusal(window, InputVetoes.TOO_MANY_WINDOWS,
+                    InputVeto.POINTER_ROBOT), Pointer.hitSubset(hit));
+        }
+        for (Component c : there) {
+            InputVetoes.Refusal r = vetoes.check(c, InputVeto.POINTER_ROBOT);
+            if (r != null) {
+                throw Errors.vetoed(view, aimed, r, Pointer.hitSubset(hit));
+            }
+        }
+    }
+
+    /**
+     * The production {@link ReleaseCheck} (Phase 8 security fix, S155, FA): waits, bounded, until the press was
+     * observed; lets the event queue pass twice (what the press posted, such as a popup's layout, runs before the
+     * question); then asks, in one bounded EDT read with a fresh evaluator, the components at the drag's end point in
+     * the window and in every other window of the JVM that holds it ({@link HitTest#releaseTargets}, every window). A
+     * refusal is kept for the result ({@code fired: false, reason: VETOED, vetoed}); a refusal, a read that fails or
+     * times out, an interruption and a press never observed all answer false, so the release goes to the press point.
+     */
+    private final class RobotRelease implements ReleaseCheck {
+        private final Invocation inv;
+        private final Plan plan;
+        private final CountDownLatch pressed;
+        volatile InputVetoes.Refusal refusal;
+
+        RobotRelease(Invocation inv, Plan plan, CountDownLatch pressed) {
+            this.inv = inv;
+            this.plan = plan;
+            this.pressed = pressed;
+        }
+
+        @Override
+        public boolean allows() {
+            try {
+                if (!pressed.await(bound(), TimeUnit.MILLISECONDS)) {
+                    return false; // nothing observed: the release cannot be judged, so it goes to the press point
+                }
+                Edt.read(ctx, bound(), new Callable<Object>() {
+                    @Override
+                    public Object call() {
+                        return null; // the press's own follow-ups, posted while it was dispatched, run first
+                    }
+                });
+                InputVetoes.Refusal r = Edt.read(ctx, bound(), new Callable<InputVetoes.Refusal>() {
+                    @Override
+                    public InputVetoes.Refusal call() {
+                        InputVetoes vetoes = new InputVetoes(ctx);
+                        List<Component> there = HitTest.releaseTargets(new SwingSpis(ctx), windows, plan.window,
+                                plan.screenTo, true);
+                        if (there == null) {
+                            return new InputVetoes.Refusal(plan.window, InputVetoes.TOO_MANY_WINDOWS,
+                                    InputVeto.POINTER_ROBOT);
+                        }
+                        for (Component c : there) {
+                            InputVetoes.Refusal one = vetoes.check(c, InputVeto.POINTER_ROBOT);
+                            if (one != null) {
+                                return one;
+                            }
+                        }
+                        return null;
+                    }
+                });
+                refusal = r;
+                return r == null;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            } catch (Exception e) {
+                return false; // a timed-out or failed read: never release on an end point nobody asked about
+            }
+        }
+
+        private long bound() {
+            return Math.min(PROBE_MS, Math.max(1, inv.remainingMs() - Pointer.SAFETY_MS));
+        }
     }
 
     /**
@@ -461,6 +592,16 @@ final class RobotPath {
      * interruption too), then the pointer restored. Package-private for the headless tests.
      */
     static void act(RobotPort port, Pointer.Request r, Point p, Point to) {
+        act(port, r, p, to, null);
+    }
+
+    /**
+     * {@link #act(RobotPort, Pointer.Request, Point, Point)} with a drag's release re-check (Phase 8 security fix,
+     * S155, FA): after the moves, {@code release} is asked; unless it allows the end point (it refused, threw or was
+     * interrupted), the pointer moves back to the press point and the release lands there (on a menu the menu stays
+     * open and nothing fires; a drag and drop drops on its source). Null asks nothing.
+     */
+    static void act(RobotPort port, Pointer.Request r, Point p, Point to, ReleaseCheck release) {
         Point saved = port.pointer();
         int mask = InputEvent.getMaskForButton(r.button);
         boolean down = false;
@@ -490,6 +631,16 @@ final class RobotPath {
                         port.mouseMove(p.x + (to.x - p.x) * i / r.steps, p.y + (to.y - p.y) * i / r.steps);
                         if (Thread.currentThread().isInterrupted()) {
                             break;
+                        }
+                    }
+                    if (release != null) {
+                        boolean allowed = false;
+                        try {
+                            allowed = release.allows();
+                        } finally {
+                            if (!allowed) {
+                                port.mouseMove(p.x, p.y); // never released on an end point the veto did not allow
+                            }
                         }
                     }
                     port.mouseRelease(mask);
