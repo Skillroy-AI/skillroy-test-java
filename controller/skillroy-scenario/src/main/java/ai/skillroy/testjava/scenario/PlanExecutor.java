@@ -261,6 +261,8 @@ public final class PlanExecutor {
     private final boolean packHooksRoot;
     /** True when the pack has a fact root named {@code caps}, which then hides the base root. */
     private final boolean packCapsRoot;
+    /** True when the pack has a fact root named {@code events}, which then hides the base root (P8 8.6). */
+    private final boolean packEventsRoot;
 
     /** The message of a run that was not executed (phase7-contracts.md 8.6). */
     static final String SKIPPED_MESSAGE = "not executed: the plan needs a model while steps run (inference: run)";
@@ -313,17 +315,20 @@ public final class PlanExecutor {
         boolean webRoot = false;
         boolean hooksRoot = false;
         boolean capsRoot = false;
+        boolean eventsRoot = false;
         if (packFacts != null) {
             for (FactProvider fact : packFacts) {
                 facts.putIfAbsent(fact.root(), fact);
                 webRoot |= "web".equals(fact.root());
                 hooksRoot |= "hooks".equals(fact.root());
                 capsRoot |= "caps".equals(fact.root());
+                eventsRoot |= "events".equals(fact.root());
             }
         }
         this.packWebRoot = webRoot;
         this.packHooksRoot = hooksRoot;
         this.packCapsRoot = capsRoot;
+        this.packEventsRoot = eventsRoot;
         for (FactProvider fact : BaseFacts.all()) {
             facts.putIfAbsent(fact.root(), fact);
         }
@@ -601,6 +606,10 @@ public final class PlanExecutor {
             if (!packCapsRoot) {
                 // phase7-contracts.md 8.5: the base root caps reads the run's merged matrix, with a source per entry.
                 runFacts.put("caps", BaseFacts.caps(() -> caps));
+            }
+            if (!packEventsRoot) {
+                // phase8-contracts.md 8.6: the base root events reads the run's window, from the start mark on.
+                runFacts.put("events", BaseFacts.events(() -> stepsSinceSeq));
             }
         }
 
@@ -1657,8 +1666,31 @@ public final class PlanExecutor {
                     runner.execute(step, j, call, plan.scenarioId() + "/" + step.id() + "/" + (j + 1),
                             () -> nextStepHandlesPrompt(index));
                 }
+                if (step.facts() != null) {
+                    captureFacts(step);
+                }
                 evaluate(step.expect(), step.id(), stepSkipped);
             });
+        }
+
+        /**
+         * A {@code captureFacts} step (phase8-contracts.md 8.7, decisions D604, D605): one read per named root, each
+         * path resolved once, no retry; the slot bound, {@code capture {step, slot, value, source: facts}} written.
+         * With {@link RunOptions#expectationsOnMaskedValues()} a captured value the mask changes fails the step.
+         */
+        private void captureFacts(Plan.Step step) throws Abort, AgentLostException, InterruptedException {
+            Map<String, Object[]> cache = new HashMap<>();
+            Map<String, Object> value = FactCapturing.capture(step, runner.bindings, runFacts.keySet(), root -> {
+                Object[] fact = cache.get(root);
+                if (fact == null) {
+                    fact = fetch(root);
+                    cache.put(root, fact);
+                }
+                return fact;
+            }, this::secret);
+            runner.bindings = runner.bindings.withCaptured(step.facts().slot(), value);
+            log.write("capture", RunLog.fields("step", step.id(), "slot", step.facts().slot(), "value", value,
+                    "source", "facts"));
         }
 
         /**
@@ -1954,9 +1986,10 @@ public final class PlanExecutor {
             }
             Bound bound = active.get(firstFailure);
             Attempt attempt = last.get(firstFailure);
-            Map<String, Object> detail = RunLog.fields("path", bound.path().text(), "matcher", bound.matcher(),
-                    "actual", attempt.actual(), "resolved", attempt.resolved(), "reason", attempt.reason(),
-                    "attempts", attempts, "timeoutMs", stepTimeoutMs, "failures", failures);
+            // phase8-contracts.md 8.10 (D608): the detail's actual cut as the expect record's is.
+            Map<String, Object> detail = RunLog.cutActual(RunLog.fields("path", bound.path().text(), "matcher",
+                    bound.matcher(), "actual", attempt.actual(), "resolved", attempt.resolved(), "reason",
+                    attempt.reason(), "attempts", attempts, "timeoutMs", stepTimeoutMs, "failures", failures));
             if (attempt.fetchError() != null) {
                 throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "fact '" + bound.path().root()
                         + "' could not be read: " + attempt.fetchError(), detail);

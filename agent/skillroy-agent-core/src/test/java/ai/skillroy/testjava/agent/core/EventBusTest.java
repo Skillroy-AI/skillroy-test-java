@@ -215,6 +215,45 @@ class EventBusTest {
         }
     }
 
+    /**
+     * phase8-contracts.md 13.1 row 36 (8.9): {@code {has: scalar}} holds on a list member equal by text, on an
+     * existing and on a future event, and never on a payload value that is not a list.
+     */
+    @Test
+    void awaitWithHasMatchesAListMemberByText() throws Exception {
+        final RingEventBus bus = new RingEventBus(100, log);
+        bus.publish("input.requested", "t", payload("state", "LOAN", "validInputs", "Key.DEPOSIT"));
+        bus.publish("input.requested", "t", payload("state", "DEPOSIT", "validInputs", Arrays.asList("Entry",
+                "Key.DEPOSIT", Long.valueOf(2))));
+        final Map<String, Object> deposit = payload("validInputs", payload("has", "Key.DEPOSIT"));
+        Event existing = bus.await(0, TopicFilter.parse("input.requested"), deposit, 1000);
+        assertNotNull(existing);
+        assertEquals(2, existing.seq(), "the scalar payload value of seq 1 never matches has");
+        assertNotNull(bus.await(0, TopicFilter.parse("input.*"), payload("validInputs", payload("has", "2")), 100),
+                "numbers by text");
+        assertNull(bus.await(0, TopicFilter.parse("input.*"), payload("validInputs", payload("has", "Key")), 100),
+                "no substring meaning");
+        assertNull(bus.await(0, TopicFilter.parse("input.*"), payload("validInputs", payload("in", "Entry")), 100),
+                "an operator other than has never holds");
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<Event> waiting = pool.submit(new Callable<Event>() {
+                @Override
+                public Event call() throws Exception {
+                    return bus.await(2, TopicFilter.parse("input.requested"), payload("validInputs",
+                            payload("has", "Key.RETURN")), 30000);
+                }
+            });
+            bus.publish("input.requested", "t", payload("validInputs", "Key.RETURN"));
+            bus.publish("input.requested", "t", payload("validInputs", Arrays.asList("Key.RETURN")));
+            assertEquals(4, waiting.get(30, TimeUnit.SECONDS).seq(), "a future event; the scalar one never");
+        } finally {
+            pool.shutdownNow();
+        }
+        assertTrue(RingEventBus.payloadMatches(existing, deposit));
+        assertTrue(RingEventBus.payloadMatches(existing, null));
+    }
+
     @Test
     void subscribersSeeEventsInOrderAndAFailingSinkHarmsNobody() throws Exception {
         RingEventBus bus = new RingEventBus(16, log);

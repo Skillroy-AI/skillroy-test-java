@@ -117,16 +117,24 @@ import java.util.TreeSet;
  * {@code expectImage} compiles to one {@code swing.capture} call and one {@link ImageCheck}. The labels of every
  * image check and guard are the plan's {@code images} (unique in the scenario). Plans are written as version 6.
  *
+ * <p>Phase 8 (phase8-contracts.md 8.2-8.9, decisions D595-D606): plans are written as version 7. The base verb
+ * {@code captureFacts} (reserved for a pack) compiles to a step with no call and its {@code facts}: exactly
+ * {@code slot} and {@code fields}, the slot under the captured-slot rules (not reserved, not in {@code resolve},
+ * captured once), 1 to 32 fields each a path or {@code {size: path}} on a known fact root other than {@code db}. The
+ * {@code match} of every {@code sync.await} call a verb emits is checked as an await's match is (a scalar or
+ * {@code {has: scalar}}); {@code containsWhere} is refused in a stored-row check (a cell is a scalar).
+ *
  * <p>Stateless; safe from any thread, provided the pack's step library is.
  */
 public final class PlanCompiler {
 
     /**
      * Verb names a pack verb may not take: the four Phase 7 base verbs (reserved since decision B16, built in Phase 7,
-     * phase7-contracts.md 8.1) and the base verb {@code call} (phase5-contracts.md 13.1), which an exported session step
-     * relies on.
+     * phase7-contracts.md 8.1), the base verb {@code call} (phase5-contracts.md 13.1), which an exported session step
+     * relies on, and the base verb {@code captureFacts} (phase8-contracts.md 8.7, D604).
      */
-    public static final Set<String> RESERVED_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call");
+    public static final Set<String> RESERVED_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call",
+            "captureFacts");
 
     private PlanCompiler() {
     }
@@ -866,6 +874,9 @@ public final class PlanCompiler {
                 Map<String, Object> typed = (Map<String, Object>) map;
                 return new Plan.Step(id, verb, line, List.of(), checks(typed, line, "expect"));
             }
+            if (Plan.CAPTURE_FACTS.equals(verb)) {
+                return captureFacts(id, index, step);
+            }
             StepLibrary chosen;
             if (packVerbs.contains(verb)) {
                 chosen = library;
@@ -908,6 +919,83 @@ public final class PlanCompiler {
             }
             cleanups.addAll(ctx.cleanups);
             return new Plan.Step(id, verb, line, calls, List.of());
+        }
+
+        /**
+         * {@code captureFacts: {slot, fields}} (phase8-contracts.md 8.7, decision D604): no call; the fields' paths
+         * checked against the grammar and the known fact roots ({@code db} refused), the slot declared as captured by
+         * this step with the fields' names.
+         */
+        private Plan.Step captureFacts(String id, int index, Scenario.Step step) throws ScenarioException {
+            int line = step.line();
+            String verb = Plan.CAPTURE_FACTS;
+            Object args = normalise(step.args(), false, line);
+            if (!(args instanceof Map<?, ?> a) || !a.keySet().equals(Set.of("slot", "fields"))) {
+                throw error(line, verb + ": needs exactly 'slot' and 'fields', found "
+                        + (args instanceof Map<?, ?> m ? "keys " + new TreeSet<>(m.keySet().stream()
+                        .map(String::valueOf).toList()) : ScenarioLoader.describe(args)));
+            }
+            if (!(a.get("slot") instanceof String slot) || slot.isBlank()) {
+                throw error(line, verb + ": 'slot' must be a slot name");
+            }
+            if (!(a.get("fields") instanceof Map<?, ?> raw) || raw.isEmpty() || raw.size() > Plan.MAX_FACT_FIELDS) {
+                throw error(line, verb + ": 'fields' needs 1 to " + Plan.MAX_FACT_FIELDS + " fields, found "
+                        + (a.get("fields") instanceof Map<?, ?> m ? m.size() + "" : ScenarioLoader.describe(
+                        a.get("fields"))));
+            }
+            Map<String, Plan.FactField> fields = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : raw.entrySet()) {
+                String name = String.valueOf(e.getKey());
+                String where = verb + " " + slot + "." + name;
+                Object value = e.getValue();
+                boolean size = false;
+                if (value instanceof Map<?, ?> sized) {
+                    if (sized.size() != 1 || !sized.containsKey("size")) {
+                        throw error(line, where + ": a field is a path or {size: path}, found keys "
+                                + new TreeSet<>(sized.keySet().stream().map(String::valueOf).toList()));
+                    }
+                    value = sized.get("size");
+                    size = true;
+                }
+                if (!(value instanceof String path) || path.isBlank()) {
+                    throw error(line, where + ": a field is a path or {size: path}, found "
+                            + ScenarioLoader.describe(value));
+                }
+                ExpectationPath parsed;
+                try {
+                    parsed = ExpectationPath.parse(path);
+                } catch (IllegalArgumentException ex) {
+                    throw error(line, where + ": " + ex.getMessage());
+                }
+                if ("db".equals(parsed.root())) {
+                    throw error(line, where + ": captureFacts reads fact roots; db.* is a stored-row check");
+                }
+                if (!roots.contains(parsed.root())) {
+                    throw error(line, where + ": unknown fact root '" + parsed.root() + "' in path '" + path
+                            + "'; roots: " + String.join(", ", roots));
+                }
+                fields.put(name, new Plan.FactField(path, size));
+            }
+            Plan.FactCapture facts;
+            try {
+                facts = new Plan.FactCapture(slot, fields);
+            } catch (IllegalArgumentException ex) {
+                throw error(line, verb + ": " + ex.getMessage());
+            }
+            // The captured-slot rules of an event's capture (capture(), phase2-contracts.md 3.4), for facts.
+            if (ScenarioLoader.RESERVED_NAMES.contains(slot)) {
+                throw error(line, verb + ": slot name '" + slot + "' is reserved");
+            }
+            if (declared.containsKey(slot)) {
+                throw error(line, verb + ": slot '" + slot + "' is also declared in resolve; a captured slot may"
+                        + " not appear there");
+            }
+            if (captured.containsKey(slot)) {
+                throw error(line, verb + ": slot '" + slot + "' is already captured by step "
+                        + captured.get(slot).stepId() + "; a slot may be captured once per scenario");
+            }
+            captured.put(slot, new Captured(slot, index, id, new TreeSet<>(facts.fields().keySet())));
+            return new Plan.Step(id, verb, line, List.of(), List.of(), facts);
         }
 
         /** The labels of the scenario's image checks and guards so far: each label once (phase7-contracts.md 8.1). */
@@ -1033,11 +1121,32 @@ public final class PlanCompiler {
                 throw new ScenarioException(scenario.id(), line, where + ": call " + call.primitive()
                         + " uses sync READY but pack '" + pack.id() + "' has no ready topics");
             }
+            syncAwaitMatch(call.primitive(), args, line, where);
             long timeoutMs = call.timeoutMs() > 0 ? call.timeoutMs() : scenario.stepTimeoutMs();
             boolean handlesPrompt = marked || "swing.dismiss".equals(call.primitive())
                     || ("sync.await".equals(call.primitive()) && awaitsPrompt(args.get("topics")));
             AwaitSpec await = call.await() == null ? null : await(call, line, where);
             return new Plan.Call(call.primitive(), args, sync, timeoutMs, await, handlesPrompt, call.capture());
+        }
+
+        /**
+         * The {@code match} argument of a {@code sync.await} call any verb emits (phase8-contracts.md 8.9, D606): a
+         * scalar or {@code {has: scalar}} per entry, as an await's match; a list or a map compiled and never matched.
+         */
+        private void syncAwaitMatch(String primitive, Map<String, Object> args, int line, String where)
+                throws ScenarioException {
+            if (!"sync.await".equals(primitive) || !args.containsKey("match")) {
+                return;
+            }
+            if (!(args.get("match") instanceof Map<?, ?> raw)) {
+                throw new ScenarioException(scenario.id(), line, where + ": call sync.await: 'match' must be a"
+                        + " mapping of payload key to value");
+            }
+            @SuppressWarnings("unchecked")
+            String problem = AwaitRules.checkMatch((Map<String, Object>) raw);
+            if (problem != null) {
+                throw new ScenarioException(scenario.id(), line, where + ": call sync.await: " + problem);
+            }
         }
 
         /**
@@ -1206,7 +1315,7 @@ public final class PlanCompiler {
                             throw error(line, label + "." + key + ": needs a matcher");
                         }
                         try {
-                            expect.put(key, Matchers.normalise(e.getValue()));
+                            expect.put(key, noContainsWhere(Matchers.normalise(e.getValue()), line, label));
                         } catch (IllegalArgumentException ex) {
                             throw error(line, label + "." + key + ": " + ex.getMessage());
                         }
@@ -1252,7 +1361,7 @@ public final class PlanCompiler {
                 throw error(line, label + "." + key + ": needs a matcher");
             }
             try {
-                return Matchers.normalise(matcher);
+                return noContainsWhere(Matchers.normalise(matcher), line, label);
             } catch (IllegalArgumentException ex) {
                 throw error(line, label + "." + key + ": " + ex.getMessage());
             }
@@ -1283,10 +1392,23 @@ public final class PlanCompiler {
                 throw error(line, label + ": 'rows' must be a whole number or a matcher such as {gte: 1}");
             }
             try {
-                return Matchers.normalise(value);
+                return noContainsWhere(Matchers.normalise(value), line, label);
             } catch (IllegalArgumentException ex) {
                 throw error(line, label + ".rows: " + ex.getMessage());
             }
+        }
+
+        /**
+         * phase8-contracts.md 8.4 (D600): {@code containsWhere} needs a list, and a stored-row cell, a count or an
+         * aggregate is a scalar, so it is refused anywhere in a stored-row check's matchers; {@code anyOf} works there.
+         */
+        private Map<String, Object> noContainsWhere(Map<String, Object> matcher, int line, String label)
+                throws ScenarioException {
+            if (Matchers.mentions(matcher, Matchers.CONTAINS_WHERE)) {
+                throw error(line, label + ": '" + Matchers.CONTAINS_WHERE + "' needs a list, and a stored-row cell is"
+                        + " a scalar");
+            }
+            return matcher;
         }
 
         // ------------------------------------------------------------------ references
@@ -1321,6 +1443,14 @@ public final class PlanCompiler {
                     checkRefs(callRefs(call), i + 1, step.line(), where);
                 }
                 checkRefs(checkRefs(step.expect()), i + 1, step.line(), where);
+                if (step.facts() != null) {
+                    // phase8-contracts.md 8.7: the references in a captureFacts step's paths, as an expectation's.
+                    List<References.Ref> refs = new ArrayList<>();
+                    for (Plan.FactField field : step.facts().fields().values()) {
+                        refs.addAll(References.collectPath(field.path()));
+                    }
+                    checkRefs(refs, i + 1, step.line(), where);
+                }
             }
             checkRefs(checkRefs(verify), Integer.MAX_VALUE, 0, "verify");
             for (Plan.Call call : cleanup) {

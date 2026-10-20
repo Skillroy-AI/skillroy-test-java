@@ -581,6 +581,30 @@ class WebPathTest {
         assertEquals("webhost.borrowed", cdp.callsTo("web.dom.fill").get(0).args().get("text"));
     }
 
+    /**
+     * phase8-contracts.md 13.1 row 40: the executor's own wait on the path's events applies the agent's rule,
+     * {@code PayloadMatch}, so {@code {has: x}} ends it on a list member and an event without one never does.
+     */
+    @Test
+    void aCombinedWaitOnThePathsEventsTakesHas() throws Exception {
+        webCdp(CapabilityState.OK, null);
+        cdp.answers.put("web.dom.click", args -> {
+            cdp.publish("web.ready", Map.of("browser", "h7", "signal", "TAP", "names", List.of("webhost.other")));
+            cdp.publish("web.ready", Map.of("browser", "h7", "signal", "TAP", "names", List.of("webhost.other",
+                    "webhost.borrowed")));
+            return Map.of("matched", 1L, "fidelity", "DOM");
+        });
+        RunResult result = run(null, """
+                  - webClick: { role: button, name: Borrow }
+                  - waitFor: { topic: web.ready, match: { names: { has: webhost.borrowed } }, within: 1s }
+                  - waitFor: { topic: web.ready, match: { names: { has: webhost.returned } }, within: 500ms }
+                """);
+        assertEquals(Status.FAIL, result.status(), result.message());
+        assertEquals("s3", result.failedStepId(), "the first wait ended on the list member: " + result.message());
+        assertEquals(FailureKind.SYNC_TIMEOUT, result.failureKind());
+        assertEquals(List.of(), agent.callsTo("sync.await"), "the executor waited itself");
+    }
+
     @Test
     void aWaitForOnAWebTopicThatNothingEndsIsTheAgentsTimeout() throws Exception {
         webCdp(CapabilityState.OK, null);

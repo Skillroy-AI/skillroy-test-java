@@ -62,6 +62,11 @@ import java.util.Set;
  * {@code recover}, {@code cleanup}) and the five the step span's events come from ({@code expect}, {@code db},
  * {@code prompt}, {@code fidelity}, {@code capture}). A log without a file still tells its observer.
  *
+ * <p>An {@code expect} record's {@code actual} (phase8-contracts.md 8.10, decision D608) is written whole up to
+ * {@value #MAX_ACTUAL_ELEMENTS} elements per list at any depth; a longer list is cut to its first
+ * {@value #MAX_ACTUAL_ELEMENTS} and the record gains {@code actualTruncated: true} ({@link #cutActual}, which the
+ * executor applies to a failure's detail too). The verdict never changes.
+ *
  * <p>Best effort: a write error disables the log and is never thrown into the run. Used by the executor's thread;
  * {@link #write} is synchronised because a web path may append a record through its run context from a thread of
  * its own.
@@ -73,6 +78,9 @@ final class RunLog implements AutoCloseable {
 
     /** The nesting the JSON codec writes at most. */
     private static final int MAX_DEPTH = 200;
+
+    /** The most elements of one list an {@code actual} is written with (phase8-contracts.md 8.10, D608). */
+    static final int MAX_ACTUAL_ELEMENTS = 200;
 
     /** The record types an observer receives as {@code scenarioRecord} (phase6-contracts.md 10.2, 10.4). */
     static final Set<String> OBSERVED = Set.of("requires", "launchProperties", "preflight", "hooks", "capabilities",
@@ -135,6 +143,9 @@ final class RunLog implements AutoCloseable {
         boolean observed = observer != RunObserver.NONE && OBSERVED.contains(type);
         if (out == null && !observed) {
             return;
+        }
+        if ("expect".equals(type)) {
+            fields = cutActual(fields);
         }
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("type", type);
@@ -224,6 +235,61 @@ final class RunLog implements AutoCloseable {
             return copy;
         }
         return Values.normalise(value);
+    }
+
+    /**
+     * {@code fields} with its {@code actual} cut to {@value #MAX_ACTUAL_ELEMENTS} elements per list at any depth and
+     * {@code actualTruncated: true} after it when something was cut (phase8-contracts.md 8.10, D608); the same map when
+     * nothing needs cutting (or there is no {@code actual}).
+     */
+    static Map<String, Object> cutActual(Map<String, ?> fields) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> same = (Map<String, Object>) fields;
+        if (fields == null || !fields.containsKey("actual")) {
+            return same;
+        }
+        boolean[] cut = {false};
+        Object actual = cutLists(fields.get("actual"), 0, cut);
+        if (!cut[0]) {
+            return same;
+        }
+        Map<String, Object> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, ?> e : fields.entrySet()) {
+            if (e.getKey().equals("actualTruncated")) {
+                continue;
+            }
+            copy.put(e.getKey(), e.getKey().equals("actual") ? actual : e.getValue());
+            if (e.getKey().equals("actual")) {
+                copy.put("actualTruncated", true);
+            }
+        }
+        return copy;
+    }
+
+    /** A copy with every list longer than the bound cut to its first elements; maps and lists copied as needed. */
+    private static Object cutLists(Object value, int depth, boolean[] cut) {
+        if (depth > MAX_DEPTH) {
+            return value;
+        }
+        if (value instanceof List<?> list) {
+            int keep = Math.min(list.size(), MAX_ACTUAL_ELEMENTS);
+            if (keep < list.size()) {
+                cut[0] = true;
+            }
+            List<Object> copy = new ArrayList<>(keep);
+            for (int i = 0; i < keep; i++) {
+                copy.add(cutLists(list.get(i), depth + 1, cut));
+            }
+            return copy;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                copy.put(e.getKey(), cutLists(e.getValue(), depth + 1, cut));
+            }
+            return copy;
+        }
+        return value;
     }
 
     /** Builds a field map in insertion order: {@code fields("step", "s1", "ok", true)}. */

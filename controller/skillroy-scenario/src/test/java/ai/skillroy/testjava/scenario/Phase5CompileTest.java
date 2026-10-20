@@ -179,7 +179,8 @@ class Phase5CompileTest {
 
     @Test
     void callIsReservedForTheBaseVerb() {
-        assertEquals(Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call"), PlanCompiler.RESERVED_VERBS);
+        assertEquals(Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call", "captureFacts"),
+                PlanCompiler.RESERVED_VERBS, "captureFacts since Phase 8 (phase8-contracts.md 8.7)");
         DomainPack shadowing = new Delegating(pack) {
             @Override
             public StepLibrary steps() {

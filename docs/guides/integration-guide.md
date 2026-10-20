@@ -328,7 +328,8 @@ agent home zip, the CLI distribution and the base jars of the pack **from the sa
   (`LendingModule.VERSION`, P1 §9.2), and the pack's `version()` whenever a compiled plan would change; plans record
   `packVersion`, and a different version at run time is logged, not an error (P2 §8.3, Q13).
 - **Plan versions move with the base**: each phase that changed the plan format raised `planVersion` (version 6 since
-  Phase 7, P7 §8.2). After a base upgrade, recompile and commit the plans (`skillroy compile`, or the sample's
+  Phase 7, P7 §8.2; **version 7 since Phase 8**, P8 §8.2, *(Phase 8, built 2026-10-19, EX)*, whose reader also refuses
+  an unknown step or call key). After a base upgrade, recompile and commit the plans (`skillroy compile`, or the sample's
   `-Dskillroy.plans.update=true` pattern, TODO "Environment notes", Phase 7 build).
 
 ### 4.5 Assembling an agent home for the application
@@ -697,6 +698,13 @@ bounded by characters, `eventRingChars`). A call's result carries the events pub
 its `seq.before`, so waiting "since `seq.before`" never misses a consequence of the call (P1 §3). Event sinks run on
 the publishing thread and must not block.
 
+*(Phase 8, built 2026-10-19, EX; P8 §8.6.)* The base fact root `events` reads the ring for the run's window, so a
+scenario can count your events, compare against a count captured earlier and assert that one never happened
+(`events[*topic=…][*payload.source=…]`, `{size: 0}`). Publish small, structured payloads with the fields a scenario
+filters on at the top level or one level down (a list for membership, `{has: x}`); a chatty module that publishes more
+than `eventRing` events in a run makes every such expectation `ERROR` (the root refuses rather than under-counts), and
+a JSON string in a payload is read with `[json]` at a cost.
+
 ### 6.14 Primitives of the module's own
 
 `Primitives.of(PrimitiveSpec.builder("<product>.<verb>")…build(), body)` and `ctx.primitives()`. A spec declares its
@@ -794,7 +802,7 @@ Each call carries a `Sync` level the verb chooses:
 | `ACK` | awaits the pack's ack topic since `seq.before` |
 | `READY` | awaits the ack topic (if the pack has one), then the first ready topic |
 | `SETTLE` | calls `swing.settle` (the UI processed the input; no window opened or closed) |
-| `EVENT` | awaits the event the call's `AwaitSpec` names, with a payload match; for acknowledgements that mean only "consumed", or primitives that publish none |
+| `EVENT` | awaits the event the call's `AwaitSpec` names, with a payload match (*Phase 8, built 2026-10-19, EX; P8 §8.9:* each value a scalar, equal by text, or `{has: scalar}`, a list member equal by text; anything else a compile error); for acknowledgements that mean only "consumed", or primitives that publish none |
 
 `SyncPolicy(ackTopic, readyTopics, promptTopics, ackTimeout, readyTimeout)`: `ackTopic` may be null (the web host has
 none and waits on `web.ready`), and `promptTopics` are the ready topics that mean "the application asks a question", to
@@ -809,7 +817,8 @@ that answers a prompt is marked as handling it; a verb that opens a session adds
 
 - A `FactProvider` names a root (`root()`) and fetches its current value (`fetch(agent)`); expectations address it with
   the path grammar (`loan.lines[code=$item.code].amount`, P1 §8.4). The base's own roots are `app`, `ui`, `dialogs`,
-  `caps`, `devices`, `web` and `hooks` (`BaseFacts`; P1 §8.4; P3 §3.4; P4 §6.2; P6 §6.3).
+  `caps`, `devices`, `web`, `hooks` and, *(Phase 8, built 2026-10-19, EX; P8 §8.6)*, `events`, the agent's bus for the
+  run's window (`BaseFacts`; P1 §8.4; P3 §3.4; P4 §6.2; P6 §6.3); a pack root of the same name hides a base root.
 - `PromptPolicy.onUnexpectedPrompt` answers `HANDLED`, `IGNORE` or `FAIL` for known interrupting prompts (a session
   lock, a reminder) deterministically (design §3.5).
 - `PreflightCheck`s check the environment (backend reachable, data present, device usable) through a context that
@@ -899,6 +908,36 @@ verify:
 on_prompt: { unexpected: fail }
 timeouts: { step: 30s }
 ```
+
+*(Phase 8, built 2026-10-19, EX; P8 §8.3-§8.9.)* Counts, deltas, membership and events, from the sample's
+`loan-counts-and-events.yaml`:
+
+```yaml
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item }
+  - captureFacts:                                   # read once where the step stands; a slot, as a capture is
+      slot: before
+      fields:
+        scans: { size: "events[*topic=input.acked][*payload.source=Barcode]" }
+        lines: { size: "loan.lines" }
+        qty:   "loan.lines[code=$item.code].qty"
+  - scan: { item: $item }
+  - expect:
+      "loan.lines[*code=$item.code]": { size: 1 }                          # a list filter, counted
+      "loan.lines[code=$item.code].qty": { gt: $before.qty }               # a delta of a value
+      "events[*topic=input.acked][*payload.source=Barcode]": { size: { gt: $before.scans } }
+      "loan.lines": { containsWhere: { code: $item.code, qty: 2 } }        # some line where
+  - key: { action: DUE }
+  - waitFor: { topic: input.requested, match: { state: DEPOSIT, validInputs: { has: Key.DEPOSIT } } }
+verify:
+  - { "slip.last.text": { anyOf: [ { contains: "NOT ON ANY SLIP" }, { contains: "DEPOSIT DUE" } ] } }
+  - { "events[*topic=prompt.waiting]": { size: 0 } }                       # negation is a count
+```
+
+Quote every key that holds `[` (a plain YAML scalar never starts with `[` or `*`). Capture counts on state that is the
+scenario's own (an open loan, the run's window), not on what an earlier run left. Put a negative check after a sync
+point or in `verify`: an expectation holds at its first true attempt. The plan is version 7.
 
 The schema of what a scenario may contain for a given pack is generated by `ScenarioSchema.generate` and served to the
 planner and MCP clients as `skillroy://schema/scenario` (P5 §13.3).
@@ -1356,7 +1395,6 @@ From TODO "Open SPI and DSL gaps" (read the row for the proposed shape):
 | 13 | no session-scoped data reads (a procedure call then a select on one connection) |
 | 18 | no standard result fields for "queued but not consumed" or "coerced" inputs |
 | 19 | plans are linear: no "only if the next ready event matches" step |
-| 21 | event expectations are limited (no negated wait, no match inside a string) |
 | 22 | pack verbs cannot declare rung ladders |
 | 24 | a scenario cannot require an application setting beyond launch properties |
 | 35, 39, 43, 44 | a view-less browser without a seed is invisible; hidden JCEF has no bitmap; JCEF before 2024-01; windowed JCEF on Java 8 |

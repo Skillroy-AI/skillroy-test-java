@@ -19,6 +19,7 @@ package ai.skillroy.testjava.scenario;
 import ai.skillroy.testjava.data.SecretMask;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,17 +28,20 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 /**
- * Expectation matchers (contract section 8.4): a scalar (equality), or exactly one of {@code {equals}},
- * {@code {contains}} (substring, or list membership), {@code {matches: regex}} (searched for; anchor with
- * {@code ^…$}), {@code {in: […]}}, {@code {gt|gte|lt|lte: n}}, {@code {size: n}} (list or map size, string length;
- * {@code n} may itself be a matcher), {@code {exists: bool}} (the path resolves to a non-null value) and
- * {@code {not: matcher}}.
+ * Expectation matchers (contract section 8.4, phase8-contracts.md 8.4): a scalar (equality), or exactly one of
+ * {@code {equals}}, {@code {contains}} (substring, or list membership), {@code {matches: regex}} (searched for; anchor
+ * with {@code ^…$}), {@code {in: […]}}, {@code {gt|gte|lt|lte: n}}, {@code {size: n}} (list or map size, string length;
+ * {@code n} may itself be a matcher), {@code {exists: bool}} (the path resolves to a non-null value),
+ * {@code {not: matcher}}, and since Phase 8 {@code {anyOf: [matcher, …]}} (1 to 16 alternatives, any holds) and
+ * {@code {containsWhere: {field: matcher, …}}} (1 to 32 dotted fields; some element of the list is a map on which every
+ * field's matcher holds, a field that does not resolve on an element evaluated as unresolved).
  *
  * <p>Equality follows {@link Values#equal}: numbers and numeric strings compare as decimals, so {@code 2 == "2.00"};
  * a string with a superfluous leading zero ({@code "0100"}) is text, not a number.
- * When the path does not resolve, only {@code exists} (and {@code not} of it) can hold. A {@code matches} search is
- * bounded by {@link SafeRegex} (about a second, no stack overflow): a search it stops is a failed outcome with the
- * reason.
+ * When the path does not resolve, only {@code exists} (and {@code not} of it, or an {@code anyOf} holding one) can
+ * hold. Every {@code matches} search of one top-level evaluation, nested ones included, shares one {@link SafeRegex}
+ * budget (about a second, no stack overflow; phase8-contracts.md 8.4, D599): a search it stops is a failed outcome with
+ * the reason, and every later {@code matches} of the same evaluation fails at once ("regex budget spent").
  *
  * <p>Stateless; safe from any thread.
  */
@@ -45,7 +49,22 @@ final class Matchers {
 
     /** The matcher keys, in documentation order. */
     static final List<String> NAMES = List.of("equals", "contains", "matches", "in", "gt", "gte", "lt", "lte",
-            "size", "exists", "not");
+            "size", "exists", "not", "anyOf", "containsWhere");
+
+    /** The most alternatives of {@code anyOf} (phase8-contracts.md 8.4). */
+    static final int MAX_ALTERNATIVES = 16;
+
+    /** The most fields of {@code containsWhere} (phase8-contracts.md 8.4). */
+    static final int MAX_WHERE_FIELDS = 32;
+
+    /** How much of one alternative's reason an {@code anyOf} failure quotes. */
+    static final int MAX_ALTERNATIVE_REASON = 200;
+
+    /** How long an {@code anyOf} failure's reason may grow. */
+    static final int MAX_ANY_OF_REASON = 2000;
+
+    /** A {@code containsWhere} field: a dotted relative path, as a {@code CaptureSpec} payload path. */
+    private static final Pattern WHERE_FIELD = Pattern.compile("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)*");
 
     private Matchers() {
     }
@@ -147,6 +166,31 @@ final class Matchers {
             case "not" -> {
                 return single(key, normalise(value));
             }
+            case ANY_OF -> {
+                if (!(value instanceof List<?> alternatives) || alternatives.isEmpty()
+                        || alternatives.size() > MAX_ALTERNATIVES) {
+                    throw new IllegalArgumentException("'" + ANY_OF + "' needs a list of 1 to " + MAX_ALTERNATIVES
+                            + " matchers, found " + count(value));
+                }
+                List<Object> normal = new ArrayList<>(alternatives.size());
+                for (Object alternative : alternatives) {
+                    normal.add(normalise(alternative));
+                }
+                return single(key, normal);
+            }
+            case CONTAINS_WHERE -> {
+                if (!(value instanceof Map<?, ?> fields) || fields.isEmpty() || fields.size() > MAX_WHERE_FIELDS
+                        || !fields.keySet().stream().allMatch(f -> f instanceof String s
+                                && WHERE_FIELD.matcher(s).matches())) {
+                    throw new IllegalArgumentException("'" + CONTAINS_WHERE + "' needs a mapping of 1 to "
+                            + MAX_WHERE_FIELDS + " fields to matchers, found " + whereFound(value));
+                }
+                Map<String, Object> normal = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> e : fields.entrySet()) {
+                    normal.put((String) e.getKey(), normalise(e.getValue()));
+                }
+                return single(key, normal);
+            }
             case "capability" -> throw new IllegalArgumentException(
                     "'capability' may only guard a top-level matcher, next to its matcher key");
             default -> throw new IllegalArgumentException("unknown matcher '" + key + "'; matchers: " + NAMES);
@@ -237,6 +281,35 @@ final class Matchers {
         return value instanceof String s && References.containsReference(s);
     }
 
+    /** For a refusal: how many entries a list or map has, else what the value is. */
+    private static String count(Object value) {
+        if (value instanceof List<?> list) {
+            return "a list of " + list.size();
+        }
+        if (value instanceof Map<?, ?> map) {
+            return "a mapping of " + map.size();
+        }
+        return ScenarioLoader.describe(value);
+    }
+
+    /** For {@code containsWhere}'s refusal: the count, or the first key that is not a dotted field. */
+    private static String whereFound(Object value) {
+        if (value instanceof Map<?, ?> map && !map.isEmpty() && map.size() <= MAX_WHERE_FIELDS) {
+            for (Object field : map.keySet()) {
+                if (!(field instanceof String s) || !WHERE_FIELD.matcher(s).matches()) {
+                    return "the field '" + cut(String.valueOf(field), 100) + "' (a field is a dotted name such as"
+                            + " payload.source)";
+                }
+            }
+        }
+        return count(value);
+    }
+
+    /** {@code text} cut to {@code max} characters, with {@code ...} when cut. */
+    private static String cut(String text, int max) {
+        return text.length() <= max ? text : text.substring(0, Math.max(0, max - 3)) + "...";
+    }
+
     private static Map<String, Object> single(String key, Object value) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put(key, value);
@@ -244,15 +317,21 @@ final class Matchers {
     }
 
     /**
-     * Evaluates a matcher in normal form (anything else is treated as equality).
+     * Evaluates a matcher in normal form (anything else is treated as equality), with one regex budget for every
+     * {@code matches} inside it (phase8-contracts.md 8.4, D599).
      *
      * @param resolved whether the path resolved
      * @param actual the resolved value (null when not resolved)
      * @param problem why the path did not resolve, when it did not
      */
     static Outcome evaluate(Object matcher, boolean resolved, Object actual, String problem) {
+        return evaluate(matcher, resolved, actual, problem, SafeRegex.Budget.start());
+    }
+
+    /** {@link #evaluate(Object, boolean, Object, String)} within a given budget (tests: a small one). */
+    static Outcome evaluate(Object matcher, boolean resolved, Object actual, String problem, SafeRegex.Budget budget) {
         if (!(matcher instanceof Map<?, ?> map) || map.size() != 1) {
-            return evaluate(single("equals", matcher), resolved, actual, problem);
+            return evaluate(single("equals", matcher), resolved, actual, problem, budget);
         }
         Map.Entry<?, ?> only = map.entrySet().iterator().next();
         String key = String.valueOf(only.getKey());
@@ -271,11 +350,14 @@ final class Matchers {
             if (!resolved && !isExists(expected)) {
                 return new Outcome(false, "the path did not resolve: " + problem);
             }
-            Outcome inner = evaluate(expected, resolved, actual, problem);
+            Outcome inner = evaluate(expected, resolved, actual, problem, budget);
             return inner.holds()
                     ? new Outcome(false, "expected not " + Values.safeWrite(expected) + " but was "
                             + Values.brief(actual, 200))
                     : new Outcome(true, null);
+        }
+        if (ANY_OF.equals(key)) {
+            return anyOf(expected, resolved, actual, problem, budget);
         }
         if (!resolved) {
             return new Outcome(false, "the path did not resolve: " + problem);
@@ -286,12 +368,98 @@ final class Matchers {
                     : new Outcome(false, "expected " + Values.brief(expected, 200) + " but was "
                             + Values.brief(actual, 200));
             case "contains" -> contains(actual, expected);
-            case "matches" -> matches(actual, expected);
+            case "matches" -> matches(actual, expected, budget);
             case "in" -> in(actual, expected);
             case "gt", "gte", "lt", "lte" -> compare(key, actual, expected);
-            case "size" -> size(actual, expected);
+            case "size" -> size(actual, expected, budget);
+            case CONTAINS_WHERE -> containsWhere(actual, expected, budget);
             default -> new Outcome(false, "unknown matcher '" + key + "'");
         };
+    }
+
+    /**
+     * {@code anyOf}: any alternative holds, each evaluated on the same resolution (so on an unresolved path only an
+     * {@code exists} or {@code not} form can hold); else every alternative's reason, each cut to 200 characters and
+     * the whole to 2000.
+     */
+    private static Outcome anyOf(Object expected, boolean resolved, Object actual, String problem,
+                                 SafeRegex.Budget budget) {
+        if (!(expected instanceof List<?> alternatives) || alternatives.isEmpty()) {
+            return new Outcome(false, "'" + ANY_OF + "' needs a list of matchers, found " + count(expected));
+        }
+        StringBuilder reasons = new StringBuilder();
+        for (Object alternative : alternatives) {
+            Outcome outcome = evaluate(alternative, resolved, actual, problem, budget);
+            if (outcome.holds()) {
+                return new Outcome(true, null);
+            }
+            if (reasons.length() > 0) {
+                reasons.append("; ");
+            }
+            reasons.append(cut(String.valueOf(outcome.reason()), MAX_ALTERNATIVE_REASON));
+        }
+        return new Outcome(false, cut("none of the " + alternatives.size() + " alternatives holds: " + reasons,
+                MAX_ANY_OF_REASON));
+    }
+
+    /**
+     * {@code containsWhere}: the value is a list and some element is a map on which every field's matcher holds; a
+     * field is navigated as {@link References#navigate} does, and one that does not resolve on an element is evaluated
+     * as unresolved (so {@code {exists: false}} says "has no such field").
+     */
+    private static Outcome containsWhere(Object actual, Object expected, SafeRegex.Budget budget) {
+        if (!(actual instanceof List<?> list)) {
+            return new Outcome(false, "'" + CONTAINS_WHERE + "' needs a list, but the value is "
+                    + ScenarioLoader.describe(actual));
+        }
+        if (!(expected instanceof Map<?, ?> fields) || fields.isEmpty()) {
+            return new Outcome(false, "'" + CONTAINS_WHERE + "' needs a mapping of fields to matchers, found "
+                    + count(expected));
+        }
+        for (Object element : list) {
+            if (!(element instanceof Map<?, ?>)) {
+                continue;
+            }
+            boolean all = true;
+            for (Map.Entry<?, ?> field : fields.entrySet()) {
+                String name = String.valueOf(field.getKey());
+                Object[] value = fieldValue(element, name);
+                Outcome outcome = value == null
+                        ? evaluate(field.getValue(), false, null, "no field '" + name + "'", budget)
+                        : evaluate(field.getValue(), true, value[0], null, budget);
+                if (!outcome.holds()) {
+                    all = false;
+                    break;
+                }
+            }
+            if (all) {
+                return new Outcome(true, null);
+            }
+        }
+        return new Outcome(false, "no element of the list of " + list.size() + " matches "
+                + Values.brief(expected, 300));
+    }
+
+    /** A dotted field of an element: map keys, or indexes on a list; null when it does not resolve. */
+    private static Object[] fieldValue(Object element, String dotted) {
+        Object current = element;
+        for (String part : dotted.split("\\.")) {
+            if (current instanceof Map<?, ?> map) {
+                if (!map.containsKey(part)) {
+                    return null;
+                }
+                current = map.get(part);
+            } else if (current instanceof List<?> list) {
+                int index = References.index(part, list.size());
+                if (index < 0) {
+                    return null;
+                }
+                current = list.get(index);
+            } else {
+                return null;
+            }
+        }
+        return new Object[] {current};
     }
 
     private static boolean isExists(Object matcher) {
@@ -323,7 +491,7 @@ final class Matchers {
                 + ScenarioLoader.describe(actual));
     }
 
-    private static Outcome matches(Object actual, Object expected) {
+    private static Outcome matches(Object actual, Object expected, SafeRegex.Budget budget) {
         if (!isScalar(actual)) {
             return new Outcome(false, "'matches' needs a scalar, but the value is " + ScenarioLoader.describe(actual));
         }
@@ -333,9 +501,13 @@ final class Matchers {
         } catch (PatternSyntaxException e) {
             return new Outcome(false, "bad regex " + Values.brief(expected, 200) + ": " + e.getDescription());
         }
+        if (budget.expired()) {
+            return new Outcome(false, "'matches' /" + Values.stringOf(expected) + "/: regex budget spent (one budget"
+                    + " of " + budget.millis() + " ms for every regex of this matcher)");
+        }
         boolean found;
         try {
-            found = SafeRegex.find(pattern, Values.stringOf(actual), SafeRegex.Budget.start());
+            found = SafeRegex.find(pattern, Values.stringOf(actual), budget);
         } catch (SafeRegex.Rejected e) {
             return new Outcome(false, "'matches' /" + Values.stringOf(expected) + "/: " + e.getMessage());
         }
@@ -383,7 +555,7 @@ final class Matchers {
                         + Values.brief(actual, 200));
     }
 
-    private static Outcome size(Object actual, Object expected) {
+    private static Outcome size(Object actual, Object expected, SafeRegex.Budget budget) {
         long n;
         if (actual instanceof List<?> list) {
             n = list.size();
@@ -396,7 +568,7 @@ final class Matchers {
                     + ScenarioLoader.describe(actual));
         }
         if (expected instanceof Map) {
-            Outcome inner = evaluate(expected, true, n, null);
+            Outcome inner = evaluate(expected, true, n, null, budget);
             return inner.holds() ? inner : new Outcome(false, "size " + n + ": " + inner.reason());
         }
         return Values.equal(n, expected)

@@ -313,6 +313,9 @@ as built 2026-10-02, the pack loader's test is the public `DomainPacks.reservedI
 (Phase 5, built 2026-10-08; P5 §13.1) `call` joins the reserved verb names: it is a base verb
 (P1 §8.3), and a pack that declares a verb `call` is refused.
 
+*(Phase 8, built 2026-10-19, EX; P8 §8.7, §2.2.)* `captureFacts` joins the reserved verb names: it is a base verb, and a
+pack that declares a verb of that name is refused at compiler construction (a break for a layer that has one, Q45).
+
 *(Phase 7, built 2026-10-10, VC; P7 §8.5.)* The `inference.` prefix is enforced against the agent's matrix too: an agent
 that declares an id with it is refused ERROR / ENVIRONMENT at the merge (`CapabilityMerge`), and a contributed id that two
 contributors answer is refused naming both.
@@ -334,6 +337,15 @@ name may be captured once per scenario and may not also appear in `resolve`.
 
 A pack verb captures through `PlannedCall.withCapture(CaptureSpec)` (§6.1) on a call whose sync is `EVENT` or whose
 primitive is `sync.await`.
+
+*(Phase 8, built 2026-10-19, EX; P8 §8.7.)* **A slot captured from facts.** The base verb `captureFacts: {slot,
+fields}` binds a slot from fact roots instead of an event: each field a path (`total: loan.total`) or `{size: path}`
+(a list's or map's size, a string's length), read once where the step stands, no retry. The slot obeys the rules
+above (not reserved, not in `resolve`, captured once, by an event or by facts) and is declared `{name, kind: capture,
+step, fields}` as an event's capture is; later steps and `verify` read `$slot.field` (a delta: `{size: {gt:
+$before.scans}}`); it appears under `captured` in the run's `bindings.json`, never in a committed bindings file. A
+path that does not resolve fails the step `FAIL / ASSERTION` naming the slot, field and path; under
+`expectationsOnMaskedValues` a captured value the run's mask changes fails it too (D605).
 
 ---
 
@@ -591,6 +603,13 @@ top-level `images` (sorted labels, absent when empty), a `swing.pointer` call's 
 with `images`; the version rule applied once more: a version 5 plan is read as version 6 without that content, which a
 version below 6 may not hold. One regeneration of every committed plan and bindings file (`planHash`) in both sample
 scenario modules, the branch variant and the session export; no `resolveHash` changed.
+
+*(Phase 8, built 2026-10-19, EX; P8 §8.2, §8.7.)* Version 7: a step's member `facts` (a `captureFacts` step only, no
+calls, no checks: `{"slot": …, "fields": {<name>: {"path": p} | {"size": p}}}`, fields sorted, written after
+`expect` only when present), and the Phase 8 items of P1 §8.2's A91 row; the version rule applied once more (a version
+6 plan is read as version 7 without them, which a version below 7 may not hold); and, new, strict keys: from version 7
+on an unknown step or call key is refused. Regenerated once per cause (P8 §2.8): the version alone at the skeleton
+commit, the rest in step R; no `resolveHash` changed.
 
 ### 5.1 Java shape of the changed Phase 1 types
 
@@ -2820,7 +2839,7 @@ Numbers are those of the table "Open SPI and DSL gaps" in `../TODO.md`.
 | # | Gap | In Phase 2 |
 |---|---|---|
 | 4 | Fixture secrets written in clear | **Closed for good**: fixtures cannot hold secrets; `credentials.yaml` and the credential join (§3.1, §4, §8.4) |
-| 20 | Expectations relative to an earlier step | **Partly**: a slot captured from an event (§3.4). Capturing a *fact* and asserting a delta against it is deferred |
+| 20 | Expectations relative to an earlier step | **Partly**: a slot captured from an event (§3.4). Capturing a *fact* and asserting a delta against it is deferred. *(Phase 8, built 2026-10-19, EX; P8 §8.7, §8.8: closed: `captureFacts` and a delta against the captured count.)* |
 | 25 | Expressions over slot values | **Decided**: no expression form; computed values are oracles, margins are query arguments (§3.2) |
 | 27 | Masking of rows read over the controller-side JDBC channel | **Closed**: `RowMask` (§7.3) |
 | 30 | `AgentConnection.await` cannot report a JSON-RPC error | already amendment A31 (1.x, built 2026-10-02) |
@@ -2831,7 +2850,7 @@ Numbers are those of the table "Open SPI and DSL gaps" in `../TODO.md`.
 | 13 | Session-scoped data reads | deferred; related limit recorded: verifiers run before sign-on (§6.4) |
 | 18 | Semantic-input result contract | deferred |
 | 19 | Conditional or optional planned calls | deferred; scenario A's prompt sequence is fixed |
-| 21 | Event expectations | deferred |
+| 21 | Event expectations | deferred. *(Phase 8, built 2026-10-19, EX; P8 §8.6, §8.8: closed for the agent's bus: the base root `events`, negation as `{size: 0}`; a CDP path's events are gap 146.)* |
 | 22 | Rung ladders for pack verbs | deferred |
 | 24 | Scenario-level preconditions on application configuration | deferred; a query that nothing satisfies already reports an unsuitable environment as `RESOLUTION_FAILED`; `PreflightContext` (§6.1) gives a pre-flight the data channel |
 | 28 | Pack-defined artifact kinds | deferred |

@@ -69,8 +69,9 @@ class ScenarioSchemaCommittedTest {
     void everyCommittedScenarioIsValidAgainstThePacksSchema() throws Exception {
         Map<String, Object> schema = ScenarioSchema.generate(pack, List.of());
         List<Path> files = everyScenario();
-        assertEquals(22, files.size(), "the eleven committed scenarios (scenario E and the four of phase7-contracts.md"
-                + " 12.4 with them) and the eleven negative ones");
+        assertEquals(24, files.size(), "the eleven committed scenarios (scenario E and the four of phase7-contracts.md"
+                + " 12.4 with them) and the eleven negative ones, with Phase 8's loan-counts-and-events and"
+                + " count-delta-fails (phase8-contracts.md 12.4; the final count is the integrator's, D641)");
         for (Path yaml : files) {
             assertEquals(List.of(), ScenarioSchema.validate(schema, document(yaml)), yaml.getFileName().toString());
         }

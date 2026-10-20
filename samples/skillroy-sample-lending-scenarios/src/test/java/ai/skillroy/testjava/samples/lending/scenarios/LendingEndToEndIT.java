@@ -27,7 +27,8 @@ import org.junit.jupiter.api.TestClassOrder;
  * {@code -Dskillroy.it.targetJava} (default: this JVM's). Phase 1 (contract section 10): once per load mode, every
  * check of {@link LoadModeChecks} runs against it through the real controller, agent home, domain pack and executor.
  * Phase 7 (phase7-contracts.md 13.2 items 1 to 6): the load modes run {@link VisionSwingChecks} (the checks of
- * {@link LoadModeChecks} with the Swing items woven in), and {@link RobotChecks} is the Robot leg.
+ * {@link LoadModeChecks} with the Swing items woven in), and {@link RobotChecks} is the Robot leg. Phase 8
+ * (phase8-contracts.md 13.2 item 34): {@link SmallRingChecks} is the small-ring leg.
  * Phase 2 and Phase 3 (phase2-contracts.md 14.2, phase3-contracts.md 11.2): once per load mode and seed, the checks of
  * {@link ResolutionChecks} run scenario A and scenario B ({@code borrow-2-waive-1-slip}: the waiver, its oracle
  * cross-checked against the desk's dry run, the wrong oracle reported as ORACLE_SUSPECT) with the committed YAML,
@@ -249,6 +250,19 @@ class LendingEndToEndIT {
         @Override
         LendingTarget.Mode mode() {
             return LendingTarget.Mode.JAVAAGENT_ROBOT;
+        }
+    }
+
+    /**
+     * The small-ring leg (phase8-contracts.md 13.2 item 34): {@code -javaagent} with the agent option
+     * {@code eventRing=200}, once per target Java; ordered after the Robot leg.
+     */
+    @Nested
+    @Order(20)
+    class JavaAgentSmallRing extends SmallRingChecks {
+        @Override
+        LendingTarget.Mode mode() {
+            return LendingTarget.Mode.JAVAAGENT_SMALL_RING;
         }
     }
 

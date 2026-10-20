@@ -29,16 +29,18 @@ import java.util.Map;
  * In {@code plan.json} it is the call's {@code "await": {"topics":…, "match":…, "timeoutMs":…}}.
  *
  * <p>{@code topics} and the values of {@code match} may hold {@code $slot} references; they are resolved when the
- * scenario runs, never at compile time. The compiler checks the rest: {@code match} must be JSON-compatible with
- * scalar values (strings, numbers, booleans, null), and a wait may last at most 600 s, the agent's limit for
- * {@code sync.await}. A timeout of 0 becomes the scenario's step timeout (at most 600 s) in the plan.
+ * scenario runs, never at compile time. The compiler checks the rest: {@code match} must be JSON-compatible, each
+ * value a scalar (a string, number, boolean or null) or, since Phase 8, {@code {has: scalar}} (the payload value is a
+ * list with a member equal by text; phase8-contracts.md 8.9, {@code PayloadMatch}); a wait may last at most 600 s, the
+ * agent's limit for {@code sync.await}. A timeout of 0 becomes the scenario's step timeout (at most 600 s) in the plan.
+ * A reference that resolves to a list or a map where a scalar belongs is refused when the call runs.
  *
  * <p>Immutable apart from the values inside {@code match}, which the compiler deep-copies into the plan. Safe to
  * share between threads.
  *
  * @param topics comma-separated topic globs, as for {@code sync.await}; at least one glob
- * @param match top-level payload equality: every entry must equal the event's payload value of the same key (compared
- *     by text, as {@code sync.await} does); null means any payload
+ * @param match every entry must hold on the event's payload value of the same key: equal by text, or with
+ *     {@code {has: x}} a list member equal by text (as {@code sync.await} compares); null means any payload
  * @param timeoutMs how long to wait in milliseconds; 0 means the scenario's step timeout
  */
 public record AwaitSpec(String topics, Map<String, Object> match, long timeoutMs) {

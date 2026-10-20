@@ -415,6 +415,9 @@ public final class ScenarioSchema {
                 Schemas.type("string"), "by", Schemas.type("object"), "region", Schemas.type("string"), "clip", rect,
                 "mask", array(Schemas.anyOf(object(props("by", Schemas.type("object")), List.of("by")), rect)),
                 "maxDiffPixels", Schemas.type("integer")), List.of("label")));
+        // phase8-contracts.md 8.7 (D604): the slot and its fields, each a path or {size: path}.
+        verbs.put("captureFacts", object(props("slot", pattern("^[A-Za-z_][A-Za-z0-9_]*$"), "fields",
+                Schemas.type("object")), List.of("slot", "fields")));
         return verbs;
     }
 

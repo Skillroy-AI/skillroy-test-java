@@ -25,6 +25,7 @@ import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.PayloadMatch;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.protocol.Protocol;
 import ai.skillroy.testjava.protocol.RpcError;
@@ -219,16 +220,9 @@ final class FakeAgent implements AgentConnection {
         return null;
     }
 
+    /** The agent's payload rule, {@code PayloadMatch} (phase8-contracts.md 8.9). */
     private static boolean matches(Event event, Map<String, Object> match) {
-        if (match == null) {
-            return true;
-        }
-        for (Map.Entry<String, Object> e : match.entrySet()) {
-            if (!String.valueOf(e.getValue()).equals(String.valueOf(event.payload().get(e.getKey())))) {
-                return false;
-            }
-        }
-        return true;
+        return PayloadMatch.matches(event.payload(), match);
     }
 
     private Object query(Map<String, Object> params) {

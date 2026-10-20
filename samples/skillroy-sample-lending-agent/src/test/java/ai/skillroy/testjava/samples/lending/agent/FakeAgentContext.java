@@ -36,6 +36,7 @@ import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.PayloadMatch;
 import ai.skillroy.testjava.protocol.JsonView;
 import ai.skillroy.testjava.protocol.LoadMode;
 import ai.skillroy.testjava.protocol.RpcException;
@@ -411,16 +412,9 @@ final class FakeAgentContext implements AgentContext {
             return e;
         }
 
+        /** The agent's payload rule, {@code PayloadMatch} (phase8-contracts.md 8.9). */
         private static boolean matches(Event e, Map<String, Object> match) {
-            if (match == null) {
-                return true;
-            }
-            for (Map.Entry<String, Object> m : match.entrySet()) {
-                if (!String.valueOf(m.getValue()).equals(String.valueOf(e.payload().get(m.getKey())))) {
-                    return false;
-                }
-            }
-            return true;
+            return PayloadMatch.matches(e.payload(), match);
         }
 
         @Override

@@ -19,6 +19,8 @@ package ai.skillroy.testjava.scenario;
 import ai.skillroy.testjava.protocol.Json;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -27,7 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The expectation path grammar and every matcher. */
+/**
+ * The expectation path grammar and every matcher; since Phase 8 (phase8-contracts.md 13.1 row 37) the list filters,
+ * dotted filter fields, {@code [json]}, {@code anyOf}, {@code containsWhere} and one regex budget per evaluation.
+ */
 class ExpectationsTest {
 
     private static final Object LOAN = Json.parse("""
@@ -225,5 +230,310 @@ class ExpectationsTest {
         assertEquals(null, Values.decimal(Double.NaN));
         assertEquals("3.5", Values.stringOf(3.5));
         assertEquals("{\"a\":1}", Values.stringOf(Map.of("a", 1L)));
+    }
+
+    // ------------------------------------------------------------------------------------ Phase 8: list filters (8.3)
+
+    private static final String EXPONENTIAL = "^(\\w+\\s?){1,1000}$";
+
+    private static String exponentialSubject() {
+        return "a".repeat(40) + "!";
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> list(String path) {
+        Object value = value(path);
+        assertTrue(value instanceof List, path + " is " + value);
+        return (List<Object>) value;
+    }
+
+    private static List<Object> codes(List<Object> lines) {
+        return lines.stream().map(l -> ((Map<?, ?>) l).get("code")).map(Object.class::cast).toList();
+    }
+
+    @Test
+    void aListFilterYieldsEveryMatchInListOrder() {
+        assertEquals(List.of("YRD-001", "YRD-002"), codes(list("loan.lines[*code~^YRD]")));
+        assertEquals(List.of(), list("loan.lines[*code=NONE]"), "no match: an empty list that resolves");
+        assertEquals(List.of("YRD-001"), codes(list("loan.lines[*qty=2.0]")), "numbers compare as decimals");
+        assertEquals(List.of("YRD-002", "CLN-9"), codes(list("loan.lines[*qty=1]")), "1.0 and 1 both");
+        assertEquals(List.of("YRD-002"), codes(list("loan.lines[*code~^YRD][*lineNo=2]")), "chained");
+        assertEquals("YRD-002", value("loan.lines[*code~^YRD][last].code"));
+        assertEquals("YRD-001", value("loan.lines[*code~^YRD][0].code"));
+        assertEquals("YRD-002", value("loan.lines[*code~^YRD].last.code"), ".last indexes the list");
+        assertEquals("YRD-002", value("loan.lines[*code~^YRD][code=YRD-002].code"), "a single filter after it");
+        assertEquals(List.of("CLN-9"), codes(list("loan.lines[* label~\\[x\\]]")), "spaces after * stripped");
+        assertTrue(problem("loan.lines[*code~^YRD].qty").contains("'qty' is not an index of"), "no projection");
+        assertTrue(problem("loan.total[*code=x]").contains("is not a list"), "on a scalar");
+        assertTrue(problem("loan.nested[*a=1]").contains("is not a list (a mapping)"), "on a map");
+        assertTrue(problem("loan.note[*a=1]").contains("is not a list (null)"), "on null: {size: 0} needs a list");
+        Matchers.Outcome none = Matchers.evaluate(Map.of("size", 0L), false, null, problem("loan.note[*a=1]"));
+        assertFalse(none.holds(), "a missing list never counts as none");
+    }
+
+    @Test
+    void filterFieldsAreDottedSubPaths() {
+        Object events = Json.parse("""
+                [{"seq": 1, "topic": "input.acked", "payload": {"source": "Barcode"}},
+                 {"seq": 2, "topic": "input.acked", "payload": {"source": "Key.SIGN_OFF"}},
+                 {"seq": 3, "topic": "input.acked", "payload": {"source": "Barcode", "lines": [{"code": "X"}]}},
+                 {"seq": 4, "topic": "state.changed", "payload": null},
+                 {"seq": 5, "topic": "input.acked", "payload.source": "Barcode"},
+                 "not a map"]
+                """);
+        Map<String, Object> root = Map.of("events", events);
+        ExpectationPath barcodes = ExpectationPath.parse("app.events[*payload.source=Barcode]");
+        assertEquals(List.of(1L, 3L), seqs(barcodes.resolve(root).value()), "the literal key 'payload.source' of"
+                + " seq 5 is no longer matched: the field is a sub-path");
+        assertEquals(List.of(3L), seqs(ExpectationPath.parse("app.events[*payload.lines.0.code=X]").resolve(root)
+                .value()), "an index inside the sub-path");
+        assertEquals(List.of(3L), seqs(ExpectationPath.parse("app.events[*payload.lines.last.code~^X$]")
+                .resolve(root).value()));
+        assertEquals(2L, ExpectationPath.parse("app.events[payload.source=Key.SIGN_OFF].seq").resolve(root).value(),
+                "the single form takes a dotted field too");
+        assertEquals(List.of(), ExpectationPath.parse("app.events[*payload.source.x=1]").resolve(root).value(),
+                "an element on which the sub-path does not resolve does not match");
+    }
+
+    private static List<Object> seqs(Object events) {
+        return ((List<?>) events).stream().map(e -> ((Map<?, ?>) e).get("seq")).map(Object.class::cast).toList();
+    }
+
+    @Test
+    void referencesInAListFilterAreBoundWithTheirType() throws Exception {
+        Bindings bindings = Bindings.of(Map.of("item", Map.of("code", "YRD-002", "qty", 1L, "re", "^YRD")));
+        assertEquals(2, ((List<?>) ExpectationPath.parse("loan.lines[*qty=$item.qty]").bind(bindings::lookup)
+                .resolve(LOAN).value()).size(), "1 equals 1.0 and 1");
+        assertEquals(2, ((List<?>) ExpectationPath.parse("loan.lines[*code~$item.re]").bind(bindings::lookup)
+                .resolve(LOAN).value()).size());
+        assertEquals(List.of(new References.Ref("item", List.of("code"), "$item.code")),
+                References.collectPath("loan.lines[*code=$item.code]"));
+    }
+
+    @Test
+    void oneRegexBudgetCoversEveryElementOfAListFilter() {
+        List<Object> lines = new ArrayList<>();
+        for (int i = 0; i < 30; i++) {
+            lines.add(Map.of("text", exponentialSubject()));
+        }
+        long t0 = System.nanoTime();
+        ExpectationPath.Resolution resolution = ExpectationPath.parse("loan.lines[*text~" + EXPONENTIAL + "]")
+                .resolve(Map.of("lines", lines));
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertFalse(resolution.resolved(), "rejected once, for the whole path");
+        assertTrue(resolution.problem().startsWith("regex in [*text~"), resolution.problem());
+        assertTrue(ms < 10_000L, ms + " ms (thirty budgets would be thirty seconds)");
+    }
+
+    @Test
+    void theListFormsGrammarErrors() {
+        for (String bad : new String[] {"loan.lines[*]", "loan.lines[* ]", "loan.lines[*=1]", "loan.lines[* =1]",
+                "loan.lines[*code]", "loan.lines[*a~(]", "loan.lines[*a..b=1]", "loan.lines[.a=1]",
+                "loan.lines[a.=1]"}) {
+            assertThrows(IllegalArgumentException.class, () -> ExpectationPath.parse(bad), bad);
+        }
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> ExpectationPath.parse("loan.lines[*]"))
+                .getMessage().contains("empty filter field"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> ExpectationPath.parse("loan.lines[*code]"))
+                .getMessage().contains("[*field=value]"));
+        assertEquals("co*de", ((ExpectationPath.Filter) ExpectationPath.parse("loan.lines[co*de=1]").segments()
+                .get(1)).field(), "a * anywhere else is part of the field name");
+    }
+
+    @Test
+    void theNewFormsNeedAVersion7PlanAndTheOldOnesDoNot() {
+        for (String old : List.of("loan", "loan.lines[0].qty", "loan.lines[code=x].qty", "loan.lines[code~^x]",
+                "caps[id=swing.tree].state", "loan.lines.last")) {
+            assertEquals(1, ExpectationPath.parse(old).minPlanVersion(), old);
+        }
+        assertEquals("a list filter", ExpectationPath.parse("loan.lines[*code=x]").version7Item());
+        assertEquals("a dotted filter field", ExpectationPath.parse("loan.lines[a.b=x]").version7Item());
+        assertEquals("[json]", ExpectationPath.parse("loan.note[json]").version7Item());
+        assertEquals(7, ExpectationPath.parse("loan.note[json].a").minPlanVersion());
+    }
+
+    // -------------------------------------------------------------------------------------------- [json] (8.5)
+
+    @Test
+    void theJsonSegmentParsesAStringAndContinues() {
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("object", "{\"qty\":2,\"code\":\"YRD-001\",\"inner\":\"{\\\"a\\\":[1,2]}\"}");
+        root.put("array", "[{\"code\":\"A\"},{\"code\":\"B\"}]");
+        root.put("scalar", "42");
+        root.put("text", "qty: 2");
+        root.put("number", 7L);
+        root.put("long", "\"" + "x".repeat(SafeRegex.MAX_SUBJECT) + "\"");
+        ExpectationPath.Resolution qty = ExpectationPath.parse("r.object[json].qty").resolve(root);
+        assertTrue(qty.resolved(), qty.problem());
+        assertEquals(2L, qty.value());
+        assertEquals("B", ExpectationPath.parse("r.array[json][*code=B][0].code").resolve(root).value());
+        assertEquals(42L, ExpectationPath.parse("r.scalar[json]").resolve(root).value());
+        assertEquals(List.of(1L, 2L), ExpectationPath.parse("r.object[json].inner[json].a").resolve(root).value(),
+                "two [json] segments in one path");
+        String notJson = ExpectationPath.parse("r.text[json]").resolve(root).problem();
+        assertTrue(notJson.startsWith("r.text is not JSON: "), notJson);
+        assertEquals("r.number is not a string (7)", ExpectationPath.parse("r.number[json]").resolve(root).problem());
+        assertEquals("r.long is longer than 1048576 characters", ExpectationPath.parse("r.long[json]").resolve(root)
+                .problem());
+        assertTrue(ExpectationPath.parse("r.missing[json]").resolve(root).problem().contains("no field 'missing'"));
+        assertTrue(ExpectationPath.parse("r[ json ]").segments().get(0) instanceof ExpectationPath.JsonText);
+    }
+
+    // ------------------------------------------------------------------------------- size on a filtered list (8.3)
+
+    @Test
+    void sizeCountsAFilteredList() throws Exception {
+        List<Object> yrd = list("loan.lines[*code~^YRD]");
+        holds(Map.of("size", 2L), yrd);
+        holds(Map.of("size", Map.of("gte", 1L)), yrd);
+        holds(Map.of("size", 0L), list("loan.lines[*code=NONE]"));
+        assertEquals("expected size 2 but was 3", failsWith(Map.of("size", 2L), list("loan.lines[*amount~.]")));
+        Bindings bindings = Bindings.of(Map.of("before", Map.of("n", 1L)));
+        Object delta = bindings.substitutePublic(Matchers.normalise(Map.of("size", Map.of("gt", "$before.n"))));
+        assertTrue(Matchers.evaluate(delta, true, yrd, null).holds(), "a delta against a captured count");
+        Object same = bindings.substitutePublic(Matchers.normalise(Map.of("size", "$before.n")));
+        assertTrue(Matchers.evaluate(same, true, list("loan.lines[*code=CLN-9]"), null).holds());
+    }
+
+    // -------------------------------------------------------------------------------------------------- anyOf (8.4)
+
+    @Test
+    void anyOfHoldsWhenOneAlternativeDoes() throws Exception {
+        String slip = "LOAN 7\nDEPOSIT DUE 7.00";
+        holds(Map.of("anyOf", List.of(Map.of("contains", "NOT ON ANY SLIP"), Map.of("contains", "DEPOSIT DUE"))),
+                slip);
+        holds(Map.of("anyOf", List.of("IDLE", "LOAN")), "LOAN");
+        holds(Map.of("anyOf", List.of(Map.of("not", Map.of("contains", "x")))), "abc");
+        String both = failsWith(Map.of("anyOf", List.of(Map.of("contains", "x"), Map.of("equals", "y"))), "abc");
+        assertTrue(both.startsWith("none of the 2 alternatives holds: expected text containing \"x\""), both);
+        assertTrue(both.contains("; expected \"y\" but was \"abc\""), both);
+        assertTrue(Matchers.evaluate(Matchers.normalise(Map.of("anyOf", List.of(Map.of("equals", 1L),
+                Map.of("exists", false)))), false, null, "gone").holds(), "an unresolved path: exists may hold");
+        Matchers.Outcome unresolved = Matchers.evaluate(Matchers.normalise(Map.of("anyOf", List.of(1L, 2L))), false,
+                null, "gone");
+        assertFalse(unresolved.holds());
+        assertTrue(unresolved.reason().contains("did not resolve: gone"), unresolved.reason());
+        holds(Map.of("not", Map.of("anyOf", List.of("IDLE", "LOAN"))), "LOCKED");
+        failsWith(Map.of("not", Map.of("anyOf", List.of("IDLE", "LOAN"))), "IDLE");
+        Bindings bindings = Bindings.of(Map.of("item", Map.of("code", "YRD-001")));
+        Object bound = bindings.substitutePublic(Matchers.normalise(Map.of("anyOf", List.of(Map.of("contains",
+                "$item.code"), "none"))));
+        assertTrue(Matchers.evaluate(bound, true, "line YRD-001", null).holds());
+        List<Object> sixteen = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            sixteen.add(Map.of("equals", "z".repeat(300)));
+        }
+        String cut = failsWith(Map.of("anyOf", sixteen), "a");
+        assertTrue(cut.length() <= Matchers.MAX_ANY_OF_REASON, cut.length() + "");
+        assertTrue(cut.endsWith("..."), "each reason and the whole cut");
+    }
+
+    @Test
+    void anyOfIsNormalisedAndBounded() {
+        assertEquals(Map.of("anyOf", List.of(Map.of("equals", "a"), Map.of("equals", List.of(1L)), Map.of("gt",
+                2L))), Matchers.normalise(Map.of("anyOf", List.of("a", List.of(1L), Map.of("gt", 2L)))));
+        List<Object> seventeen = new ArrayList<>();
+        for (int i = 0; i < 17; i++) {
+            seventeen.add(i);
+        }
+        for (Object bad : new Object[] {List.of(), seventeen, "x", Map.of("equals", 1L)}) {
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> Matchers.normalise(Map.of("anyOf", bad)), String.valueOf(bad));
+            assertTrue(e.getMessage().startsWith("'anyOf' needs a list of 1 to 16 matchers, found "), e.getMessage());
+        }
+        IllegalArgumentException capability = assertThrows(IllegalArgumentException.class,
+                () -> Matchers.normalise(Map.of("anyOf", List.of(Map.of("capability", "x")))));
+        assertTrue(capability.getMessage().contains("'capability' may only guard a top-level matcher"));
+        assertThrows(IllegalArgumentException.class, () -> Matchers.normalise(Map.of("anyOf", List.of(Map.of(
+                "nope", 1L)))), "an unknown matcher inside");
+    }
+
+    // ------------------------------------------------------------------------------------------ containsWhere (8.4)
+
+    private static final Object DEPOSITS = Json.parse("""
+            [{"amount": "10.00", "kind": "CASH", "by": {"code": "100"}},
+             {"amount": "3.50", "kind": "CARD"},
+             {"amount": "3.50", "kind": "CASH", "note": null},
+             "not a map"]
+            """);
+
+    @Test
+    void containsWhereHoldsWhenSomeElementMatchesEveryField() {
+        holds(Map.of("containsWhere", Map.of("amount", "3.5", "kind", "CASH")), DEPOSITS);
+        holds(Map.of("containsWhere", Map.of("by.code", "100")), DEPOSITS);
+        holds(Map.of("containsWhere", Map.of("amount", Map.of("gt", 5L))), DEPOSITS);
+        holds(Map.of("containsWhere", Map.of("kind", "CARD", "by", Map.of("exists", false))), DEPOSITS);
+        holds(Map.of("containsWhere", Map.of("note", Map.of("exists", false), "kind", "CASH")), DEPOSITS);
+        String none = failsWith(Map.of("containsWhere", Map.of("amount", "10.00", "kind", "CARD")), DEPOSITS);
+        assertTrue(none.startsWith("no element of the list of 4 matches {\"amount\":{\"equals\":\"10.00\"}"), none);
+        failsWith(Map.of("containsWhere", Map.of("by.code", "101")), DEPOSITS);
+        assertEquals("no element of the list of 0 matches {\"a\":{\"equals\":1}}",
+                failsWith(Map.of("containsWhere", Map.of("a", 1L)), List.of()));
+        assertEquals("'containsWhere' needs a list, but the value is a mapping",
+                failsWith(Map.of("containsWhere", Map.of("a", 1L)), Map.of("a", 1L)));
+        holds(Map.of("not", Map.of("containsWhere", Map.of("kind", "CHEQUE"))), DEPOSITS);
+        failsWith(Map.of("not", Map.of("containsWhere", Map.of("kind", "CARD"))), DEPOSITS);
+        holds(Map.of("size", 4L), DEPOSITS);
+        holds(Map.of("anyOf", List.of(Map.of("containsWhere", Map.of("kind", "X")), Map.of("containsWhere",
+                Map.of("kind", "CARD")))), DEPOSITS);
+        Matchers.Outcome unresolved = Matchers.evaluate(Matchers.normalise(Map.of("containsWhere", Map.of("a", 1L))),
+                false, null, "gone");
+        assertTrue(unresolved.reason().contains("did not resolve"), unresolved.reason());
+    }
+
+    @Test
+    void containsWhereIsNormalisedAndBounded() {
+        assertEquals(Map.of("containsWhere", Map.of("code", Map.of("equals", "$item.code"), "qty", Map.of("gte",
+                2L))), Matchers.normalise(Map.of("containsWhere", Map.of("code", "$item.code", "qty", Map.of("gte",
+                2L)))));
+        Map<String, Object> thirtyThree = new LinkedHashMap<>();
+        for (int i = 0; i < 33; i++) {
+            thirtyThree.put("f" + i, 1L);
+        }
+        for (Object bad : new Object[] {Map.of(), thirtyThree, List.of(Map.of("a", 1L)), "x", Map.of("a b", 1L),
+                Map.of("a.", 1L), Map.of(".a", 1L), Map.of("a[0]", 1L)}) {
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> Matchers.normalise(Map.of("containsWhere", bad)), String.valueOf(bad));
+            assertTrue(e.getMessage().startsWith("'containsWhere' needs a mapping of 1 to 32 fields to matchers, found "),
+                    e.getMessage());
+        }
+        assertThrows(IllegalArgumentException.class, () -> Matchers.normalise(Map.of("containsWhere", Map.of("a",
+                Map.of("capability", "x")))));
+    }
+
+    @Test
+    void everyMatchesOfOneEvaluationSharesOneBudget() {
+        SafeRegex.Budget budget = SafeRegex.Budget.ofMillis(100);
+        Matchers.Outcome both = Matchers.evaluate(Matchers.normalise(Map.of("anyOf", List.of(Map.of("matches",
+                EXPONENTIAL), Map.of("matches", EXPONENTIAL)))), true, exponentialSubject(), null, budget);
+        assertFalse(both.holds());
+        assertTrue(both.reason().contains("ran longer than 100 ms"), both.reason());
+        assertTrue(both.reason().contains("regex budget spent"), "the second slow regex fails at once: "
+                + both.reason());
+        List<Object> lines = new ArrayList<>();
+        for (int i = 0; i < 30; i++) {
+            lines.add(Map.of("text", exponentialSubject()));
+        }
+        long t0 = System.nanoTime();
+        Matchers.Outcome where = Matchers.evaluate(Matchers.normalise(Map.of("containsWhere", Map.of("text",
+                Map.of("matches", EXPONENTIAL)))), true, lines, null);
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertFalse(where.holds());
+        assertTrue(ms < 10_000L, ms + " ms: one budget of 1 s for all thirty elements, not one each");
+        assertTrue(Matchers.evaluate(Matchers.normalise(Map.of("matches", "^a")), true, "abc", null).holds(),
+                "a fresh evaluation has a fresh budget");
+    }
+
+    @Test
+    void theVersion7MatchersAreFoundAtAnyDepth() {
+        assertEquals(7, Matchers.minPlanVersion(Matchers.normalise(Map.of("not", Map.of("size", Map.of("anyOf",
+                List.of(1L)))))));
+        assertEquals(7, Matchers.minPlanVersion(Matchers.normalise(Map.of("anyOf", List.of(Map.of("containsWhere",
+                Map.of("a", 1L)))))));
+        assertEquals("containsWhere", Matchers.version7Matcher(Matchers.normalise(Map.of("not", Map.of(
+                "containsWhere", Map.of("a", Map.of("not", 1L)))))));
+        assertEquals(1, Matchers.minPlanVersion(Matchers.normalise(Map.of("size", Map.of("gt", 1L)))));
+        assertEquals(List.of("equals", "contains", "matches", "in", "gt", "gte", "lt", "lte", "size", "exists", "not",
+                "anyOf", "containsWhere"), Matchers.NAMES, "thirteen matchers (phase8-contracts.md 8.11)");
     }
 }

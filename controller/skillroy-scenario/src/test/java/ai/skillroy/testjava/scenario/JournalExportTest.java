@@ -69,4 +69,24 @@ class JournalExportTest {
             assertFalse(fx.agent.callsTo("toy.wipe").get(1).options().confirm());
         }
     }
+
+    /** phase8-contracts.md 13.1 row 40: a session's {@code captureFacts} step is exported as given and replays. */
+    @Test
+    void captureFactsIsExportedAsGiven() throws Exception {
+        SessionFixture fx = new SessionFixture(dir.resolve("session"));
+        try (ExecutorSession session = fx.open()) {
+            assertEquals(Status.PASS, session.execute("enter", Map.of("value", "B2"), Origin.person("p")).status());
+            StepOutcome capture = session.execute("captureFacts", Map.of("slot", "before", "fields", Map.of("acks",
+                    Map.of("size", "events[*topic=input.acked]"))), Origin.person("p"));
+            assertEquals(Status.PASS, capture.status(), capture.message());
+            ExportResult result = session.journal().export(ExportOptions.of("captured"));
+            assertTrue(result.yaml().contains("  - captureFacts:"), result.yaml());
+            assertTrue(result.yaml().contains("events[*topic=input.acked]"), result.yaml());
+            Plan plan = PlanCompiler.compile(result.yaml().getBytes(StandardCharsets.UTF_8), "captured.yaml",
+                    fx.pack);
+            assertEquals("captureFacts", plan.steps().get(1).verb());
+            assertEquals(new Plan.FactField("events[*topic=input.acked]", true), plan.steps().get(1).facts().fields()
+                    .get("acks"));
+        }
+    }
 }

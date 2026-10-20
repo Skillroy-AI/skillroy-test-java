@@ -1609,6 +1609,13 @@ Events the ring evicted before the read (`eventRing`, `eventRingChars`, P1 §2.4
 the ring's retention is a lower bound, whether or not `truncated` says so. An event without a numeric `seq` ends the
 paging with `truncated: true`.
 
+*(Phase 8, built 2026-10-19, EX; P8 §8.6, D602.)* An eighth base root `events` stands beside `hooks`: every event of the
+bus since the same start mark (`stepsSinceSeq`; a session's own mark), oldest first, through `evt.query` with the same
+paging (1000 a page from each full page's last `seq`, at most ten pages). Its loss rule is stricter than this root's,
+because a `{size: 0}` or a delta rests on the count: where `hooks` answers a lower bound with `truncated: true`, the
+`events` root's read fails (ERROR / ENVIRONMENT) when the ring evicted any event since the mark (the first page's
+`oldestSeq` past `since + 1`, a gap in the sequence) and when the tenth page is full.
+
 **The sample application changes once for it**: `AccessControl.check` reads the `RETURN` limit through
 `limit(code, LIMIT_RETURN)` (public today, with no caller outside the class) instead of `returnLimit(code)`, so that `returnLimit` is called by
 **`Engine`'s return path only** (the return line's check and the supervisor's) and never by the verifier's primitive

@@ -1,0 +1,359 @@
+{
+  "planVersion": 7,
+  "scenarioId": "loan-counts-and-events",
+  "pack": "lending",
+  "packVersion": "0.6.0",
+  "sourceHash": "sha256:ff74acbd6799c0b2cb3ea50cfc0bf09002f056221d6b2ad4598b1624aa96625d",
+  "inference": "none",
+  "requires": [
+    "lending.input",
+    "lending.state",
+    "lending.loan",
+    "lending.slip"
+  ],
+  "slots": [
+    {
+      "name": "assistant",
+      "kind": "fixture",
+      "value": {
+        "code": "100"
+      },
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    },
+    {
+      "name": "item",
+      "kind": "fixture",
+      "value": {
+        "code": "YRD-001",
+        "barcode": "5000000000017",
+        "deposit": "3.50"
+      }
+    },
+    {
+      "name": "before",
+      "kind": "capture",
+      "step": "s3",
+      "fields": [
+        "lines",
+        "qty",
+        "scans",
+        "signOffs"
+      ]
+    }
+  ],
+  "oracles": [],
+  "resolutionGraph": [
+    "assistant",
+    "item"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "signOn",
+      "source": {
+        "line": 16
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        },
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.password"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "scan",
+      "source": {
+        "line": 17
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Barcode",
+            "value": "$item.barcode"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "captureFacts",
+      "source": {
+        "line": 18
+      },
+      "calls": [],
+      "expect": [],
+      "facts": {
+        "slot": "before",
+        "fields": {
+          "lines": {
+            "size": "loan.lines"
+          },
+          "qty": {
+            "path": "loan.lines[code=$item.code].qty"
+          },
+          "scans": {
+            "size": "events[*topic=input.acked][*payload.source=Barcode]"
+          },
+          "signOffs": {
+            "size": "events[*topic=input.acked][*payload.source=Key.SIGN_OFF]"
+          }
+        }
+      }
+    },
+    {
+      "id": "s4",
+      "verb": "scan",
+      "source": {
+        "line": 25
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Barcode",
+            "value": "$item.barcode"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "expect",
+      "source": {
+        "line": 26
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.lines[*code=$item.code]",
+          "matcher": {
+            "size": 1
+          }
+        },
+        {
+          "path": "loan.lines",
+          "matcher": {
+            "size": "$before.lines"
+          }
+        },
+        {
+          "path": "loan.lines[code=$item.code].qty",
+          "matcher": {
+            "gt": "$before.qty"
+          }
+        },
+        {
+          "path": "events[*topic=input.acked][*payload.source=Barcode]",
+          "matcher": {
+            "size": {
+              "gt": "$before.scans"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "verb": "expect",
+      "source": {
+        "line": 31
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.lines",
+          "matcher": {
+            "containsWhere": {
+              "code": {
+                "equals": "$item.code"
+              },
+              "qty": {
+                "equals": 2
+              },
+              "unitDeposit": {
+                "equals": "$item.deposit"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "verb": "key",
+      "source": {
+        "line": 33
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.DUE"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s8",
+      "verb": "waitFor",
+      "source": {
+        "line": 34
+      },
+      "calls": [
+        {
+          "primitive": "sync.await",
+          "args": {
+            "match": {
+              "state": "DEPOSIT",
+              "validInputs": {
+                "has": "Key.DEPOSIT"
+              }
+            },
+            "timeoutMs": 30000,
+            "topics": "input.requested"
+          },
+          "sync": "NONE",
+          "timeoutMs": 31000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s9",
+      "verb": "mark",
+      "source": {
+        "line": 35
+      },
+      "calls": [
+        {
+          "primitive": "trace.mark",
+          "args": {
+            "attrs": {
+              "value": "{\"qty\":2,\"code\":\"YRD-001\"}"
+            },
+            "label": "json-probe"
+          },
+          "sync": "NONE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s10",
+      "verb": "deposit",
+      "source": {
+        "line": 36
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.DEPOSIT",
+            "value": "10.00"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "verify": [
+    {
+      "path": "loan.authorisations[*kind=RETURN_OVERRIDE]",
+      "matcher": {
+        "size": 0
+      }
+    },
+    {
+      "path": "loan.deposits",
+      "matcher": {
+        "containsWhere": {
+          "amount": {
+            "equals": "10.00"
+          }
+        }
+      }
+    },
+    {
+      "path": "slip.last.text",
+      "matcher": {
+        "anyOf": [
+          {
+            "contains": "NOT ON ANY SLIP"
+          },
+          {
+            "contains": "DEPOSIT DUE"
+          }
+        ]
+      }
+    },
+    {
+      "path": "events[*source~^lending$][*topic=loan.posted]",
+      "matcher": {
+        "size": 1
+      }
+    },
+    {
+      "path": "events[*topic=input.acked][*payload.source=Key.SIGN_OFF]",
+      "matcher": {
+        "size": "$before.signOffs"
+      }
+    },
+    {
+      "path": "events[*topic=trace.mark][*payload.label=json-probe].last.payload.attrs.value[json].qty",
+      "matcher": {
+        "equals": 2
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "primitive": "lending.input",
+      "args": {
+        "source": "Key.SIGN_OFF"
+      },
+      "sync": "READY",
+      "timeoutMs": 30000
+    }
+  ],
+  "launchProperties": {
+    "lending.seed": "A"
+  },
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "bindTimeoutMs": 60000
+}

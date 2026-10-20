@@ -66,7 +66,13 @@ final class LendingTarget implements AutoCloseable {
          * the operator's half of the double opt-in; no other leg sets it, so the goldens hold the Robot ids
          * {@code UNAVAILABLE("robot: not enabled…")}.
          */
-        JAVAAGENT_ROBOT("javaagent-robot", LoadMode.JAVAAGENT);
+        JAVAAGENT_ROBOT("javaagent-robot", LoadMode.JAVAAGENT),
+        /**
+         * The small-ring leg (phase8-contracts.md 13.2 item 34): {@code -javaagent} with the agent option
+         * {@code eventRing=200}, so that a scenario that publishes more than the ring holds meets the {@code events}
+         * fact root's refusal; no other leg sets it.
+         */
+        JAVAAGENT_SMALL_RING("javaagent-small-ring", LoadMode.JAVAAGENT);
 
         final String slug;
         final LoadMode loadMode;
@@ -85,6 +91,8 @@ final class LendingTarget implements AutoCloseable {
     static final String HOOKS_LEG_MODULES = "skillroy-agent-hooks,skillroy-agent-byteman";
     /** The agent option of the Robot path (phase7-contracts.md 3.4, A65): the operator's consent. */
     static final String ROBOT_OPTION = "robot";
+    /** The small-ring leg's ring (phase8-contracts.md 13.2 item 34): the agent option {@code eventRing}. */
+    static final String SMALL_RING = "200";
     /** The agent option naming the user's Byteman jar (phase6-contracts.md 3.7, 7.4). */
     static final String BYTEMAN_JAR = "byteman.jar";
     /**
@@ -206,9 +214,11 @@ final class LendingTarget implements AutoCloseable {
         Map<String, String> agentOptions = mode == Mode.JAVAAGENT_HOOKS
                 ? Map.of("discoveryDir", dir.toString(), OPTIONAL_MODULES, HOOKS_LEG_MODULES, BYTEMAN_JAR, bytemanJar())
                 : mode == Mode.JAVAAGENT_ROBOT ? Map.of("discoveryDir", dir.toString(), ROBOT_OPTION, "true")
+                : mode == Mode.JAVAAGENT_SMALL_RING ? Map.of("discoveryDir", dir.toString(), "eventRing", SMALL_RING)
                 : Map.of("discoveryDir", dir.toString());
         switch (mode) {
-            case JAVAAGENT, JAVAAGENT_HOOKS, JAVAAGENT_ROBOT -> builder.javaAgent(home, agentOptions);
+            case JAVAAGENT, JAVAAGENT_HOOKS, JAVAAGENT_ROBOT, JAVAAGENT_SMALL_RING -> builder.javaAgent(home,
+                    agentOptions);
             case JAVA_TOOL_OPTIONS -> builder.javaAgent(home, agentOptions).viaJavaToolOptions(true);
             case ATTACH -> {
                 // Launched without the agent; it is attached once the JVM runs.

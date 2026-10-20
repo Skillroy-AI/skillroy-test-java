@@ -20,6 +20,7 @@ import ai.skillroy.testjava.agent.api.AgentLog;
 import ai.skillroy.testjava.agent.api.EventBus;
 import ai.skillroy.testjava.agent.api.EventSink;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.PayloadMatch;
 import ai.skillroy.testjava.protocol.TopicFilter;
 import ai.skillroy.testjava.protocol.text.TextBounds;
 
@@ -276,18 +277,13 @@ final class RingEventBus implements EventBus {
         }
     }
 
-    /** Every match entry equals the payload value by {@code String.valueOf}. */
+    /**
+     * Every match entry holds on the payload by the shared rule of {@link PayloadMatch} (phase8-contracts.md 8.9):
+     * a scalar equal by {@code String.valueOf} text, or {@code {has: scalar}} a list member equal by text. Linear and
+     * text only, since it runs under the ring lock: no regex, no parsing, no nested path.
+     */
     static boolean payloadMatches(Event event, Map<String, Object> match) {
-        if (match == null) {
-            return true;
-        }
-        Map<String, Object> payload = event.payload();
-        for (Map.Entry<String, Object> entry : match.entrySet()) {
-            if (!String.valueOf(entry.getValue()).equals(String.valueOf(payload.get(entry.getKey())))) {
-                return false;
-            }
-        }
-        return true;
+        return PayloadMatch.matches(event.payload(), match);
     }
 
     @Override

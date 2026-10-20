@@ -24,6 +24,7 @@ import ai.skillroy.testjava.controller.CapabilityMatrix;
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.PayloadMatch;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.TopicFilter;
 import ai.skillroy.testjava.protocol.web.WebLib;
@@ -532,17 +533,12 @@ final class WebRun {
         return first;
     }
 
-    /** Every match entry equals the payload value of the same key by {@code String.valueOf}, as the agent compares. */
+    /**
+     * Every match entry holds on the payload by the agent's own rule, {@link PayloadMatch} (a scalar equal by text, or
+     * {@code {has: scalar}} a list member equal by text; phase8-contracts.md 8.9).
+     */
     private static boolean matches(Event event, Map<String, Object> match) {
-        if (match == null) {
-            return true;
-        }
-        for (Map.Entry<String, Object> e : match.entrySet()) {
-            if (!String.valueOf(e.getValue()).equals(String.valueOf(event.payload().get(e.getKey())))) {
-                return false;
-            }
-        }
-        return true;
+        return PayloadMatch.matches(event.payload(), match);
     }
 
     // ------------------------------------------------------------------------------------------------ end of run

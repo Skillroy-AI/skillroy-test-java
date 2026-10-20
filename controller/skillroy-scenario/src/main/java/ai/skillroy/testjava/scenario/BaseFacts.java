@@ -69,6 +69,17 @@ import java.util.function.Supplier;
  *       newest of the bus's last {@value #HOOK_EVENTS_TAIL} events, or null. When {@code hook.health} answers {@code METHOD_NOT_FOUND}
  *       (no hooks module), {@code CAPABILITY_UNAVAILABLE} (no {@code Instrumentation}) or {@code NOT_READY}, the root
  *       is an empty list. This class's own provider counts from sequence 0.</li>
+ *   <li>{@code events} (phase8-contracts.md 8.6, decisions D602, D603): a list, oldest first, of
+ *       {@code {seq, ts, topic, source, correlationId, payload}} (an event's JSON without {@code traceparent}) for
+ *       every event of the agent's bus after the sequence the executor recorded when the first step began (a
+ *       session: its start mark), read with {@code evt.query {since, limit: 1000}} and no topic filter, paged on from
+ *       each full page's last {@code seq}, at most {@value #EVENTS_PAGES} pages. The read <em>fails</em>, rather than
+ *       answering fewer events, when the ring has evicted any event of the window (the first page's
+ *       {@code oldestSeq} past {@code since + 1}, or a gap in the sequence while paging) and when the tenth page is
+ *       full: a count that a {@code {size: 0}} or a delta rests on must be exact or absent. Payloads are as the agent
+ *       published them (masked at publish). Filter it with the list form:
+ *       {@code events[*topic=input.acked][*payload.source=Barcode]}. This class's own provider reads from sequence
+ *       0.</li>
  * </ul>
  *
  * <p>A pack's own root of the same name takes precedence over a base root. Stateless; safe from any thread.
@@ -76,7 +87,20 @@ import java.util.function.Supplier;
 public final class BaseFacts {
 
     /** The base root names. */
-    public static final List<String> ROOTS = List.of("app", "ui", "dialogs", "caps", "devices", "web", "hooks");
+    public static final List<String> ROOTS = List.of("app", "ui", "dialogs", "caps", "devices", "web", "hooks",
+            "events");
+
+    /** The most events one {@code evt.query} call of the root {@code events} reads (the agent's cap). */
+    static final long EVENTS_LIMIT = 1000L;
+
+    /**
+     * The most {@code evt.query} pages the root {@code events} reads per fetch (phase8-contracts.md 8.6): 10,000
+     * events, all that the default {@code eventRing} holds; a tenth full page fails the read.
+     */
+    static final int EVENTS_PAGES = 10;
+
+    /** The members of an event the root {@code events} keeps, in this order ({@code traceparent} left out). */
+    static final List<String> EVENT_KEYS = List.of("seq", "ts", "topic", "source", "correlationId", "payload");
 
     /** The most events of one hook one {@code hook.events} call of the root {@code hooks} reads (its cap). */
     static final long HOOK_EVENTS_LIMIT = 1000L;
@@ -127,7 +151,7 @@ public final class BaseFacts {
     private BaseFacts() {
     }
 
-    /** The seven base providers, in {@link #ROOTS} order. */
+    /** The eight base providers, in {@link #ROOTS} order. */
     public static List<FactProvider> all() {
         return List.of(
                 provider("app", agent -> agent.call("app.state", Map.of(), READ).value()),
@@ -140,7 +164,8 @@ public final class BaseFacts {
                 provider("devices", BaseFacts::devices),
                 web(AGENT_READS, Clock.systemUTC(), (ref, reason) -> {
                 }),
-                hooks(() -> 0L));
+                hooks(() -> 0L),
+                events(() -> 0L));
     }
 
     /**
@@ -309,6 +334,70 @@ public final class BaseFacts {
         Map<String, Object> out = new LinkedHashMap<>();
         map.forEach((k, v) -> out.put(String.valueOf(k), v));
         return out;
+    }
+
+    /**
+     * The root {@code events} (phase8-contracts.md 8.6): every event of the agent's bus after the sequence
+     * {@code since} supplies (read at every fetch: the executor fixes it when the first step begins, a session at its
+     * start mark), oldest first.
+     */
+    public static FactProvider events(LongSupplier since) {
+        return provider("events", agent -> eventsAfter(agent, since.getAsLong()));
+    }
+
+    /**
+     * {@code [{seq, ts, topic, source, correlationId, payload}]} after {@code since}, oldest first (see the class
+     * comment).
+     *
+     * @throws IllegalStateException naming the evicted range, or the page bound, when the window cannot be read whole
+     * @throws Exception a failure of {@code evt.query}, or a lost agent
+     */
+    private static Object eventsAfter(AgentConnection agent, long since) throws Exception {
+        List<Object> out = new ArrayList<>();
+        long cursor = since;
+        for (int page = 0; page < EVENTS_PAGES; page++) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("since", cursor);
+            params.put("limit", EVENTS_LIMIT);
+            Object value = agent.call("evt.query", params, READ).value();
+            if (!(value instanceof Map<?, ?> answer) || !(answer.get("events") instanceof List<?> events)) {
+                throw new IllegalStateException("evt.query answered no events list");
+            }
+            long oldest = answer.get("oldestSeq") instanceof Number n ? n.longValue() : -1L;
+            long expected = cursor + 1;
+            if (page == 0 && oldest > since + 1) {
+                throw evicted(since + 1, oldest - 1);
+            }
+            if (events.isEmpty() && oldest > expected) {
+                throw evicted(expected, oldest - 1);
+            }
+            for (Object item : events) {
+                if (!(item instanceof Map<?, ?> event) || !(event.get("seq") instanceof Number seq)) {
+                    throw new IllegalStateException("evt.query answered an event without a seq");
+                }
+                if (seq.longValue() != expected) {
+                    throw evicted(expected, seq.longValue() - 1);
+                }
+                Map<String, Object> entry = new LinkedHashMap<>();
+                for (String key : EVENT_KEYS) {
+                    entry.put(key, event.get(key));
+                }
+                out.add(entry);
+                expected++;
+            }
+            if (events.size() < EVENTS_LIMIT) {
+                return out;
+            }
+            cursor = expected - 1;
+        }
+        throw new IllegalStateException("more than " + EVENTS_PAGES * EVENTS_LIMIT + " events since the run's start:"
+                + " the events root cannot see them all; raise eventRing or shorten the scenario");
+    }
+
+    /** The read's failure when the ring no longer holds events {@code from..to} of the window (D602). */
+    private static IllegalStateException evicted(long from, long to) {
+        return new IllegalStateException("the ring evicted events " + from + ".." + Math.max(from, to)
+                + " since the run's start; raise the agent option eventRing");
     }
 
     /**

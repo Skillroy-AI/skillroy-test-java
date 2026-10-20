@@ -17,6 +17,12 @@
 package ai.skillroy.testjava.scenario;
 
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.scenario.pack.CompileContext;
+import ai.skillroy.testjava.scenario.pack.DelegatingDomainPack;
+import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.pack.PlannedCall;
+import ai.skillroy.testjava.scenario.pack.StepLibrary;
+import ai.skillroy.testjava.scenario.pack.Sync;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -24,6 +30,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -335,6 +342,216 @@ class Phase8CompileTest {
         assertTrue(Matchers.mentions(Map.of("containsWhere", Map.of("a", Map.of("not", anyOf))), "anyOf"));
         assertFalse(Matchers.mentions(Map.of("in", List.of(where)), "containsWhere"), "an operand is a value");
         assertNull(Matchers.version7Matcher(Map.of("equals", 1L)));
+    }
+
+    // ------------------------------------------------------------------------- the gates of 8.3-8.5 at the reader
+
+    @Test
+    void jsonAndTheTwoMatchersNeedVersion7() throws Exception {
+        String json = compile("  - expect: { \"state.note[json].qty\": 2 }\n").toJsonText();
+        assertEquals("invalid plan: expectation state.note[json].qty: [json] needs a version 7 plan", reason(v6(json)));
+        assertEquals(json, Plan.parse(json).toJsonText(), "read at 7");
+        String anyOf = compile("  - expect: { \"state.name\": { anyOf: [IDLE, LOAN] } }\n").toJsonText();
+        assertEquals("invalid plan: expectation state.name: matcher 'anyOf' needs a version 7 plan", reason(v6(anyOf)));
+        String where = compile("  - expect: { \"loan.lines\": { not: { containsWhere: { code: x } } } }\n")
+                .toJsonText();
+        assertEquals("invalid plan: expectation loan.lines: matcher 'containsWhere' needs a version 7 plan",
+                reason(v6(where)), "nested inside not");
+        assertEquals(where, Plan.parse(where).toJsonText());
+    }
+
+    @Test
+    void inAStoredRowCheckContainsWhereIsRefusedAndAnyOfNeedsVersion7() throws Exception {
+        pack.storedTables = List.of(Phase3CompileTest.waiverTable());
+        for (String matcher : List.of("rule_code: { containsWhere: { a: 1 } }", "rows: { containsWhere: { a: 1 } }",
+                "\"sum(amount)\": { not: { containsWhere: { a: 1 } } }")) {
+            ScenarioException e = assertThrows(ScenarioException.class, () -> compile("  - expect: { db.loan_waiver: {"
+                    + " where: { loan_id: 1 }, " + matcher + " } }\n"), matcher);
+            assertTrue(e.reason().endsWith("db.loan_waiver: 'containsWhere' needs a list, and a stored-row cell is a"
+                    + " scalar"), e.reason());
+        }
+        String anyOf = compile("  - expect: { db.loan_waiver: { where: { loan_id: 1 }, rule_code: { anyOf: [A, B] }"
+                + " } }\n").toJsonText();
+        assertEquals("invalid plan: db check loan_waiver: matcher 'anyOf' needs a version 7 plan", reason(v6(anyOf)));
+        assertEquals(anyOf, Plan.parse(anyOf).toJsonText());
+    }
+
+    // ------------------------------------------------------------------------------------- captureFacts (8.7)
+
+    private static final String CAPTURE = """
+              - poke: {}
+              - captureFacts:
+                  slot: before
+                  fields:
+                    total: loan.total
+                    scans: { size: "loan.lines[*code=x]" }
+            """;
+
+    @Test
+    void captureFactsCompilesToTheFactsMemberAndDeclaresItsSlot() throws Exception {
+        Plan plan = compile(CAPTURE + "  - expect: { \"loan.lines[*code=x]\": { size: { gt: $before.scans } } }\n");
+        Plan.Step s2 = plan.steps().get(1);
+        assertEquals("captureFacts", s2.verb());
+        assertEquals(List.of(), s2.calls());
+        assertEquals(List.of(), s2.expect());
+        assertEquals(List.of("scans", "total"), List.copyOf(s2.facts().fields().keySet()), "sorted");
+        assertEquals(new Plan.FactField("loan.lines[*code=x]", true), s2.facts().fields().get("scans"));
+        assertEquals(new Plan.FactField("loan.total", false), s2.facts().fields().get("total"));
+        Plan.Slot slot = plan.slots().stream().filter(sl -> sl.name().equals("before")).findFirst().orElseThrow();
+        assertEquals("capture", slot.kind());
+        assertEquals(new Plan.CaptureDecl("s2", List.of("scans", "total")), slot.capture());
+        String text = plan.toJsonText();
+        assertTrue(text.contains("\"facts\": {\n        \"slot\": \"before\",\n        \"fields\": {\n          \"scans\":"
+                + " {\n            \"size\": \"loan.lines[*code=x]\"\n          },\n          \"total\": {\n"
+                + "            \"path\": \"loan.total\"\n          }"), text);
+        Plan read = Plan.parse(text);
+        assertEquals(text, read.toJsonText(), "byte-identical round trip");
+        assertEquals(plan, read);
+    }
+
+    @Test
+    void captureFactsCompileErrors() throws Exception {
+        assertCompileError("captureFacts: slot name 'env' is reserved", CAPTURE.replace("slot: before", "slot: env"));
+        assertCompileError("captureFacts: slot 'item' is also declared in resolve", "scenario: t\npack: toy\n"
+                + "resolve:\n  item: { fixture: { code: x } }\nsteps:\n" + CAPTURE.replace("slot: before",
+                "slot: item"), true);
+        assertCompileError("captureFacts: slot 'before' is already captured by step s1", "  - waitFor: { topic: x,"
+                + " capture: { slot: before, fields: { id: id } } }\n" + CAPTURE);
+        assertCompileError("captureFacts: 'fields' needs 1 to 32 fields, found 0", "  - captureFacts: { slot: b,"
+                + " fields: {} }\n");
+        StringBuilder many = new StringBuilder("  - captureFacts:\n      slot: b\n      fields:\n");
+        for (int i = 0; i < 33; i++) {
+            many.append("        f").append(i).append(": loan.total\n");
+        }
+        assertCompileError("captureFacts: 'fields' needs 1 to 32 fields, found 33", many.toString());
+        assertCompileError("captureFacts: the field name 'a-b' must match [A-Za-z0-9_]+", "  - captureFacts: { slot: b,"
+                + " fields: { a-b: loan.total } }\n");
+        assertCompileError("captureFacts b.n: a field is a path or {size: path}, found keys [path, size]",
+                "  - captureFacts: { slot: b, fields: { n: { size: loan.lines, path: loan.total } } }\n");
+        assertCompileError("captureFacts b.n: a field is a path or {size: path}, found 3", "  - captureFacts: { slot:"
+                + " b, fields: { n: 3 } }\n");
+        assertCompileError("captureFacts b.n: unknown fact root 'nope' in path 'nope.x'", "  - captureFacts: { slot:"
+                + " b, fields: { n: nope.x } }\n");
+        assertCompileError("captureFacts b.n: captureFacts reads fact roots; db.* is a stored-row check",
+                "  - captureFacts: { slot: b, fields: { n: db.loan_waiver } }\n");
+        assertCompileError("captureFacts b.n: path 'loan..x': empty field name", "  - captureFacts: { slot: b, fields:"
+                + " { n: loan..x } }\n");
+        assertCompileError("captureFacts: needs exactly 'slot' and 'fields', found keys [fields, slot, when]",
+                "  - captureFacts: { slot: b, fields: { n: loan.total }, when: now }\n");
+        assertCompileError("refers to slot 'before', which step s2 captures", CAPTURE.replace("loan.total",
+                "\"loan.lines[code=$before.scans]\""));
+        assertCompileError("$before.total refers to slot 'before', which step s3 captures", "  - expect: {"
+                + " \"loan.total\": $before.total }\n" + CAPTURE);
+        assertCompileError("captured slot 'before' has no field 'nope'", CAPTURE + "  - expect: { \"loan.total\":"
+                + " $before.nope }\n");
+        Plan later = compile(CAPTURE + "  - captureFacts: { slot: after, fields: { n: \"loan.lines[*code=$before"
+                + ".total]\" } }\n");
+        assertEquals("after", later.steps().get(2).facts().slot(), "a later capture may filter on an earlier one");
+    }
+
+    @Test
+    void captureFactsIsReservedForAPack() {
+        DomainPack shadowing = new DelegatingDomainPack(pack, "shadow", "1") {
+            @Override
+            public StepLibrary steps() {
+                return new StepLibrary() {
+                    @Override
+                    public Set<String> verbs() {
+                        return Set.of("captureFacts");
+                    }
+
+                    @Override
+                    public List<PlannedCall> compile(String verb, Object args, CompileContext ctx) {
+                        return List.of();
+                    }
+                };
+            }
+        };
+        ScenarioException e = assertThrows(ScenarioException.class, () -> PlanCompiler.compile(
+                "scenario: t\npack: toy\nsteps: []\n".getBytes(StandardCharsets.UTF_8), "t.yaml", shadowing));
+        assertTrue(e.reason().contains("declares the verb 'captureFacts', which is reserved"), e.reason());
+        assertTrue(BaseSteps.VERBS.contains("captureFacts"));
+        assertTrue(PlanCompiler.RESERVED_VERBS.contains("captureFacts"));
+    }
+
+    // ------------------------------------------------------------------------------------------ {has} (8.9)
+
+    @Test
+    void waitForsMatchIsAScalarOrHas() throws Exception {
+        assertCompileError("waitFor: 'match.id' must be a scalar or {has: scalar}, found a list",
+                "  - waitFor: { topic: x, match: { id: [a] } }\n");
+        assertCompileError("waitFor: 'match.id' must be a scalar or {has: scalar}, found a mapping with keys [a]",
+                "  - waitFor: { topic: x, match: { id: { a: 1 } } }\n");
+        assertCompileError("waitFor: 'match.id' must be a scalar or {has: scalar}, found {has: a list}",
+                "  - waitFor: { topic: x, match: { id: { has: [a] } } }\n");
+        Plan plan = compile("  - waitFor: { topic: input.requested, match: { state: DEPOSIT, validInputs: { has:"
+                + " Key.DEPOSIT } } }\n");
+        assertEquals(Map.of("state", "DEPOSIT", "validInputs", Map.of("has", "Key.DEPOSIT")),
+                plan.steps().get(0).calls().get(0).args().get("match"));
+        String text = plan.toJsonText();
+        assertEquals(text, Plan.parse(text).toJsonText());
+        assertEquals("invalid plan: call sync.await await: {has} needs a version 7 plan", reason(v6(text)));
+        Plan reference = compile("  - waitFor: { topic: x, match: { items: { has: $env.id } } }\n");
+        assertEquals(Map.of("has", "$env.id"), ((Map<?, ?>) reference.steps().get(0).calls().get(0).args()
+                .get("match")).get("items"), "a reference in has, resolved at run");
+        Plan await = compile("  - call: { primitive: toy.emit, sync: EVENT, await: { topic: toy.done, match: { ids:"
+                + " { has: x } } } }\n");
+        assertEquals(Map.of("ids", Map.of("has", "x")), await.steps().get(0).calls().get(0).await().match());
+        assertCompileError("'match.ids' must be a scalar or {has: scalar}, found {has: null}", "  - call: { primitive:"
+                + " toy.emit, sync: EVENT, await: { topic: toy.done, match: { ids: { has: null } } } }\n");
+    }
+
+    @Test
+    void aPackSyncAwaitCallWithABadMatchIsRefused() throws Exception {
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("topics", "toy.done");
+        args.put("match", Map.of("id", List.of("a")));
+        args.put("timeoutMs", 1000L);
+        pack.custom = List.of(new PlannedCall("sync.await", args, Sync.NONE, 2000));
+        assertCompileError("verb 'custom': call sync.await: 'match.id' must be a scalar or {has: scalar}, found a list",
+                "  - custom: {}\n");
+        args.put("match", Map.of("id", Map.of("has", "a")));
+        pack.custom = List.of(new PlannedCall("sync.await", args, Sync.NONE, 2000));
+        assertEquals(Map.of("id", Map.of("has", "a")), compile("  - custom: {}\n").steps().get(0).calls().get(0)
+                .args().get("match"));
+    }
+
+    private void assertCompileError(String expected, String steps) {
+        assertCompileError(expected, steps, false);
+    }
+
+    private void assertCompileError(String expected, String text, boolean whole) {
+        ScenarioException e = assertThrows(ScenarioException.class, () -> {
+            if (whole) {
+                PlanCompiler.compile(text.getBytes(StandardCharsets.UTF_8), "t.yaml", pack);
+            } else {
+                compile(text);
+            }
+        }, text);
+        assertTrue(e.reason().contains(expected), e.reason());
+    }
+
+    // ------------------------------------------------------------------------------------- the schema (8.4, 8.7)
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theSchemaOffersTheTwoMatchersTheVerbAndTheEightRoots() throws Exception {
+        Map<String, Object> schema = ScenarioSchema.generate(pack, List.of());
+        assertTrue(String.valueOf(schema.get("description")).endsWith("Fact roots: state, loan, app, ui, dialogs,"
+                + " caps, devices, web, hooks, events."), String.valueOf(schema.get("description")));
+        Map<String, Object> defs = (Map<String, Object>) schema.get("$defs");
+        String check = Json.write(defs.get("check"));
+        assertTrue(check.contains("\"properties\":{\"anyOf\":{},\"capability\""), check);
+        assertTrue(check.contains("\"properties\":{\"containsWhere\":{},\"capability\""), check);
+        String step = Json.write(defs.get("step"));
+        assertTrue(step.contains("\"captureFacts\":{\"type\":\"object\""), step);
+        Scenario scenario = ScenarioLoader.load(("scenario: t\npack: toy\nsteps:\n" + CAPTURE).getBytes(
+                StandardCharsets.UTF_8), "t.yaml");
+        assertEquals("captureFacts", scenario.steps().get(1).verb());
+        Object document = ai.skillroy.testjava.data.yaml.StrictYaml.read(("scenario: t\npack: toy\nsteps:\n" + CAPTURE
+                + "  - expect: { \"loan.lines\": { containsWhere: { code: x } }, \"state.name\": { anyOf: [A] } }\n")
+                .getBytes(StandardCharsets.UTF_8)).root();
+        assertEquals(List.of(), ScenarioSchema.validate(schema, document));
     }
 
     // ------------------------------------------------------------------------------------------------ JSON helpers

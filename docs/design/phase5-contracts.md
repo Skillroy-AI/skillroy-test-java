@@ -1883,7 +1883,11 @@ credential character by character). A plan run judges its expectations (`expect`
 checks (row count, columns, aggregates) by the same rule when its `RunOptions` say
 `withExpectationsOnMaskedValues(true)`, so that a run's PASS or FAIL answers no question about a secret either; the
 default is false (a scenario a person committed is evaluated on the values as read), and the hosts that run a plan a
-model or a client wrote (the MCP server's `skillroy_scenario_run`, `author --run`) set it. `readOnly` refuses any
+model or a client wrote (the MCP server's `skillroy_scenario_run`, `author --run`) set it. *(Phase 8, built 2026-10-19,
+EX; P8 §8.7, D605.)* The rule extends to captured facts: under `withExpectationsOnMaskedValues(true)` a value a
+`captureFacts` step captures that the run's mask changes fails the step `FAIL / ASSERTION` ("captureFacts slot.field:
+the value holds a secret …"), so that a captured secret never becomes a matcher operand or a call argument; a session's
+`captureFacts` runs under the session's mask always. `readOnly` refuses any
 mutating or destructive call before it is sent (`READ_ONLY` in the outcome, nothing journaled as executed). A
 destructive call needs `confirm: true` in its arguments, which only an `Origin` of kind `PERSON` may carry: the
 session strips `confirm` from a `MODEL` origin's call and the call then fails with `CONFIRM_REQUIRED` as the agent
@@ -2167,6 +2171,10 @@ no value changing (Q10). As built (2026-10-08, E1): `Plan.inferenceOf(slots)` wr
 `llm-sql` below version 5 is "needs a version 5 plan"; the seven committed plans changed `planVersion` only and the four
 bindings files `planHash` only (regenerated through `PlansUpToDateTest` and `PackOnRealSchemaTest` with their update
 properties, as Phase 4 did).
+
+*(Phase 8, built 2026-10-19, EX; P8 §8.2.)* The written version is 7 since Phase 8 (6 since Phase 7); a session's steps
+are compiled as a scenario's and so carry the version 7 forms (a `captureFacts` step's `facts`, list filters, the two
+new matchers); a session's `captureFacts` step is journaled and exported with its verb and arguments as given.
 
 ### 13.3 The scenario JSON schema and its validator (`skillroy-scenario`)
 

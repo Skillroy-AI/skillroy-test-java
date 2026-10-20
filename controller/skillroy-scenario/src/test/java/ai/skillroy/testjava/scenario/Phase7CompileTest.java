@@ -56,7 +56,7 @@ class Phase7CompileTest {
 
     @Test
     void theFourVerbsAreBaseVerbsAndStayReservedForAPack() {
-        assertEquals(18, BaseSteps.VERBS.size());
+        assertEquals(19, BaseSteps.VERBS.size(), "captureFacts since Phase 8 (phase8-contracts.md 8.7)");
         assertTrue(BaseSteps.VERBS.containsAll(List.of("aiAct", "aiExpect", "pointer", "expectImage")));
         assertTrue(PlanCompiler.RESERVED_VERBS.containsAll(List.of("aiAct", "aiExpect", "pointer", "expectImage")),
                 "a pack may not take them");

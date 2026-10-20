@@ -218,6 +218,34 @@ class CorePrimitivesTest {
                 "since", Long.valueOf(0), "timeoutMs", Long.valueOf(-1)))));
     }
 
+    /**
+     * phase8-contracts.md 13.1 row 36 (8.9): {@code sync.await} with {@code {has: x}} answers the event with the
+     * list member; an invalid match is {@code INVALID_PARAMS {param: match, reason}} before any wait.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void syncAwaitTakesHasAndRefusesAnInvalidMatchBeforeWaiting() throws Exception {
+        long since = agent.runtime.context().events().lastSeq();
+        agent.runtime.context().events().publish("toy.tags", "test", map("tags", Arrays.asList("a", "b")));
+        Map<String, Object> event = agent.valueMap("sync.await", map("topics", "toy.tags", "since",
+                Long.valueOf(since), "match", map("tags", map("has", "b")), "timeoutMs", Long.valueOf(1000)));
+        assertEquals(Arrays.asList("a", "b"), ((Map<String, Object>) event.get("payload")).get("tags"));
+        long t0 = System.nanoTime();
+        Map<String, Object> refused = agent.error("sync.await", map("topics", "toy.tags", "since", Long.valueOf(since),
+                "match", map("sources", map("in", Arrays.asList("a"))), "timeoutMs", Long.valueOf(20000)));
+        assertTrue(System.nanoTime() - t0 < TimeUnit.SECONDS.toNanos(10), "refused before waiting");
+        assertEquals((long) ErrorCodes.INVALID_PARAMS, code(refused));
+        assertEquals("match", data(refused).get("param"));
+        assertEquals("'match.sources' must be a scalar or {has: scalar}, found a mapping with keys [in]",
+                data(refused).get("reason"));
+        assertEquals((long) ErrorCodes.INVALID_PARAMS, code(agent.error("sync.await", map("topics", "toy.tags",
+                "since", Long.valueOf(since), "match", map("tags", Arrays.asList("a")), "timeoutMs",
+                Long.valueOf(20000)))), "a list value");
+        Map<String, Object> timeout = agent.error("sync.await", map("topics", "toy.tags", "since", Long.valueOf(since),
+                "match", map("tags", map("has", "z")), "timeoutMs", Long.valueOf(150)));
+        assertEquals((long) ErrorCodes.TIMEOUT, code(timeout), "a valid match that holds on nothing times out");
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     void appStateAndDevices() throws Exception {

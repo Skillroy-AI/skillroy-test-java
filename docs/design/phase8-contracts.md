@@ -2364,6 +2364,13 @@ root     := [A-Za-z_][A-Za-z0-9_-]*                      -- unchanged
 Failure path: a path that does not resolve fails its matcher as today (only `exists`/`not` can hold); a regex that runs out
 of budget leaves the path unresolved with the reason (`:273-275`); both end at the step timeout as `FAIL / ASSERTION`.
 
+**As built (Phase 8, EX).** `ExpectationPath.Filter` keeps a three-argument constructor for the single form;
+`fieldPath()` splits the field at `.` when asked, and the parser refuses an empty part ("empty part in the filter field
+'a..b'"); `[*]` and `[* ]` are "empty filter field", `[*field]` names the list forms in its message (`[*field=value] /
+[*field~regex]`); a filter field is read on each element as `References.navigate` walks (a missing key, an index out
+of range or a scalar in the middle does not match; only a map element can match); the description in messages and in
+`walked` is the segment as written (`[*code~^YRD]`).
+
 ### 8.4 Matchers: `size` (documented), `anyOf`, `containsWhere`, one regex budget (gap 118, gap 108; D599, D600)
 
 `Matchers.NAMES` becomes `equals, contains, matches, in, gt, gte, lt, lte, size, exists, not, anyOf, containsWhere`
@@ -2391,6 +2398,15 @@ out fails with the existing reason, and every later `matches` of the same evalua
 spent". P1 §8.4's "one budget per matcher evaluation" then reads literally (A93). The path's own budget (§8.3) stays
 separate: at most 2 s of regex per expectation per attempt.
 
+**As built (Phase 8, EX).** `Matchers.evaluate(matcher, resolved, actual, problem)` starts one `SafeRegex.Budget` and
+calls a package-private overload taking the budget (the tests pass a small one); a `matches` on a spent budget fails at
+once with "'matches' /<regex>/: regex budget spent (one budget of 1000 ms for every regex of this matcher)". `anyOf`'s
+reason cuts each alternative's reason to 200 characters and the whole to 2000, each with `...`; `containsWhere` passes
+over an element that is not a map and names a bad field in its refusal ("the field 'a b' (a field is a dotted name such
+as payload.source)"); the constants `MAX_ALTERNATIVES` 16 and `MAX_WHERE_FIELDS` 32. The compiler's stored-row refusal
+reads "<where> db.<table>: 'containsWhere' needs a list, and a stored-row cell is a scalar" for a column, a `rows` or an
+aggregate matcher (`PlanCompiler.noContainsWhere`).
+
 ### 8.5 The `[json]` path segment (gap 21(c); D601)
 
 `[json]` parses the current value, which must be a string, as JSON (`ai.skillroy.testjava.protocol.Json.parse`: depth at
@@ -2401,6 +2417,11 @@ characters"), or is not JSON ("… is not JSON: <JsonException message>"). Sever
 (each bounded). A plain regex on the text (`[*payload.value~"qty":2]`) works without it. The segment is a free token today
 (`[json]` is "neither an index nor a filter", `:132-135`), so an old reader refuses it; the version 7 gate names it (§8.2).
 Not in Phase 8: a `json: matcher` matcher form (it cannot be followed by segments; D601).
+
+**As built (Phase 8, EX).** The segment is `ExpectationPath.JsonText`; `[ json ]` is the segment too (an index's spaces
+are stripped as before). The reasons read "<walked> is not a string (…)", "<walked> is longer than 1048576 characters"
+and "<walked> is not JSON: <message>"; a number is what `Json.parse` gives (an integer a `Long`), compared numerically by
+the matchers as any value.
 
 ### 8.6 The base fact root `events` (gap 21(a); D602, D603)
 
@@ -2436,6 +2457,16 @@ engine thread carry none). Single filters work too: `events[topic=loan.posted].p
 
 **Scope (D603).** The agent's bus only. A CDP path's own events (a separate sequence, `S/WebRun.java`) are not in the root
 in Phase 8 (gap 146); a scenario on a non-agent web path asserts on them through the web verbs' `await` as before.
+
+**As built (Phase 8, EX).** `BaseFacts.events(LongSupplier)` is public (§10's table) and `BaseFacts.all()` gives eight
+providers. Each page is checked whole: besides the first page's `oldestSeq`, every event's `seq` must be the previous
+one plus one (a gap inside a page fails as one between pages: "the ring evicted events N..M …", `M` at least `N`), an
+empty page whose `oldestSeq` is past the cursor + 1 fails (a ring the character bound emptied), and an answer without
+an `events` list fails ("evt.query answered no events list"). The read's failure is the expectation's fetch error, so
+the step retries it until its timeout like any root's failed read and then ends `ERROR / ENVIRONMENT` "fact 'events'
+could not be read: …" (§13.2 item 34's scenario uses a 3 s step timeout). In a run the provider is put into the run's
+facts unless the pack has a root `events` (`PlanExecutor.packEventsRoot`), and a session's from its start mark, as
+`hooks` is.
 
 ### 8.7 The verb `captureFacts` and the step member `facts` (gap 20; D604, D605)
 
@@ -2495,6 +2526,18 @@ in Phase 8 (gap 146); a scenario on a non-agent web path asserts on them through
 - **Replay.** No model; the verb reads the agent only.
 - **Timing.** A capture happens where the step stands; place it after a sync point (a `READY` step, a `waitFor`) when the
   count must include a late event (§8.8).
+
+**As built (Phase 8, EX).** The compiler (`PlanCompiler.captureFacts`) answers "captureFacts: needs exactly 'slot' and
+'fields', found keys […]", "captureFacts: 'fields' needs 1 to 32 fields, found N", "captureFacts <slot>.<field>: a field
+is a path or {size: path}, found …", "captureFacts <slot>.<field>: unknown fact root 'x' in path 'p'; roots: …" and "…:
+captureFacts reads fact roots; db.* is a stored-row check"; the slot rules are those of an event's capture with the
+prefix "captureFacts:" (reserved, in `resolve`, "already captured by step sN"), and a field name `FactCapture`'s
+("the field name 'a-b' must match [A-Za-z0-9_]+"). `BaseSteps.compile` answers no call for the verb (the compiler takes
+it before any step library, as `expect`). The run and the session share `FactCapturing.capture` (package-private): the
+step's own one read per root, the paths bound against the public values; a `size` of a value without one is
+"captureFacts s.f: <path> did not resolve: 'size' needs a list, a map or a string, but the value is …"; a masked value's
+failure carries it masked as `detail.actual`. A session's capture writes the same `capture` record to its log (its
+observer) and binds the slot as a run does, so the step's `captured` detail carries it.
 
 ### 8.8 Negation and deltas: an expectation, not a wait (gap 21(d); D607)
 
@@ -2567,6 +2610,16 @@ the rule); a scalar is anything but a map, a collection or an array, so a set or
 text); it is now a compile error (none committed). A `sync.await` sent by a client (`skillroy call`, MCP) with an invalid
 `match` is `INVALID_PARAMS` instead of `TIMEOUT`.
 
+**As built (Phase 8, EX).** `AwaitRules.checkMatch` checks blank keys, then `PayloadMatch.problem`; `AwaitRules.resolve`
+refuses a substituted match with "await match '<key>' resolved to a list; a match value is a scalar or {has: scalar}"
+(or "await match is not valid: <problem>"), reason `REFERENCE`, nothing sent. The agent answers `INVALID_PARAMS` "invalid
+match: <problem>" with `data {param: "match", reason: <problem>}`. `waitFor`'s check reads "waitFor: <problem>"; the
+compiler checks the `match` of every `sync.await` call any verb emits, the base `waitFor`'s included ("verb 'v': call
+sync.await: <problem>", `PlanCompiler.syncAwaitMatch`). The substituted arguments of a `sync.await` call are sent as
+they are (`CallRunner` is §7's file), so a `waitFor` whose `{has: $x}` resolves to a list is refused by the agent's
+check (`INVALID_PARAMS`) rather than by `AwaitRules.resolve`. The seven test fakes' rule and `WebRun.matches` call
+`PayloadMatch.matches`; `AwaitSpec`'s Javadoc states the rule.
+
 ### 8.10 Threads, bounds, records
 
 | Where | Bound |
@@ -2581,6 +2634,11 @@ text); it is now a compile error (none committed). A `sync.await` sent by a clie
 
 Records: `capture {step, slot, value, source: "facts"}` (new form); `expect` unchanged in keys but for `actualTruncated`;
 `sync` unchanged (`match` is logged as sent). No new record type from this section (`capture` is already observed; §7.1 adds `warning`, `rung` and `rungs` to `RunLog.OBSERVED`).
+
+**As built (Phase 8, EX).** `RunLog.cutActual(fields)` cuts every list of `actual` to its first 200 elements at any depth
+(up to the codec's depth bound) and inserts `actualTruncated: true` right after `actual`, answering the same map when
+nothing is cut; `RunLog.write` applies it to every `expect` record (the observer's copy too), and the executor to an
+expectation failure's detail, so `RunResult.detail.actual` is cut the same way.
 
 ### 8.11 Behaviour changes for existing users, in one list
 
@@ -3356,6 +3414,19 @@ committed list of 17 names with `scanner/`'s one, `SEED_A` with the new seed-A s
 covers query slots and images only; scenario A's rehash is step R's) and `ScenarioSchemaCommittedTest` (**22 → 34**:
 the eleven committed scenarios plus five and `scanner/`'s one, and the eleven negatives plus six).
 
+**As built (Phase 8, EX).** `loan-counts-and-events` captures **after the first scan, on the open loan**, not right after
+`signOn`: `lending.loan` answers the open loan, else the most recently recorded one (`LendingPrimitives.loan`), so on a
+desk that recorded an earlier loan (every `LoadModeChecks` leg, the JUnit glue) a `lines` count taken after sign-on is that
+loan's, and the delta `{size: {gt: $before.lines}}` would fail whenever it had one line. As built: `signOn`; `scan`
+once; `captureFacts before {scans, signOffs, lines, qty}` (`scans` 1, `signOffs` 0, `lines` 1, `qty` "1" on every
+desk); `scan` again; `expect` `[*code=$item.code]` `{size: 1}`, `loan.lines` `{size: $before.lines}` (the second scan
+adds to the line), the line's `qty` `{gt: $before.qty}` (a delta of a value) and the Barcode acknowledgements `{size:
+{gt: $before.scans}}`; the rest as the table says. The negative `count-delta-fails` is as specified (its step timeout
+5 s). `PlansUpToDateTest.thePlansUseEventDrivenSyncOnly` admits a `mark` step's `trace.mark` (sync `NONE`: the mark
+publishes its event before it answers). On EX's branch the lists read: the committed list of 12 names
+(`loan-counts-and-events.yaml` added), `SEED_A` with `loan-counts-and-events`, 12 negatives (`count-delta-fails.yaml`),
+`ScenarioSchemaCommittedTest` 24, the JUnit glue's 12 ids (D641; the integrator resolves the literals).
+
 ### 12.5 Regenerated committed artifacts
 
 The skeleton commit regenerates the version alone (§2.2, §8.2: the 19 plans, `toy-loan.plan.json` among them, and the
@@ -3660,6 +3731,18 @@ named per item host the agent-level half of a proof.
    in reasonable time, and the two loss conditions share one code path.
 35. **Plan version 7 in the image** (EX). `ResolutionChecks` items 1-7 replay scenario A from its regenerated plan and bindings
    (`planHash` rehashed, `resolveHash` unchanged, approve byte-identical): no new item; the matrix proves the regeneration.
+
+   **As built (Phase 8, EX), items 32-34.** Slot 176 (`countsAndEventsScenarioPasses`) asserts the capture of §12.4's
+   As built note (`{lines: 1, qty: "1", scans: 1, signOffs: 0}`, step `s3`), eleven `expect` records held, the waitFor's
+   `call` record of `sync.await` (a `waitFor` is sync `NONE`, so its record is the call's) `ok: true` with the match as
+   sent, the Barcode acknowledgement of step `s2` carrying the correlation id `loan-counts-and-events/s2/1` (read with
+   `evt.query`), and the raw `sync.await` checks from the DEPOSIT event's sequence: `{state: DEPOSIT, validInputs: {has:
+   Key.DEPOSIT}}` answers that event, `{has: Key.RETURN}` is `TIMEOUT`, `{in: [x]}` is `INVALID_PARAMS {param: match}`.
+   `SmallRingChecks` (`@Order(20) JavaAgentSmallRing`) checks `agent.info.options.eventRing` is `200`, item 34 (a) and
+   (b) (the 300-mark scenario with a 3 s step timeout ends `ERROR / ENVIRONMENT` at `s302`, its one `expect` record
+   `failed`), and the sign-off after each. The §13.1 row 38 part that names `ScenarioSchemaTest` is in
+   `Phase8CompileTest` (`ScenarioSchemaTest` is EP's file); the headless test (row 41) runs each plan without its launch
+   property (the headless desk is seed A's and answers no `jvm.properties`).
 
 36. **`LoadModeChecks`, new slot 177** (EP). (every mode, the seed-A desk): a `basic-loan` run's `capabilities.json` holds
    `lending.returns.ceiling OK`, its `capabilities` record lists it under `pack` with `scope: scenario, cached: false`

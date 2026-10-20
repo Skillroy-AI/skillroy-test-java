@@ -26,6 +26,7 @@ import ai.skillroy.testjava.agent.api.spi.DeviceAdapter;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.JsonView;
+import ai.skillroy.testjava.protocol.PayloadMatch;
 import ai.skillroy.testjava.protocol.Protocol;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.TopicFilter;
@@ -472,7 +473,8 @@ final class CorePrimitives {
                         + "TIMEOUT with data.lastSeq if none arrives.")
                 .param("topics", "string|array", true, "topic globs")
                 .param("since", "integer", true, "only events with a higher seq")
-                .param("match", "object", false, "payload entries that must be equal (String.valueOf)")
+                .param("match", "object", false, "payload entries that must hold: a scalar (equal by text) or"
+                        + " {has: scalar} (a list member equal by text)")
                 .param("timeoutMs", "integer", false, "default 10000, at most " + MAX_AWAIT_MS)
                 .build();
 
@@ -500,6 +502,14 @@ final class CorePrimitives {
             TopicFilter filter = topics(args, "topics", true);
             long since = args.requireNum("since");
             Map<String, Object> match = args.has("match") ? args.obj("match").raw() : null;
+            // phase8-contracts.md 8.9: an invalid match is refused before the wait, never a silent timeout.
+            String problem = PayloadMatch.problem(match);
+            if (problem != null) {
+                Map<String, Object> data = new LinkedHashMap<String, Object>();
+                data.put("param", "match");
+                data.put("reason", problem);
+                throw new RpcException(ErrorCodes.INVALID_PARAMS, "invalid match: " + problem, data);
+            }
             long wait = Math.min(waitMs(args), inv.remainingMs());
             Event event = ctx.events.await(since, filter, match, wait);
             if (event == null) {

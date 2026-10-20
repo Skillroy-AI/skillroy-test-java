@@ -1649,6 +1649,9 @@ supported (expected 1, 2, 3 or 4)"). The `planHash` covers the version, so the l
 were rewritten (only `planVersion` changed, to 4; `packVersion` stays `0.3.0`) and its four bindings files carry the new
 `planHash`; the scenario module's test plan `toy-loan.plan.json` is version 4 as well.)
 
+*(Phase 8, built 2026-10-19, EX; P8 §8.2.)* The plan is version 7 since Phase 8 (versions 5 and 6 were Phases 5 and 7);
+the reader accepts 1 to 7 and, from 7 on, refuses an unknown step or call key; `web` is unchanged.
+
 ---
 
 ## 8. Failure taxonomy, status mapping and run outputs
@@ -2351,7 +2354,7 @@ Numbers are those of `../TODO.md`, "Open SPI and DSL gaps".
 
 | # | Gap | In Phase 4 |
 |---|---|---|
-| 21 | Event expectations (`sync.await` matches top-level values by text only) | partly: `await:` on the web verbs matches `name` and top-level `detail` fields by text (A32 rules); the `events` fact root and negated waits stay open |
+| 21 | Event expectations (`sync.await` matches top-level values by text only) | partly: `await:` on the web verbs matches `name` and top-level `detail` fields by text (A32 rules); the `events` fact root and negated waits stay open. *(Phase 8, built 2026-10-19, EX; P8 §8.6, §8.8, §8.9: closed for the agent's bus: the base root `events`, negation as `{size: 0}` on it, `{has: scalar}` in a match through `PayloadMatch`, which the executor's wait on a CDP path's events applies too; the CDP path's own events are not in the root, gap 146.)* |
 | 22 | Rung ladders for pack verbs | unchanged; the web verbs record `path` and `fidelity: DOM`, which is the same need expressed per verb; a general ladder stays open |
 | 28 | Pack-defined artifact kinds | unchanged; the web evidence is base evidence, not a pack artifact |
 | 31 | `swing.events` and other catalogued primitives not yet in a contract | unchanged |

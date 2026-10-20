@@ -72,11 +72,12 @@ class PlansUpToDateTest {
     void everyCommittedPlanMatchesItsScenario() throws Exception {
         List<Path> scenarios = committedScenarios();
         assertEquals(List.of("basic-loan-ui.yaml", "basic-loan.yaml", "borrow-2-waive-1-slip.yaml",
-                "keypad-image.yaml", "loan-table-visual-check.yaml", "return-over-limit-needs-supervisor.yaml",
-                "return-refunds-deposit.yaml", "return-within-limit-observed.yaml", "sign-on-by-number-pad.yaml",
-                "supervisor-return-llm-sql.yaml", "vision-live-only.yaml"),
+                "keypad-image.yaml", "loan-counts-and-events.yaml", "loan-table-visual-check.yaml",
+                "return-over-limit-needs-supervisor.yaml", "return-refunds-deposit.yaml",
+                "return-within-limit-observed.yaml", "sign-on-by-number-pad.yaml", "supervisor-return-llm-sql.yaml",
+                "vision-live-only.yaml"),
                 scenarios.stream().map(p -> p.getFileName().toString()).toList(), "the Phase 7 scenarios with the"
-                + " earlier ones (phase7-contracts.md 12.4)");
+                + " earlier ones (phase7-contracts.md 12.4) and Phase 8's (phase8-contracts.md 12.4)");
         // skillroy author writes <out>/plan/<id>.plan.json; a scenario it wrote into scenarios/ has its plan moved here
         // with the others, so that a plan's default bindings root (D31: beside its directory) is bindings/.
         assertFalse(Files.exists(moduleDir().resolve("scenarios").resolve("plan")), "the committed plans are in plan/");
@@ -113,7 +114,7 @@ class PlansUpToDateTest {
 
     /** The seed-A scenarios (their staff number and fixtures are seed A's): they name the seed they run on. */
     static final List<String> SEED_A = List.of("basic-loan", "basic-loan-ui", "sign-on-by-number-pad",
-            "loan-table-visual-check", "vision-live-only");
+            "loan-table-visual-check", "vision-live-only", "loan-counts-and-events");
 
     /**
      * Every call is followed by an event wait or the UI settle, or is itself a wait: a {@code sync.await}, or the
@@ -142,8 +143,10 @@ class PlansUpToDateTest {
                             && calls.get(i - 1).sync() == Sync.EVENT;
                     // phase7-contracts.md 8.1: an expectImage's capture is a read, compared at once (sync NONE).
                     boolean imageRead = call.primitive().equals("swing.capture") && step.verb().equals("expectImage");
+                    // phase8-contracts.md 8.5, 12.4: a mark publishes its event before it answers (sync NONE).
+                    boolean mark = call.primitive().equals("trace.mark") && step.verb().equals("mark");
                     boolean waitedOn = call.sync() != Sync.NONE || call.primitive().equals("sync.await")
-                            || settlesAnAwaitedUiCall || imageRead;
+                            || settlesAnAwaitedUiCall || imageRead || mark;
                     assertTrue(waitedOn, plan.scenarioId() + " " + step.id() + ": every call is followed by an "
                             + "event wait or the UI settle, or is itself a wait: " + call);
                 }
@@ -250,10 +253,11 @@ class PlansUpToDateTest {
         Path dir = moduleDir().resolve("src/test/resources/negative");
         try (Stream<Path> files = Files.list(dir)) {
             List<Path> yamls = files.filter(p -> p.getFileName().toString().endsWith(".yaml")).sorted().toList();
-            assertEquals(List.of("click-fallback-degraded.yaml", "click-strict-fails.yaml", "guarded-unavailable.yaml",
-                    "missing-capability.yaml", "modal-open-step.yaml", "no-item-in-range.yaml", "no-rule-of-kind.yaml",
-                    "prompt-left-open.yaml", "return-within-limit.yaml", "waiver-guard-fails.yaml",
-                    "wrong-expectation.yaml"), yamls.stream().map(p -> p.getFileName().toString()).toList());
+            assertEquals(List.of("click-fallback-degraded.yaml", "click-strict-fails.yaml", "count-delta-fails.yaml",
+                    "guarded-unavailable.yaml", "missing-capability.yaml", "modal-open-step.yaml",
+                    "no-item-in-range.yaml", "no-rule-of-kind.yaml", "prompt-left-open.yaml", "return-within-limit.yaml",
+                    "waiver-guard-fails.yaml", "wrong-expectation.yaml"),
+                    yamls.stream().map(p -> p.getFileName().toString()).toList());
             for (Path yaml : yamls) {
                 Plan plan = PlanCompiler.compile(yaml, new LendingPack());
                 assertEquals(yaml.getFileName().toString(), plan.scenarioId() + ".yaml");

@@ -68,6 +68,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -202,11 +203,13 @@ public final class ExecutorSession implements AutoCloseable {
         boolean webRoot = false;
         boolean hooksRoot = false;
         boolean capsRoot = false;
+        boolean eventsRoot = false;
         for (FactProvider fact : packFacts == null ? List.<FactProvider>of() : packFacts) {
             facts.putIfAbsent(fact.root(), fact);
             webRoot |= "web".equals(fact.root());
             hooksRoot |= "hooks".equals(fact.root());
             capsRoot |= "caps".equals(fact.root());
+            eventsRoot |= "events".equals(fact.root());
         }
         for (FactProvider fact : BaseFacts.all()) {
             facts.putIfAbsent(fact.root(), fact);
@@ -223,6 +226,11 @@ public final class ExecutorSession implements AutoCloseable {
         if (!capsRoot) {
             // phase7-contracts.md 8.5: the base root caps reads the session's merged matrix, with a source per entry.
             facts.put("caps", BaseFacts.caps(() -> this.caps));
+        }
+        if (!eventsRoot) {
+            // phase8-contracts.md 8.6: a session's events window starts at its own start mark, as hooks does.
+            long startSeq = runner.lastActionSeq;
+            facts.put("events", BaseFacts.events(() -> startSeq));
         }
     }
 
@@ -614,7 +622,7 @@ public final class ExecutorSession implements AutoCloseable {
         try {
             Plan compiled = PlanCompiler.compile(scenarioOf(verb, given), pack);
             Plan.Step only = compiled.steps().get(0);
-            step = new Plan.Step(stepId, verb, 0, only.calls(), only.expect());
+            step = new Plan.Step(stepId, verb, 0, only.calls(), only.expect(), only.facts());
         } catch (ScenarioException e) {
             return refused(stepId, verb, given, List.of(), origin, "the step does not compile: " + e.reason());
         } catch (RuntimeException e) {
@@ -625,7 +633,7 @@ public final class ExecutorSession implements AutoCloseable {
             for (Plan.Call call : step.calls()) {
                 calls.add(withoutConfirmation(call));
             }
-            step = new Plan.Step(stepId, verb, 0, calls, step.expect());
+            step = new Plan.Step(stepId, verb, 0, calls, step.expect(), step.facts());
         }
         return run(stepId, verb, given, step, origin);
     }
@@ -759,6 +767,9 @@ public final class ExecutorSession implements AutoCloseable {
                     consumed(call);
                 }
             }
+            if (step.facts() != null) {
+                captureFacts(step);
+            }
             if (!step.expect().isEmpty()) {
                 imageSkipped = expectNow(step.expect(), stepId);
             }
@@ -801,6 +812,30 @@ public final class ExecutorSession implements AutoCloseable {
         String snapshotHash = origin.kind() == Origin.Kind.MODEL ? snapshotHash() : null;
         return finish(stepId, verb, givenArgs, step, callRecords, origin, executed, status, null, null, detail,
                 seqBefore, t0, snapshotHash);
+    }
+
+    /**
+     * A {@code captureFacts} step in a session (phase8-contracts.md 8.7, decision D605): one read per named root, no
+     * retry, the failures of a run's; the slot bound (the step's {@code captured} detail then carries it) and the
+     * {@code capture} record written; a captured value the session's mask changes fails the step, always.
+     */
+    private void captureFacts(Plan.Step step) throws Abort, AgentLostException, InterruptedException {
+        Map<String, Object[]> cache = new HashMap<>();
+        Map<String, Object> value = FactCapturing.capture(step, runner.bindings, facts.keySet(), root -> {
+            Object[] fact = cache.get(root);
+            if (fact == null) {
+                try {
+                    fact = new Object[] {fetch(root)};
+                } catch (FactFailure e) {
+                    fact = new Object[] {null, e.getMessage()};
+                }
+                cache.put(root, fact);
+            }
+            return fact;
+        }, captured -> Matchers.maskedSecret(mask, captured));
+        runner.bindings = runner.bindings.withCaptured(step.facts().slot(), value);
+        log.write("capture", RunLog.fields("step", step.id(), "slot", step.facts().slot(), "value", value, "source",
+                "facts"));
     }
 
     /** A step refused before anything was sent (it does not compile): ERROR / ENVIRONMENT, journaled. */
