@@ -4200,7 +4200,9 @@ named per item host the agent-level half of a proof.
    step's verdict: `consumed: QUEUED` means the race happened and the attempt must end `SYNC_TIMEOUT` naming its own
    `inputId` (a PASS, which is what an uncorrelated wait gives, fails the check); the pre-check's `INPUT_REJECTED`
    is "not observed"; any other outcome fails. Before the fix the assertions ran only when the step had already ended
-   `SYNC_TIMEOUT`, so the defect the half exists for counted as "not observed". Alternative not taken (an owner's
+   `SYNC_TIMEOUT`, so the defect the half exists for counted as "not observed". Each attempt then waits (bounded, on
+   the desk's ready event after the queued `SIGN_OFF`) before it reads the state, which a Java 8 target's embedded leg
+   once read mid-take (`SIGNED_OFF`, `awaitingInput: false`). Alternative not taken (an owner's
    choice, D-ES-17's rejected seam): a test-only desk option that delays the engine's take of an input, set on one
    leg, which would make the race happen every time.
 28. **Composites** (ES). (`@Order(174)`): `sign-on-any` PASS (branches `auto` and `password` in the `call` records,

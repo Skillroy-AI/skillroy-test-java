@@ -1434,6 +1434,11 @@ abstract class LoadModeChecks {
                             + " nor refused by the pre-check: " + second.status() + " " + second.failureKind() + " "
                             + second.message() + " consumed=" + consumed);
                 }
+                // The first input was queued (ackTimeoutMs: 0): the state is read once the engine has finished it,
+                // on its ready event after the call (bounded), never while it is still taking it (fix wave, FD: a Java
+                // 8 target's embedded leg read SIGNED_OFF with awaitingInput false).
+                assertNotNull(client().await(READY_TOPICS, first.seqBefore(), null, WAIT),
+                        "the desk ready after the queued SIGN_OFF");
                 Map<String, Object> state = value(client().call("lending.state", Map.of(), CALL));
                 if ("IDLE".equals(state.get("name"))) {
                     send("Key.SIGN_OFF", null);
