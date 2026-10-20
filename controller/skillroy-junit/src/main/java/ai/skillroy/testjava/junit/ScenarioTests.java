@@ -26,6 +26,7 @@ import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
 import ai.skillroy.testjava.scenario.PlanExecutor;
 import ai.skillroy.testjava.scenario.RunOptions;
+import ai.skillroy.testjava.scenario.SuiteCache;
 import ai.skillroy.testjava.scenario.RunResult;
 import ai.skillroy.testjava.scenario.Scenario;
 import ai.skillroy.testjava.scenario.ScenarioException;
@@ -121,6 +122,11 @@ import java.util.stream.Stream;
  *
  * <p>The connection is obtained lazily inside each test and is never closed here: the caller owns it. Tests run on
  * JUnit's thread; scenarios against one target must not run concurrently.
+ *
+ * <p>The suite (phase8-contracts.md 9.3.3): one stream is one suite. Whenever the effective options carry no
+ * {@link RunOptions#suite()}, the stream gets one {@code SuiteCache} of its own, so that a {@code SUITE} pre-flight
+ * check or pack capability is evaluated once for its scenarios (per environment and agent start); a caller shares one
+ * cache across streams by passing it in the options.
  */
 public final class ScenarioTests {
 
@@ -200,7 +206,8 @@ public final class ScenarioTests {
      * One test per scenario.
      *
      * @param options run options, whose {@code bind()} is used as it is; null means defaults with the bind options of
-     *     the system properties. {@code outputDir}, when set, is the parent of one directory per scenario
+     *     the system properties. {@code outputDir}, when set, is the parent of one directory per scenario. Without a
+     *     {@code suite()} the stream gets a {@code SuiteCache} of its own (phase8-contracts.md 9.3.3)
      * @param pack the pack to compile and run every scenario with, or null to select it per scenario with
      *     {@code ServiceLoader}
      */
@@ -236,6 +243,10 @@ public final class ScenarioTests {
         }
         ClassLoader loader = Thread.currentThread().getContextClassLoader();
         RunOptions chosen = effective;
+        if (chosen.suite() == null) {
+            // phase8-contracts.md 9.3.3: the stream is the suite; a caller shares a cache across streams by passing one.
+            chosen = chosen.withSuite(SuiteCache.create());
+        }
         if (chosen.robot()) {
             warnings.println(ROBOT_WARNING);
         }

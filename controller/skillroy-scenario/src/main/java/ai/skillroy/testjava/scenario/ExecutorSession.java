@@ -171,6 +171,8 @@ public final class ExecutorSession implements AutoCloseable {
     private Map<String, Object> provenance;
     /** The ids the controller-side contributors added at open (phase7-contracts.md 8.5). */
     private List<String> contributed = List.of();
+    /** The ids the pack's capabilities added at open (phase8-contracts.md 9.1.4). */
+    private List<String> packCapabilities = List.of();
     /** The baselines of the current {@link #expectImage} step; {@link ImageSteps.Baselines#none()} otherwise. */
     private ImageSteps.Baselines stepBaselines = ImageSteps.Baselines.none();
 
@@ -231,14 +233,17 @@ public final class ExecutorSession implements AutoCloseable {
     /**
      * Opens a session: reads the target's capability matrix, installs the pack's hook catalogue under
      * {@link SessionOptions#hooks()} as a run's step 0b does (phase6-contracts.md 5.3; an armed stub is recorded, not
-     * refused) and archives the final matrix as {@code capabilities.json} in the output directory, reads the target's
-     * catalogue, runs the pack's pre-flight checks as a run does, opens the web path (P4 6.1) with the session's web settings (without tracing: a session keeps no
+     * refused), merges the controller-side contributors' and the pack's capabilities (phase8-contracts.md 9.1.5) and
+     * archives the final matrix as {@code capabilities.json} in the output directory, reads the target's
+     * catalogue, runs the pack's pre-flight checks as a run does (a {@code SUITE} one answered from
+     * {@link SessionOptions#suite()}, phase8-contracts.md 9.3.3), opens the web path (P4 6.1) with the session's web settings (without tracing: a session keeps no
      * failure evidence, and any step may type a secret), computes the environment fingerprint, marks the start
      * ({@code trace.mark}, so that waits and prompt checks never see an earlier event) and writes the journal's first
      * record. No model is involved.
      *
      * @param options null means {@link SessionOptions#defaults} without an output directory
-     * @throws SessionOpenException ENVIRONMENT for a failed pre-flight check, fingerprint, start mark or journal, or a
+     * @throws SessionOpenException ENVIRONMENT for a refused capability merge (a contributor's or the pack's
+     *     declarations), a failed pre-flight check, fingerprint, start mark or journal, or a
      *     refused hook install (another catalogue installed, an agent error); PRECONDITION_FAILED for hooks {@code ON}
      *     without a catalogue or a usable engine;
      *     PRECONDITION_FAILED (or ENVIRONMENT) for a pinned web path that cannot be used
@@ -283,32 +288,37 @@ public final class ExecutorSession implements AutoCloseable {
             CapabilityMatrix after = agent.capabilities();
             caps = after == null ? new CapabilityMatrix(Map.of()) : after;
         }
-        // phase7-contracts.md 8.5 (D326, D348): the controller-side contributors' capabilities merged once, with the
-        // host's features (SessionOptions.host, set before open), so that capabilities.json is written once.
-        CapabilityMerge.Result merge;
-        try {
-            merge = CapabilityMerge.merge(caps, CapabilityMerge.load(effective.webPathLoader()).contributors(),
-                    new CapabilityContributor.CapabilityContext(effective.bind().inference(), BindMode.LIVE, caps,
-                            effective.host(), pack));
-        } catch (CapabilityMerge.Refused e) {
-            throw new SessionOpenException(FailureKind.ENVIRONMENT, mask.apply(e.getMessage()), null);
-        }
-        caps = merge.merged();
-        caps = mergePackCapabilities(pack, caps);
-        archiveCapabilities(effective.outputDir(), caps, mask);
-        Map<String, PrimitiveDescriptor> primitives = new TreeMap<>();
-        List<PrimitiveDescriptor> schema = agent.schema();
-        for (PrimitiveDescriptor descriptor : schema == null ? List.<PrimitiveDescriptor>of() : schema) {
-            if (descriptor != null) {
-                primitives.putIfAbsent(descriptor.name(), descriptor);
-            }
-        }
+        // phase8-contracts.md 9.1.5: the session's data channels serve the pack's capabilities and its pre-flight; they
+        // are closed on every failure path from here on.
         DataChannels data = DataChannels.of(agent, effective.bind().credentials(), rowMasks(pack));
-        RunLog log = RunLog.open(null, clock);
-        log.mask(mask);
-        WebRun web = new WebRun(agent, log, clock, effective.webPathLoader());
+        RunLog log = null;
+        WebRun web = null;
         boolean ok = false;
         try {
+            // phase7-contracts.md 8.5 (D326, D348): the controller-side contributors' capabilities merged once, with
+            // the host's features (SessionOptions.host, set before open), so that capabilities.json is written once.
+            CapabilityMerge.Result merge;
+            try {
+                merge = CapabilityMerge.merge(caps, CapabilityMerge.load(effective.webPathLoader()).contributors(),
+                        new CapabilityContributor.CapabilityContext(effective.bind().inference(), BindMode.LIVE, caps,
+                                effective.host(), pack));
+            } catch (CapabilityMerge.Refused e) {
+                throw new SessionOpenException(FailureKind.ENVIRONMENT, mask.apply(e.getMessage()), null);
+            }
+            caps = merge.merged();
+            PackCapabilities.Result packCaps = mergePackCapabilities(pack, caps, agent, data, effective, mask);
+            caps = packCaps.merged();
+            archiveCapabilities(effective.outputDir(), caps, mask);
+            Map<String, PrimitiveDescriptor> primitives = new TreeMap<>();
+            List<PrimitiveDescriptor> schema = agent.schema();
+            for (PrimitiveDescriptor descriptor : schema == null ? List.<PrimitiveDescriptor>of() : schema) {
+                if (descriptor != null) {
+                    primitives.putIfAbsent(descriptor.name(), descriptor);
+                }
+            }
+            log = RunLog.open(null, clock);
+            log.mask(mask);
+            web = new WebRun(agent, log, clock, effective.webPathLoader());
             preflight(pack, agent, data, effective);
             WebSettings settings = effective.effectiveWeb();
             WebSettings untraced = new WebSettings(settings.path(), settings.defaultBrowser(),
@@ -344,15 +354,20 @@ public final class ExecutorSession implements AutoCloseable {
             ExecutorSession session = new ExecutorSession(pack, agent, effective, id, log, web, runner, journal,
                     fingerprint, caps, primitives, data);
             session.contributed = merge.contributed();
+            session.packCapabilities = packCaps.ids();
             session.hooksRecord = mask(mask, hooks.record());
             session.start();
             ok = true;
             return session;
         } finally {
             if (!ok) {
-                web.close();
+                if (web != null) {
+                    web.close();
+                }
                 data.close();
-                log.close();
+                if (log != null) {
+                    log.close();
+                }
             }
         }
     }
@@ -377,37 +392,33 @@ public final class ExecutorSession implements AutoCloseable {
     /**
      * phase8-contracts.md 9.1.5 (gap 106): the pack's capabilities evaluated into the session's matrix after its
      * contributors' merge, with the session's data channels, environment id and settings and
-     * {@link SessionOptions#suite()}, before {@code capabilities.json} is written. As built (Phase 8, EP step 1): the
-     * seam only; a pack that declares none changes nothing, and the evaluation is not built yet, so a pack that
-     * declares any cannot open a session until it lands.
+     * {@link SessionOptions#suite()} under the connection's agent session, before {@code capabilities.json} is written.
+     * A pack that declares none changes nothing. A declaration error, and an interrupted evaluation, refuse the open
+     * ENVIRONMENT.
      */
-    private static CapabilityMatrix mergePackCapabilities(DomainPack pack, CapabilityMatrix caps) {
-        List<ai.skillroy.testjava.scenario.pack.PackCapability> declared = pack.capabilities();
-        if (declared == null || declared.isEmpty()) {
-            return caps;
-        }
-        throw new UnsupportedOperationException("pack capabilities are not built yet (phase8-contracts.md 9.1)");
-    }
-
-    private static List<ai.skillroy.testjava.data.RowMask> rowMasks(DomainPack pack) {
-        try {
-            List<ai.skillroy.testjava.data.RowMask> masks = pack.rowMasks();
-            return masks == null ? List.of() : masks;
-        } catch (RuntimeException e) {
-            return List.of();
-        }
-    }
-
-    private static void preflight(DomainPack pack, AgentConnection agent, DataChannel data, SessionOptions options)
+    private static PackCapabilities.Result mergePackCapabilities(DomainPack pack, CapabilityMatrix caps,
+                                                                 AgentConnection agent, DataChannel data,
+                                                                 SessionOptions options, SecretMask mask)
             throws SessionOpenException, AgentLostException {
-        List<PreflightCheck> checks;
         try {
-            checks = pack.preflight();
-        } catch (RuntimeException e) {
-            throw new SessionOpenException(FailureKind.ENVIRONMENT, "pack " + pack.id() + ": its pre-flight checks"
-                    + " cannot be read: " + e, null);
+            return PackCapabilities.evaluate(caps, pack, context(pack, agent, data, options), options.suite(),
+                    agent.agentSession(), mask);
+        } catch (CapabilityMerge.Refused e) {
+            throw new SessionOpenException(FailureKind.ENVIRONMENT, mask.apply(e.getMessage()), null);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SessionOpenException(FailureKind.ENVIRONMENT, "interrupted", null);
         }
-        PreflightCheck.PreflightContext ctx = new PreflightCheck.PreflightContext() {
+    }
+
+    /**
+     * What the pack's capabilities and its pre-flight checks read at the open (phase2-contracts.md 6.1;
+     * phase8-contracts.md 9.1.3): the session's connection and data channels, its environment id and the pack's
+     * settings; no bind mode, no inference settings, no gateway.
+     */
+    private static PreflightCheck.PreflightContext context(DomainPack pack, AgentConnection agent, DataChannel data,
+                                                           SessionOptions options) {
+        return new PreflightCheck.PreflightContext() {
             @Override
             public AgentConnection agent() {
                 return agent;
@@ -429,24 +440,39 @@ public final class ExecutorSession implements AutoCloseable {
                 return settings == null ? PackSettings.EMPTY : settings;
             }
         };
-        SecretMask mask = options.bind().credentials().mask();
-        for (PreflightCheck check : checks == null ? List.<PreflightCheck>of() : checks) {
-            String reason;
-            try {
-                reason = check.check(ctx);
-            } catch (AgentLostException e) {
-                throw e;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                reason = "interrupted";
-            } catch (Exception e) {
-                reason = "failed: " + e;
-            }
-            if (reason != null) {
-                throw new SessionOpenException(FailureKind.ENVIRONMENT, mask.apply("pre-flight check " + check.id()
-                        + ": " + reason), RunLog.fields("preflight", check.id(), "reason", mask.apply(reason)));
-            }
+    }
+
+    private static List<ai.skillroy.testjava.data.RowMask> rowMasks(DomainPack pack) {
+        try {
+            List<ai.skillroy.testjava.data.RowMask> masks = pack.rowMasks();
+            return masks == null ? List.of() : masks;
+        } catch (RuntimeException e) {
+            return List.of();
         }
+    }
+
+    /**
+     * The pack's pre-flight at the open (phase8-contracts.md 9.3.3) through {@link Preflight}, a {@code SUITE} check
+     * answered from {@link SessionOptions#suite()} under the connection's agent session; the first failure refuses the
+     * open ENVIRONMENT, masked.
+     */
+    private static void preflight(DomainPack pack, AgentConnection agent, DataChannel data, SessionOptions options)
+            throws SessionOpenException, AgentLostException {
+        Preflight.Outcome outcome = Preflight.run(pack, context(pack, agent, data, options), options.suite(),
+                agent.agentSession());
+        if (outcome.failure() == null) {
+            return;
+        }
+        SecretMask mask = options.bind().credentials().mask();
+        Preflight.Record failed = outcome.failed();
+        if (failed == null) {
+            throw new SessionOpenException(FailureKind.ENVIRONMENT, mask.apply(outcome.failure()), null);
+        }
+        Map<String, Object> detail = RunLog.fields("preflight", failed.id(), "reason", mask.apply(failed.reason()));
+        if (failed.cached()) {
+            detail.put("cached", true);
+        }
+        throw new SessionOpenException(FailureKind.ENVIRONMENT, mask.apply(outcome.failure()), detail);
     }
 
     private static void configure(CallRunner runner, DomainPack pack) {
@@ -507,6 +533,10 @@ public final class ExecutorSession implements AutoCloseable {
         }
         if (!contributed.isEmpty()) {
             sessionOptions.put("contributed", contributed);
+        }
+        if (!packCapabilities.isEmpty()) {
+            // phase8-contracts.md 9.1.4: the pack's ids, beside the contributors'.
+            sessionOptions.put("pack", packCapabilities);
         }
         Map<String, String> capabilityOf = new TreeMap<>();
         List<String> reads = new ArrayList<>();

@@ -328,8 +328,8 @@ abstract class ResolutionChecks {
     /**
      * Item 7, the failures before the bind (Q11): scenario A with a {@code requires} entry no target has ends
      * PRECONDITION_FAILED, and run with a pack whose pre-flight is scripted to fail it ends ENVIRONMENT. In both,
-     * nothing is sent to the target after the capability check: the executor's only request is the capability
-     * matrix, {@code run.jsonl} ends with the failed check (no bind, call, cleanup or recover record), and the desk is
+     * nothing is sent to the target after the capability check: the executor's only requests are the capability
+     * matrix and, since Phase 8, the reads of the pack's capability ({@link #beforeRequires()}), {@code run.jsonl} ends with the failed check (no bind, call, cleanup or recover record), and the desk is
      * untouched (signed off, no prompt, and no event since the check began).
      */
     @Test
@@ -338,8 +338,9 @@ abstract class ResolutionChecks {
         long seq = lastSeq();
         String yaml = Files.readString(ScenarioA.yaml(), StandardCharsets.UTF_8);
         String missing = "lending.teleport";
-        String withMissing = yaml.replace("lending.slip]", "lending.slip, " + missing + "]");
-        assertFalse(yaml.equals(withMissing), "scenario A's requires list ends with lending.slip");
+        String withMissing = yaml.replace("lending.returns.ceiling]", "lending.returns.ceiling, " + missing + "]");
+        assertFalse(yaml.equals(withMissing), "scenario A's requires list ends with lending.returns.ceiling"
+                + " (phase8-contracts.md 9.4)");
         Plan unmet = PlanCompiler.compile(withMissing.getBytes(StandardCharsets.UTF_8), ScenarioA.YAML, Runs.PACK);
         assertTrue(unmet.requires().contains(missing), String.valueOf(unmet.requires()));
         Recording agent = new Recording(client());
@@ -971,11 +972,15 @@ abstract class ResolutionChecks {
 
     /**
      * What a run sends before its {@code requires} check (phase6-contracts.md 5.3 step 0b): the capability matrix; in
-     * the hooks leg, where the catalogue is installed by then, also {@code hook.health} and the matrix read again.
+     * the hooks leg, where the catalogue is installed by then, also {@code hook.health} and the matrix read again; then
+     * the reads of the pack's capability {@code lending.returns.ceiling} (phase8-contracts.md 9.1.3, 13.2 items 37 and
+     * 41: the agent's data channel asks once which sources it serves, then reads the setting row), after the
+     * contributors' merge and before {@code requires}.
      */
     List<String> beforeRequires() {
-        return mode() == LendingTarget.Mode.JAVAAGENT_HOOKS ? List.of("capabilities", "hook.health", "capabilities")
-                : List.of("capabilities");
+        return mode() == LendingTarget.Mode.JAVAAGENT_HOOKS
+                ? List.of("capabilities", "hook.health", "capabilities", "data.sources", "data.query")
+                : List.of("capabilities", "data.sources", "data.query");
     }
 
     /**
@@ -1141,6 +1146,12 @@ abstract class ResolutionChecks {
             return target.isLost();
         }
 
+        /** The target's (phase8-contracts.md 9.3.2): no I/O, so nothing is recorded. */
+        @Override
+        public String agentSession() {
+            return target.agentSession();
+        }
+
         @Override
         public void close() {
             // The test owns the target's connection.
@@ -1293,6 +1304,12 @@ abstract class ResolutionChecks {
         @Override
         public List<RowMask> rowMasks() {
             return pack.rowMasks();
+        }
+
+        /** The pack's capabilities (phase8-contracts.md 9.1): scenario A requires {@code lending.returns.ceiling}. */
+        @Override
+        public List<ai.skillroy.testjava.scenario.pack.PackCapability> capabilities() {
+            return pack.capabilities();
         }
     }
 

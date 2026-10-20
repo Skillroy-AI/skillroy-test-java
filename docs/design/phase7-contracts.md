@@ -2100,6 +2100,17 @@ agentHash, contributed}` (`hash` and the file the merged matrix's); the session 
 `session-start.options` when it is not empty. `InferenceContributor` implements both SPIs (one `META-INF/services` entry
 each); `inference.gateway` and `inference.sql` are `OK` with the gateway's name as the strategy.
 
+**Pack capabilities (Phase 8, built 2026-10-19, EP; P8 §9.1).** After the contributors' merge every host also evaluates
+the running pack's own capabilities (`DomainPack.capabilities()`, `PackCapability`, through the one helper
+`PackCapabilities`): ids `<packId>.<name>`, source **`pack:<packId>`** (`CapabilityMatrix.SOURCE_PACK_PREFIX`; `agentOnly()`
+drops them, the wire shape carries no source), every declared id, before `capabilities.json` and `requires`. Unlike a
+contributed `inference.*` id they are **honoured in `replay`**: the evaluation's context (`PreflightContext`) carries no
+bind mode, no inference settings and no gateway, so the answer cannot depend on the mode, and the D19 ledger check still
+catches a model call. An evaluation that throws makes its id `UNAVAILABLE("failed: <SimpleName>")` instead of refusing
+the host (unlike D367: an evaluation reads the environment and may fail for environmental reasons); a declaration
+error refuses it. The `capabilities` record gains `pack` (absent when the pack declares none), the session journals
+`session-start.options.pack` beside `contributed`, and `BaseFacts.caps` shows `source: pack:<packId>` unchanged in code.
+
 ### 8.6 The fifth status: `SKIPPED` (D328)
 
 `Status { PASS, DEGRADED, FAIL, ERROR, SKIPPED }`. A run is `SKIPPED` when its plan's `inference` is `run` and the
@@ -2540,6 +2551,11 @@ action but a tool set's read" above now reads "… a tool set's read, which coun
 - **`SessionOptions.host`** (`Set<String>`, default empty; the fourteenth component, `withHost`; D348): the features the
   host declares to the capability merge of `open` (§8.5), `"vision-session"` among them; journaled in
   `session-start.options`. **`public CapabilityMatrix capabilities()`** answers the merged matrix after `open`.
+- *(Phase 8, built 2026-10-19, EP; P8 §9.3.4, §9.1.5.)* **`SessionOptions.suite`** (`SuiteCache`, default none; the
+  fifteenth component, `withSuite`; the fourteen-argument constructor kept): `open` answers a `SUITE`-scoped pre-flight
+  check and pack capability from it under the connection's agent session; `open` also evaluates the pack's capabilities
+  after the contributors' merge (with the session's data channels, environment id and the pack's settings), so
+  `capabilities()` holds them, and journals their ids in `session-start.options.pack` when there are any.
 
 **As built (Phase 7, VC):** the `read` exclusion list also refuses a primitive the catalogue does not list and a
 `script` primitive; the timeout is 10 s or the descriptor's own, at most 120 s. The credential rule: `inFlight` is set by
@@ -2592,7 +2608,7 @@ method; a host may still pass its own.
 | `run` | `--allow-robot` (sets `RunOptions.robot`); in `--mode approve` the image approvals of §8.7 (the candidate's path and size printed, `--yes` approves); the summary line counts `skipped`; `--json` gains `skipped` and, per result, `skipped: true` with the reason |
 | `call` | `--allow-robot` beside `--confirm` (VC): the raw command sends its arguments to the agent through the client with no `ExecutorSession` and no `CallPolicy`, so without the flag `CallCommand` refuses `via: ROBOT` and `mode: ROBOT` in the arguments before anything is sent; with it the person's typed argument is the second half of the opt-in (§3.4, §11) |
 | `mcp` | `--vision v1 \| v2 \| v3` (the tier of `skillroy_session_ask`'s actor; default `off` unless given), `--allow-robot` (`ServerOptions.robot`; required for `v3`; enables V3 inside `skillroy_session_ask` and nothing else, §9.4); the help says captures reach the client only under `images: true` (unchanged, D159) |
-| `caps` | a `source` column (`agent`, `controller:inference`, `controller:vision`) and the merged matrix when a pack and settings are given (`--pack`, `--inference`), the agent's alone otherwise |
+| `caps` | a `source` column (`agent`, `controller:inference`, `controller:vision`) and the merged matrix when a pack and settings are given (`--pack`, `--inference`), the agent's alone otherwise. *(Phase 8, built 2026-10-19, EP; P8 §9.1.5)* with `--pack` and a single pack also the pack's own capabilities, a row each with `SOURCE pack:<packId>` (table and `--json`), evaluated with no credentials (every source through the agent's `data.query`), the environment `default`, the pack's settings and no cache; a source served over JDBC only then shows `UNAVAILABLE` (gap 149) |
 | JUnit glue | the property `skillroy.robot` (`true` sets `RunOptions.robot`; the glue prints one warning line naming both halves of the opt-in whenever it is true, since a property can sit in a committed build file); `SKIPPED` as `Assumptions.abort` (§8.6) |
 
 Exit codes unchanged (`Exit`); a skipped run is `OK`.

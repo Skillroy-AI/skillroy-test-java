@@ -308,6 +308,9 @@ final class RunCommand implements Command {
                 if (stepTimeoutMs != null) {
                     base = base.withStepTimeout(Duration.ofMillis(stepTimeoutMs));
                 }
+                // phase8-contracts.md 9.3.3: one suite cache per invocation, so that a SUITE pre-flight check or pack
+                // capability is evaluated once for the scenarios of this run.
+                base = base.withSuite(ai.skillroy.testjava.scenario.SuiteCache.create());
                 PrintStream progress = json ? cli.err() : cli.out();
                 for (Loaded input : loaded) {
                     Path dir = out == null ? null : out.resolve(input.plan().scenarioId());

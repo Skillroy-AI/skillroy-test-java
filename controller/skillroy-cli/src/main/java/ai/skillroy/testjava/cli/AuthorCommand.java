@@ -32,6 +32,7 @@ import ai.skillroy.testjava.scenario.BindOptions;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanExecutor;
 import ai.skillroy.testjava.scenario.RunOptions;
+import ai.skillroy.testjava.scenario.SuiteCache;
 import ai.skillroy.testjava.scenario.RunResult;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.Status;
@@ -221,7 +222,11 @@ final class AuthorCommand implements Command {
                     settings.envId(), target, null));
             UnaryOperator<String> scrub = text -> mask.apply(target.scrub(text));
             try (target) {
-                String preflight = Preconditions.preflight(pack, target.client(), credentials, settings.envId());
+                // phase8-contracts.md 9.3.3: one suite cache shared by the pre-flight up front and the resolve and
+                // --run executors, so that a SUITE check runs once for the command.
+                SuiteCache suite = SuiteCache.create();
+                String preflight = Preconditions.preflight(pack, target.client(), credentials, settings.envId(), suite,
+                        target.client().agentSession());
                 if (preflight != null) {
                     throw new CliException(Exit.FAILED, scrub.apply(preflight) + "; the planner was not started");
                 }
@@ -286,7 +291,8 @@ final class AuthorCommand implements Command {
                 String resolveLine;
                 if (plan.needsBindings()) {
                     RunResult bound = new PlanExecutor(pack, target.client(), RunOptions.defaults().withBind(live)
-                            .withObserver(observer).withHooks(hooks), packs.loader()).resolve(plan).result();
+                            .withObserver(observer).withHooks(hooks).withSuite(suite), packs.loader()).resolve(plan)
+                            .result();
                     resolved = passed(bound);
                     resolveLine = resolved ? "check: its slots resolve on " + settings.envId() + " (live, nothing"
                             + " written)" : "check: the bind failed: " + bound.failureKind() + BindArgs.reason(
@@ -304,8 +310,8 @@ final class AuthorCommand implements Command {
                                 + " it offers as tools): " + String.join("; ", refusals);
                     } else {
                         RunResult run = new PlanExecutor(pack, target.client(), RunOptions.defaults().withBind(live)
-                                .withExpectationsOnMaskedValues(true).withObserver(observer).withHooks(hooks),
-                                packs.loader()).run(plan);
+                                .withExpectationsOnMaskedValues(true).withObserver(observer).withHooks(hooks)
+                                .withSuite(suite), packs.loader()).run(plan);
                         ran = passed(run);
                         runText = "check: run once live: " + RunCommand.describe(run, null);
                     }

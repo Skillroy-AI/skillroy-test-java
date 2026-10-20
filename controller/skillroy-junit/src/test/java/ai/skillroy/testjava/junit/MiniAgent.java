@@ -48,6 +48,8 @@ final class MiniAgent implements AgentConnection {
     volatile boolean closed;
     /** What {@code mini.echo} answers; null echoes the text it is given. */
     volatile String echoAnswer;
+    /** The agent session {@link #agentSession()} answers (phase8-contracts.md 9.3.2); null = none. */
+    volatile String session;
 
     @Override
     public RpcResult call(String method, Map<String, Object> params) throws AgentRpcException {
@@ -97,6 +99,11 @@ final class MiniAgent implements AgentConnection {
     @Override
     public Map<String, Object> ping() {
         return Map.of();
+    }
+
+    @Override
+    public String agentSession() {
+        return session;
     }
 
     @Override

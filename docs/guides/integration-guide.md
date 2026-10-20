@@ -688,6 +688,12 @@ capability fails fast with `CAPABILITY_UNAVAILABLE`. Scenarios use the ids in `r
 `lending.loan.authorisations`, which guarded expectations point at. Keep the handles to withdraw them in `uninstall()`
 (A18). `skillroy caps` shows the matrix; each run archives it as `capabilities.json` (P6 §6.4).
 
+*(Phase 8, built 2026-10-19, EP; P8 §9.1, §9.4.)* A fact only the environment holds (a setting row, a table's
+contents) has a second source: the **pack** evaluates it at run start, `DomainPack.capabilities()` (§8.1), reading
+through the run's data channel, overlay-aware through `settings()`, honoured in `replay`, costing no agent change and no
+capability golden. Application configuration a scenario depends on is a capability either way: the decision and the
+choice between the two sources are in §8.8.
+
 ### 6.13 Events
 
 `ctx.events().publish(topic, source, payload)` may be called from any thread, the EDT and application threads
@@ -761,8 +767,9 @@ framework must survive without harming the host).
 | `steps()` | – | the `StepLibrary`: the pack's verbs (§8.2) | P1 §8.3; P5 §9.5 |
 | `syncPolicy()` | – | the ack, ready and prompt topics and their timeouts (§8.2) | P1 §8.3 |
 | `facts()` | – | `FactProvider`s: fact roots for expectations (§8.3) | P1 §8.3, §8.4 |
-| `promptPolicy()` | `PromptPolicy.FAIL` | what to do with a prompt no step expected | P1 §8.3 |
-| `preflight()` | none | `PreflightCheck`s run before the first scenario; a failure is `ENVIRONMENT` | P1 §8.3 |
+| `promptPolicy()` | `PromptPolicy.FAIL` | what to do with a prompt no step expected, unless `on_prompt: {unexpected: fail}` | P1 §8.3; P8 §9.2 |
+| `preflight()` | none | `PreflightCheck`s run before each scenario; scope `SUITE` once per suite and agent start; a failure is `ENVIRONMENT` | P1 §8.3; P8 §9.3 |
+| `capabilities()` | none | `PackCapability`s: environment facts the pack contributes to the matrix, ids `<packId>.<name>`, source `pack:<packId>`, honoured in `replay` (§6.12, §8.8) | P8 §9.1 |
 | `recover(agent)` | nothing | return the application to idle after a scenario that did not pass | P1 §8.3 |
 | `resolution()` | empty | the `ResolutionCatalogue`: query kinds, resolvers, verifiers, oracles, cross-checks, value loaders (§8.4) | P2 §6; P3 §5 |
 | `fingerprinter()` | none | the `EnvFingerprinter` (§8.5) | P2 §6.6, §8.2 |
@@ -777,6 +784,8 @@ framework must survive without harming the host).
 Two further contribution points sit beside the pack, found by `ServiceLoader` on the pack's class loader:
 `ResolverContributor` (a module contributes resolvers, as `skillroy-inference` contributes `inference.sql`, P5 §5.5) and
 `CapabilityContributor` (controller-side capabilities merged into the matrix; ids must start with `inference.`, P7 §8.5).
+A pack's own capabilities are not contributors: they are the member `capabilities()`, their ids start with
+`<packId>.` and their source is `pack:<packId>` (Phase 8, built 2026-10-19, EP; P8 §9.1).
 
 There is no MCP tool-pack member (design §3.6 lists one as "later"): the MCP server projects the pack's verbs as tools
 named `<domain>_<verb>` with schemas from `StepLibrary.argsSchema`, and the base primitives by policy (P5 §9.3, §9.5).
@@ -811,10 +820,16 @@ that answers a prompt is marked as handling it; a verb that opens a session adds
   the path grammar (`loan.lines[code=$item.code].amount`, P1 §8.4). The base's own roots are `app`, `ui`, `dialogs`,
   `caps`, `devices`, `web` and `hooks` (`BaseFacts`; P1 §8.4; P3 §3.4; P4 §6.2; P6 §6.3).
 - `PromptPolicy.onUnexpectedPrompt` answers `HANDLED`, `IGNORE` or `FAIL` for known interrupting prompts (a session
-  lock, a reminder) deterministically (design §3.5).
+  lock, a reminder) deterministically (design §3.5). A scenario overrides it with `on_prompt: {unexpected: fail}`;
+  `on_prompt: {unexpected: pack}` names the pack's policy explicitly; those are the two values that load (Phase 8,
+  built 2026-10-19, EP; P8 §9.2: any other value is refused, where it used to select the pack's policy silently).
 - `PreflightCheck`s check the environment (backend reachable, data present, device usable) through a context that
-  offers the agent, the data channel, the environment id and the pack's settings; a failure is one `environment`
-  failure, not one per scenario.
+  offers the agent, the data channel, the environment id and the pack's settings; a failure is `ENVIRONMENT` for the
+  scenario. *(Phase 8, built 2026-10-19, EP; P8 §9.3.)* They run before each scenario (the default scope,
+  `SCENARIO`); a check whose fact belongs to the suite returns `CheckScope.SUITE` from `scope()` and runs once per
+  suite, environment and agent start (the JUnit stream, the CLI invocation, the MCP server): a `SUITE` check that failed
+  fails every later scenario of the suite without running again (`... (checked once for this suite)`), so a transient
+  failure fails the suite. Keep `SCENARIO` checks cheap, and keep `SCENARIO` for anything that may recover.
 - `recover(agent)` must be bounded and event-driven: the sample answers any open prompt, cancels an open transaction and
   signs off, at most 20 actions and 60 s (P1 §9.3).
 
@@ -896,7 +911,7 @@ steps:
 verify:
   - db.loan_line: { where: { loan_id: $loan.id, item_code: $item.code }, returned: true, amount: $oracle.returnLine }
   # … three more checks
-on_prompt: { unexpected: fail }
+on_prompt: { unexpected: fail }       # fail | pack (default: the pack's policy); nothing else loads
 timeouts: { step: 30s }
 ```
 
@@ -933,6 +948,23 @@ fail the build when it is stale: `skillroy compile --check` exits 1 for a missin
   what it can do without: `{ gte: 1, capability: hook.limit.applied }`; when the capability is not `OK` the expectation
   is skipped and the best outcome is `DEGRADED` (B14; P1 §8.4). The sample's scenario E guards its hook expectations
   this way and passes with hooks on, `DEGRADED` with hooks off (P6 §6.3).
+- **Application configuration a scenario depends on is a capability** (Phase 8, built 2026-10-19, EP; P8 §9.4, gap 24):
+  name it in `requires:` when the scenario cannot run without it (`PRECONDITION_FAILED` before anything mutating is
+  sent, before pre-flight, bind and the start mark), or in a guard when one piece of evidence depends on it
+  (`DEGRADED`). There is no `preconditions:` key: one matrix states everything a scenario needs, `skillroy caps` shows
+  it, each run archives it, the `caps` root reads it and the scenario schema lists the ids. Two sources, the layer's
+  choice per fact: the **agent module probes** the setting in process (`ctx.capabilities().declare(id, probe)`, or
+  `set(…)` from the application's own change notification when it can change while the target runs; one id per
+  condition, the value in the name when needed, `<module>.setting.<name>.<value>`; it costs the capability goldens an
+  id each, and a probe runs at readiness and on `reprobe` only, so a mirrored setting goes stale unless the module
+  `set()`s it on change), or the **pack evaluates** it from the environment at run start (`DomainPack.capabilities()`,
+  `PackCapability`: read-only through the data channel, overlay-aware through `settings()`, honoured in `replay`, no
+  agent change and no golden; `SUITE` scope for a slow fact). The sample: `lending.returns.ceiling` is the pack's
+  ("the desk has a system maximum return configured"), and scenario A names it in `requires:`; a guard reads the same
+  way, `"db.loan_authorisation": { where: { loan_id: $returned.id }, rows: 1, capability: lending.returns.ceiling }`.
+  Ids carry no arguments. **The namespace:** the agent module and the pack of one domain share the prefix `<packId>.`,
+  and only an id both declare is a conflict (it refuses every run naming both): give the pack's ids a leaf the module
+  never declares, and run `skillroy caps --pack <jar>` before CI, which shows both sides in one table.
 - Classification is deterministic and happens before any model sees a failure (design §3.5): `ASSERTION` and
   `SYNC_TIMEOUT` are `FAIL`; `PRECONDITION_FAILED`, `REBIND_NEEDED`, `RESOLUTION_FAILED`, `ORACLE_SUSPECT`,
   `TARGET_RESTARTED`, `AGENT_LOST`, `ENVIRONMENT` are `ERROR`; `MODAL_OPEN` and `INPUT_REJECTED` from a step call are
@@ -1358,7 +1390,6 @@ From TODO "Open SPI and DSL gaps" (read the row for the proposed shape):
 | 19 | plans are linear: no "only if the next ready event matches" step |
 | 21 | event expectations are limited (no negated wait, no match inside a string) |
 | 22 | pack verbs cannot declare rung ladders |
-| 24 | a scenario cannot require an application setting beyond launch properties |
 | 35, 39, 43, 44 | a view-less browser without a seed is invisible; hidden JCEF has no bitmap; JCEF before 2024-01; windowed JCEF on Java 8 |
 | 50 | a class behind a strict-delegation loader cannot be hooked |
 | 77, 78, 81 | no Robot key input; HiDPI unverified; no key input into a page through `web.pointer` |

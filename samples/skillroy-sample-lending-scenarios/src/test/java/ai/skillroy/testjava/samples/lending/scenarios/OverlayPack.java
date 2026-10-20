@@ -189,4 +189,10 @@ final class OverlayPack implements DomainPack {
     public List<SqlAllowList> sqlAllowLists() {
         return allowLists;
     }
+
+    /** The pack's capabilities, forwarded (phase8-contracts.md 9.1). */
+    @Override
+    public List<ai.skillroy.testjava.scenario.pack.PackCapability> capabilities() {
+        return pack.capabilities();
+    }
 }

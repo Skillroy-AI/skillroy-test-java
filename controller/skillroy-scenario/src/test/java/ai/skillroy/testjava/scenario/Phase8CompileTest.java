@@ -337,6 +337,46 @@ class Phase8CompileTest {
         assertNull(Matchers.version7Matcher(Map.of("equals", 1L)));
     }
 
+    // ------------------------------------------------------------------------------------------------ onPrompt (EP)
+
+    /** phase8-contracts.md 9.2 (gap 111, D615), 13.1 row 45: the reader's rule, whatever the plan version. */
+    @Test
+    void theReaderRefusesAnOnPromptValueOtherThanFailOrPack() throws Exception {
+        String text = compile("  - poke: {}\n").toJsonText();
+        assertTrue(text.contains("\"onPrompt\": {}"), text);
+        for (String version : List.of("7", "6", "2")) {
+            String plan = text.replace("\"planVersion\": 7", "\"planVersion\": " + version);
+            for (String onPrompt : List.of("{\"unexpected\": \"x\"}", "{\"other\": \"fail\"}",
+                    "{\"unexpected\": \"failWithBundle\"}", "{\"unexpected\": 1}", "{\"unexpected\": \"fail\","
+                            + " \"other\": \"pack\"}")) {
+                Map<String, Object> json = parse(plan);
+                json.put("onPrompt", parse(onPrompt));
+                String why = reason(json);
+                assertTrue(why.startsWith("invalid plan: onPrompt.unexpected must be fail or pack, found "), version
+                        + " " + onPrompt + ": " + why);
+            }
+            for (String value : List.of("fail", "pack", " FAIL ")) {
+                Map<String, Object> json = parse(plan);
+                json.put("onPrompt", new LinkedHashMap<>(Map.of("unexpected", value)));
+                assertEquals(value, Plan.fromJson(json).onPrompt().get("unexpected"), version + " " + value);
+            }
+            Map<String, Object> json = parse(plan);
+            assertEquals(Map.of(), Plan.fromJson(json).onPrompt(), "no key: the pack's policy");
+        }
+    }
+
+    /** phase8-contracts.md 9.2: the compiler copies the loader's normalised value, so a plan holds fail or pack. */
+    @Test
+    void aCompiledPlanHoldsTheNormalisedValue() throws Exception {
+        Plan fail = PlanCompiler.compile(("scenario: t\npack: toy\non_prompt: { unexpected: ' Fail' }\nsteps:\n"
+                + "  - poke: {}\n").getBytes(StandardCharsets.UTF_8), "t.yaml", pack);
+        assertEquals(Map.of("unexpected", "fail"), fail.onPrompt());
+        Plan packPolicy = PlanCompiler.compile(("scenario: t\npack: toy\non_prompt: { unexpected: PACK }\nsteps:\n"
+                + "  - poke: {}\n").getBytes(StandardCharsets.UTF_8), "t.yaml", pack);
+        assertEquals(Map.of("unexpected", "pack"), packPolicy.onPrompt());
+        assertEquals(packPolicy.toJsonText(), Plan.parse(packPolicy.toJsonText()).toJsonText());
+    }
+
     // ------------------------------------------------------------------------------------------------ JSON helpers
 
     private interface Edit {

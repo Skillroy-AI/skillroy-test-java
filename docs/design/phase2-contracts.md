@@ -317,6 +317,13 @@ as built 2026-10-02, the pack loader's test is the public `DomainPacks.reservedI
 that declares an id with it is refused ERROR / ENVIRONMENT at the merge (`CapabilityMerge`), and a contributed id that two
 contributors answer is refused naming both.
 
+*(Phase 8, built 2026-10-19, EP; P8 §9.1.2, §9.1.6.)* A pack's own capability ids (`DomainPack.capabilities()`) are
+`<packId>.<name>`, `name` matching `[a-z0-9]+([.-][a-z0-9]+)*`, at most 128 characters; since the pack id `inference` is
+reserved, no pack id starts with `inference.`. The agent module of the same domain declares `<packId>.*` ids too, so
+the namespace is shared and the enforceable rule is **equality**: an id both the agent and the pack declare, or a
+contributor and the pack, refuses the run naming both; a prefix is never a conflict. The guide advises a leaf the
+module never declares and `skillroy caps --pack` (both sides in one table) as the check before CI.
+
 ### 3.4 A slot captured from an event
 
 The base verb `waitFor` and the `await` of `call`, `click`, `type` and `press` (A32) accept `capture`:
@@ -1783,8 +1790,12 @@ passes credentials (§13.4 lists them).
 
 ### 11.2 Run sequence (changes to P1 §8.5 in bold)
 
-1. `requires` and `launchProperties`;
-2. pre-flight;
+1. `requires` and `launchProperties`; *(Phase 8, built 2026-10-19, EP; P8 §9.1.3)* before `requires`, after the
+   contributors' merge, the running pack's capabilities are evaluated into the matrix (reads only, through the run's
+   data channel; honoured in `replay`);
+2. pre-flight; *(Phase 8, built 2026-10-19, EP; P8 §9.3)* through `Preflight`, a `SUITE`-scoped check answered from
+   the host's suite cache (`RunOptions.suite`) under the connection's agent session, so it runs once per suite,
+   environment and agent start; a `SCENARIO` check, the default, runs in every run, as before;
 3. **bind (§8); check that every `db` source is served;**
 4. the start mark;
 5. steps: **before a call is sent, the executor names its secret arguments in `_meta.secretParams` (A34, §11.4)**;
@@ -2094,7 +2105,7 @@ New commands:
 
 | Command | Does |
 |---|---|
-| `resolve <yaml\|plan.json\|dir>… [--env <id>] [--bindings <dir>] [--credentials <file>] [--yes] [--approved-by <label>] [--dry-run] [--pack <jar>]… [--json]` | connects, checks `requires` and launch properties, runs pre-flight, then binds each scenario in `approve` mode, checks that every `db` source is served (since 2026-10-03) and stops: no step runs, no cleanup call is sent and `recover` is not called. `--dry-run` binds in `live` mode: it prints what would be written and writes nothing. Scenarios that need no bindings are listed as such and skipped |
+| `resolve <yaml\|plan.json\|dir>… [--env <id>] [--bindings <dir>] [--credentials <file>] [--yes] [--approved-by <label>] [--dry-run] [--pack <jar>]… [--json]` | connects, checks `requires` and launch properties, runs pre-flight per scenario (*Phase 8, built 2026-10-19, EP; P8 §9.3.3*: a `SUITE` check once per invocation, the invocation owning one suite cache), then binds each scenario in `approve` mode, checks that every `db` source is served (since 2026-10-03) and stops: no step runs, no cleanup call is sent and `recover` is not called. `--dry-run` binds in `live` mode: it prints what would be written and writes nothing. Scenarios that need no bindings are listed as such and skipped |
 | `diff-bindings <a.bindings.json> <b.bindings.json> [--json]` and `diff-bindings --bindings <dir> --env <a> --env <b> <scenario-id> [--json]` | offline (no agent): prints the `BindingsDiff` of two files, one line per change, grouped by slot. For reviewing a re-resolution, and for comparing two environments |
 | `re-resolve`, `mcp`, `author`, `triage`, `session` (Phase 5, built 2026-10-08; P5 §13.4) | the commands of the AI layer, as P5 §8.2 (`re-resolve`, which refuses to start without a job budget), §9.2 (`mcp`, the MCP server over stdio), §10.2 (`author`, the planner), §11.2 (`triage`, over the output directory of a finished run) and §12.4 (`session`, an interactive session with a REPL or a script) state them. Each takes `--help`, `--json` and the exit codes below unless P5 states otherwise |
 
@@ -2833,7 +2844,7 @@ Numbers are those of the table "Open SPI and DSL gaps" in `../TODO.md`.
 | 19 | Conditional or optional planned calls | deferred; scenario A's prompt sequence is fixed |
 | 21 | Event expectations | deferred |
 | 22 | Rung ladders for pack verbs | deferred |
-| 24 | Scenario-level preconditions on application configuration | deferred; a query that nothing satisfies already reports an unsuitable environment as `RESOLUTION_FAILED`; `PreflightContext` (§6.1) gives a pre-flight the data channel |
+| 24 | Scenario-level preconditions on application configuration | deferred; a query that nothing satisfies already reports an unsuitable environment as `RESOLUTION_FAILED`; `PreflightContext` (§6.1) gives a pre-flight the data channel. **Closed by P8 §9.4 (Phase 8, built 2026-10-19, EP):** application configuration a scenario depends on is a capability, probed by the agent module or evaluated by the pack (`DomainPack.capabilities()`), named in `requires:` or a guard; no `preconditions:` key; the sample's scenario A requires `lending.returns.ceiling` |
 | 28 | Pack-defined artifact kinds | deferred |
 | 26 | Oracle cross-check outcomes | Phase 3, with `crossCheck` (Phase 3, built 2026-10-03: a guarded cross-check that cannot run makes `DEGRADED` the best outcome, P3 §6.2, D38) |
 

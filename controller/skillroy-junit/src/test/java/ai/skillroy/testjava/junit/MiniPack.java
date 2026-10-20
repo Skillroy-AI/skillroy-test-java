@@ -20,6 +20,7 @@ import ai.skillroy.testjava.scenario.pack.CompileContext;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
+import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
 import ai.skillroy.testjava.scenario.resolve.CrossCheck;
@@ -39,6 +40,9 @@ import java.util.Set;
  * application's {@code mini.echo} (phase3-contracts.md 5.1).
  */
 public final class MiniPack implements DomainPack {
+
+    /** The pack's pre-flight checks (none by default; phase8-contracts.md 13.1 row 47 sets a SUITE one). */
+    volatile List<PreflightCheck> preflight = List.of();
 
     @Override
     public String id() {
@@ -73,6 +77,11 @@ public final class MiniPack implements DomainPack {
     @Override
     public List<FactProvider> facts() {
         return List.of();
+    }
+
+    @Override
+    public List<PreflightCheck> preflight() {
+        return preflight;
     }
 
     @Override

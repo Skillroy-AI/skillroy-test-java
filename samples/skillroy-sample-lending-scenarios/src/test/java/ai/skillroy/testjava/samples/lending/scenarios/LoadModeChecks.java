@@ -33,6 +33,7 @@ import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.LoadMode;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
+import ai.skillroy.testjava.samples.lending.pack.LendingPack;
 import ai.skillroy.testjava.scenario.BindingsFile;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.JunitXmlReporter;
@@ -896,9 +897,11 @@ abstract class LoadModeChecks {
             assertEquals(CapabilityState.UNAVAILABLE, archived.get(id).state(), id);
             assertEquals("replay", archived.get(id).reason(), id);
         }
+        // phase8-contracts.md 9.1.4: and the pack's own capability, which the agent's matrix never holds.
         assertEquals(agent.all().keySet(), archived.agentOnly().all().keySet().stream().filter(
-                id -> !contributed.contains(id)).collect(Collectors.toSet()),
-                "the archive is the agent's matrix plus the contributed ids");
+                id -> !contributed.contains(id) && !id.equals(LendingPack.CAP_RETURNS_CEILING))
+                .collect(Collectors.toSet()), "the archive is the agent's matrix plus the contributed ids and the"
+                + " pack's");
     }
 
     // ------------------------------------------------------------------ JUnit glue
@@ -950,6 +953,25 @@ abstract class LoadModeChecks {
             List<Map<String, Object>> live = Runs.runLog(ItEnv.runDir(mode().slug, "junit-glue")
                     .resolve("vision-live-only"));
             assertEquals("SKIPPED", live.get(live.size() - 1).get("status"));
+            // phase8-contracts.md 9.3, 13.2 item 39: the stream is the suite, so the pack's SUITE check
+            // lending.database ran once, in the first scenario that reached the pre-flight, and every later one was
+            // answered from the stream's cache.
+            List<Object> cached = new ArrayList<>();
+            for (String name : names) {
+                Path runDir = ItEnv.runDir(mode().slug, "junit-glue").resolve(name);
+                if (!Files.isRegularFile(runDir.resolve("run.jsonl"))) {
+                    continue;
+                }
+                for (Map<String, Object> record : Runs.runLog(runDir)) {
+                    if ("preflight".equals(record.get("type"))) {
+                        assertEquals("suite", record.get("scope"), name + ": " + record);
+                        cached.add(record.get("cached"));
+                    }
+                }
+            }
+            assertTrue(cached.size() > 1, "the scenarios that reached the pre-flight: " + cached);
+            assertEquals(List.of(false), cached.subList(0, 1), "the first evaluation: " + cached);
+            assertFalse(cached.subList(1, cached.size()).contains(false), "every later one cached: " + cached);
             assertSignedOff();
         }));
         return checked.stream();
@@ -973,6 +995,75 @@ abstract class LoadModeChecks {
             assertEquals(2L, lendingState(second).get("engineListeners"), "the window's listener and one agent's");
         }
         assertEquals(2L, lendingState(client()).get("engineListeners"));
+    }
+
+    // ------------------------------------------------------------------ pack capabilities (EP)
+
+    /**
+     * phase8-contracts.md 9.1, 9.3, 13.2 item 36 (every mode, the seed-A desk): a {@code basic-loan} run's
+     * {@code capabilities.json} holds the pack's {@code lending.returns.ceiling OK}, its {@code capabilities} record
+     * lists it under {@code pack} ({@code scope: scenario, cached: false}) beside the contributors' ids; a scenario
+     * asserting {@code caps[id=lending.returns.ceiling].source: pack:lending} passes; the run's one {@code preflight}
+     * record is {@code lending.database}, {@code SUITE}, not cached (each run here has its own options and no cache).
+     */
+    @Test
+    @Order(177)
+    void thePacksCapabilityIsInTheMatrixAndThePreflightIsSuiteScoped() throws Exception {
+        Path dir = ItEnv.runDir(mode().slug, "pack-capability");
+        Runs.Outcome loan = Runs.run(client(), Runs.committed("basic-loan"), dir);
+        Runs.assertPassedWithoutSleeping(loan);
+        CapabilityMatrix archived = CapabilityMatrix.fromJson(Json.parseObject(Files.readString(dir.resolve(
+                "capabilities.json"), StandardCharsets.UTF_8)));
+        assertEquals(CapabilityState.OK, archived.get(LendingPack.CAP_RETURNS_CEILING).state(),
+                String.valueOf(archived.get(LendingPack.CAP_RETURNS_CEILING)));
+        Map<String, Object> record = Runs.capabilitiesRecord(dir);
+        assertEquals(List.of("inference.gateway", "inference.sql", "inference.vision"), record.get("contributed"),
+                "the contributors' ids, the pack's apart");
+        List<?> pack = (List<?>) record.get("pack");
+        assertEquals(1, pack.size(), String.valueOf(record));
+        Map<?, ?> entry = (Map<?, ?>) pack.get(0);
+        assertEquals(LendingPack.CAP_RETURNS_CEILING, entry.get("id"));
+        assertEquals("OK", entry.get("state"));
+        assertEquals("scenario", entry.get("scope"));
+        assertEquals(Boolean.FALSE, entry.get("cached"));
+        assertFalse(entry.containsKey("error"));
+        List<Map<String, Object>> preflight = Runs.runLog(dir).stream().filter(r -> "preflight".equals(
+                r.get("type"))).toList();
+        assertEquals(1, preflight.size(), String.valueOf(preflight));
+        assertEquals(LendingPack.PREFLIGHT_DATABASE, preflight.get(0).get("id"));
+        assertEquals(Boolean.TRUE, preflight.get(0).get("ok"));
+        assertEquals("suite", preflight.get(0).get("scope"));
+        assertEquals(Boolean.FALSE, preflight.get(0).get("cached"));
+        assertSignedOff();
+
+        ai.skillroy.testjava.scenario.Plan source = ai.skillroy.testjava.scenario.PlanCompiler.compile((
+                "scenario: pack-capability-source\npack: lending\nsteps:\n  - expect: { \"caps[id="
+                + LendingPack.CAP_RETURNS_CEILING + "].source\": \"pack:lending\", \"caps[id="
+                + LendingPack.CAP_RETURNS_CEILING + "].state\": OK }\n").getBytes(StandardCharsets.UTF_8),
+                "pack-capability-source.yaml", Runs.PACK);
+        Runs.Outcome caps = Runs.run(client(), source, ItEnv.runDir(mode().slug, "pack-capability-source"));
+        assertEquals(Status.PASS, caps.result().status(), caps.describe());
+        assertSignedOff();
+
+        // 13.2 item 41, the merge order (hooks, then the contributors, then the pack): what a run sends before an
+        // unmet requires is the matrix (and in the hooks leg step 0b's hook calls), then the pack's reads, last.
+        ai.skillroy.testjava.scenario.Plan unmet = ai.skillroy.testjava.scenario.PlanCompiler.compile((
+                "scenario: pack-capability-order\npack: lending\nrequires: [lending.teleport]\nsteps: []\n")
+                .getBytes(StandardCharsets.UTF_8), "pack-capability-order.yaml", Runs.PACK);
+        ResolutionChecks.Recording recording = new ResolutionChecks.Recording(client());
+        Runs.Outcome order = Runs.run(recording, unmet, ItEnv.runDir(mode().slug, "pack-capability-order"));
+        assertEquals(FailureKind.PRECONDITION_FAILED, order.result().failureKind(), order.describe());
+        List<String> sent = recording.sent;
+        int reads = sent.indexOf("data.sources");
+        assertTrue(reads > 0, "the pack's reads: " + sent);
+        assertEquals(List.of("data.sources", "data.query"), sent.subList(reads, sent.size()),
+                "the pack's reads come last, and nothing after them: " + sent);
+        assertTrue(sent.subList(0, reads).stream().allMatch(m -> m.equals("capabilities") || m.startsWith("hook.")),
+                "before them the matrix and step 0b only: " + sent);
+        if (!hooksLeg()) {
+            assertEquals(List.of("capabilities", "data.sources", "data.query"), sent);
+        }
+        assertSignedOff();
     }
 
     // ------------------------------------------------------------------ item 7

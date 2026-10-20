@@ -380,7 +380,7 @@ The primary surface is YAML:
 | `oracle` (Phase 2, built 2026-10-02) | committed Java functions over slots |
 | `steps` | verbs from the pack's step library, with `expect` blocks |
 | `verify` | post-conditions over in-process facts and stored rows |
-| `on_prompt` | what to do with prompts the steps did not expect: `fail`, or the pack's policy |
+| `on_prompt` | what to do with prompts the steps did not expect: `fail`, or `pack` (the pack's policy, the default); no other value loads (Phase 8, built 2026-10-19, EP; P8 §9.2) |
 | `artifacts` | evidence to keep even on success (Phase 1: `capture`) |
 | `timeouts` | step timeout (default 10 s) |
 | `ui` (1.x, built 2026-10-02; A29) | click fidelity for the scenario: `{ clickRung: ACTION \| COMPONENT, strict: bool }`; absent means `ACTION`, not strict (§3.7) |
@@ -512,6 +512,7 @@ interface DomainPack {
   List<PreflightCheck> preflight();   void recover(AgentConnection agent);                                        // Phase 1
   ResolutionCatalogue resolution();   EnvFingerprinter fingerprinter();                                         // Phase 2 (built)
   List<StoredTable> storedTables();   List<RowMask> rowMasks();                                                  // Phase 2 (built)
+  List<PackCapability> capabilities();                                                     // Phase 8 (built, P8 §9.1)
   McpToolPack mcpTools();                                                                                        // later
 }
 ```
@@ -524,7 +525,7 @@ A **tenant pack** is a `DomainPack` overlay for one deployment variant of the sa
 
 | Need | Built as |
 |---|---|
-| Pre-flight checks | `DomainPack.preflight()`; a failure is reported as `ENVIRONMENT` |
+| Pre-flight checks | `DomainPack.preflight()`; a failure is reported as `ENVIRONMENT`. (Phase 8, built 2026-10-19, EP; P8 §9.3) A check's `scope()` is `SCENARIO` (every run, the default) or `SUITE` (once per suite, environment and agent start, kept by the host's suite cache) |
 | Scenario lifecycle | a verb registers cleanup calls (`CompileContext.addCleanup`) that the executor runs at scenario end, in reverse order (since Phase 2 only once the run's start mark was written: nothing is sent to the target for a failure before it); `DomainPack.recover(agent)` returns the application to idle after a scenario that did not pass, so the target is not restarted between scenarios |
 | Optional-capability expectations | a `capability:` guard on an expectation plus the `DEGRADED` result (decision B14). §1.3 still holds for everything a scenario cannot do without: that belongs in `requires:` |
 
@@ -662,7 +663,7 @@ Rules for both (browser-spi §C0-§C5): no adapter creates or configures an engi
 
 **SqlGuard** validates every model-written statement before it runs: exactly one SELECT; tables and columns on the pack's allow-list; no DML or DDL; `CALL` only for allow-listed procedures; a deterministic `ORDER BY` with tie-breaker; `LIMIT` at most 200. JSqlParser's dialect coverage is `needs spike` BS6; where a dialect does not parse, the query type stays on tier (a).
 
-**Pre-flight.** A pack declares environment checks (backend reachable, site open, device usable). They run before the first scenario, so an unusable environment fails as `ENVIRONMENT`, not inside a scenario.
+**Pre-flight.** A pack declares environment checks (backend reachable, site open, device usable). They run before each scenario; a `SUITE`-scoped check once per suite, environment and agent start (Phase 8, built 2026-10-19, EP; P8 §9.3: the code always ran them per scenario, and the sentence said "before the first scenario"); an unusable environment fails as `ENVIRONMENT`, not inside a scenario. A pack's capabilities (`DomainPack.capabilities()`, P8 §9.1) are evaluated by every run after the contributors' merge, source `pack:<packId>`, honoured in `replay`.
 
 ### 3.10 Vision and human-like input (bolt-on)
 
@@ -932,7 +933,7 @@ The base defines a contract; a pack supplies the launch recipe for its applicati
 | Zero-LLM assertion | the cost ledger must be empty after a replay run, or the run fails |
 | Phase 7 (built 2026-10-10, VC; P7 §8.5, §8.6) | a plan that needs a model while steps run is `SKIPPED` in `replay` (JUnit `<skipped>`, exit 0, the agent not contacted); a guarded visual check reads `inference.vision UNAVAILABLE (replay)` in the merged matrix and is skipped (the run DEGRADED at best); controller-side capabilities are merged into each run's matrix, every one `UNAVAILABLE (replay)` in `replay` |
 | Hooks (Phase 6, built 2026-10-09, CP; P6 §5.3, §6.1, §6.4) | `-Dskillroy.hooks=auto\|on\|off` (the JUnit glue) or `--hooks` (the CLI): `auto`, the default, installs the pack's catalogue when the target's hooks module is loaded, once per target and idempotent by hash; a `replay` run against an armed stub is ERROR / ENVIRONMENT. Every run's directory holds `capabilities.json`, which is what tells a hooks-on run from a hooks-off one |
-| junit.xml | one testcase per scenario, plus one `environment` testcase for handshake, backend and pre-flight failures and a credentials file that cannot be loaded, so an unusable environment is one failure, not one per scenario. (Phase 2 contract, built 2026-10-02: a fingerprint failure is reported per scenario, because bindings files go stale per scenario) |
+| junit.xml | one testcase per scenario, plus one `environment` testcase for handshake, backend and credentials failures and a credentials file that cannot be loaded, so an unusable environment is one failure, not one per scenario. (Phase 2 contract, built 2026-10-02: a fingerprint failure is reported per scenario, because bindings files go stale per scenario.) (Phase 8, built 2026-10-19, EP; P8 §9.3: a pre-flight failure is reported per scenario, a `SUITE` check's cached failure in every later scenario of the suite without re-running it) |
 | Artifacts (B11) | `run.jsonl`, `agent-events.jsonl`, per-step bundles (snapshot text, PNG, events, state transitions, device output), Playwright `trace.zip`; optional `ffmpeg -f x11grab` video, default off, kept for failed scenarios only. (Phase 6, built 2026-10-09, TL; P6 §10.5) `spans.jsonl` under `<out>/telemetry/` when a run uses `--telemetry file` (the JUnit glue: `-Dskillroy.telemetry=file -Dskillroy.telemetry.out=<dir>`), the trace without a collector |
 | Telemetry (Phase 6, built 2026-10-09, TL; P6 §10.3) | off by default. `--telemetry otlp --telemetry-endpoint https://<collector>` (or `http://127.0.0.1:4318` to a collector on the CI host) exports one trace per invocation, scenarios as children; a backend's token comes from an environment variable that `telemetry.yaml` names, never a file or an option; the JUnit report's `<system-out>traceId=<hex></system-out>` and `run-start` name the trace; an unreachable endpoint never fails or slows the gate beyond the exporter's timeout |
 | Gates | zero-LLM assertion; Java 8 agent vs Java 25 client protocol test; SSE soak; MCP conformance; the sample lending desk on JDK 8 and JDK 25 targets in all three load modes, with `JAVAAGENT` also injected through `JAVA_TOOL_OPTIONS`; the licence-header check (`ci/license-headers.sh`). The Linux test image is `eclipse-temurin:25-jdk` with a JDK 8 mounted for legacy targets. A Java 21 target is no longer run. From Phase 4: the adapter contract kit against a real JCEF browser in that image |

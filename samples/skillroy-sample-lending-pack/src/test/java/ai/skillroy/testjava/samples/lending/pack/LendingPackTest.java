@@ -103,6 +103,99 @@ class LendingPackTest {
     }
 
     /**
+     * phase8-contracts.md 9.1, 12.3, 13.1 row 50: the pack's one capability, {@code lending.returns.ceiling}, with its
+     * description and {@code SCENARIO} scope, and the database check's {@code SUITE} scope; evaluated on the fake desk,
+     * {@code OK} with the row, {@code UNAVAILABLE} naming the row's name without it, the channel's failure as its
+     * reason, and the row's name taken from the settings an overlay gives.
+     */
+    @Test
+    void theReturnsCeilingIsAPackCapabilityReadFromTheDesksSettingRow() throws Exception {
+        assertEquals(List.of(LendingPack.CAP_RETURNS_CEILING), pack.capabilities().stream()
+                .map(ai.skillroy.testjava.scenario.pack.PackCapability::id).toList());
+        assertEquals("lending.returns.ceiling", LendingPack.CAP_RETURNS_CEILING);
+        ai.skillroy.testjava.scenario.pack.PackCapability ceiling = pack.capabilities().get(0);
+        assertEquals("the desk has a system maximum return configured", ceiling.description());
+        assertEquals(ai.skillroy.testjava.scenario.pack.CheckScope.SCENARIO, ceiling.scope());
+        assertEquals(ai.skillroy.testjava.scenario.pack.CheckScope.SUITE, pack.preflight().get(0).scope());
+        assertSame(pack.capabilities(), pack.capabilities(), "the same list on every call");
+
+        FakeDesk desk = new FakeDesk();
+        desk.dataQuery = Map.of("columns", List.of(Map.of("name", "VALUE", "type", "VARCHAR")), "rows",
+                List.of(List.of("250.00")), "rowCount", 1L);
+        ai.skillroy.testjava.protocol.Capability ok = ceiling.evaluate(context(desk,
+                new ai.skillroy.testjava.data.AgentDataChannel(desk), pack.settings()));
+        assertEquals(new ai.skillroy.testjava.protocol.Capability("lending.returns.ceiling",
+                ai.skillroy.testjava.protocol.CapabilityState.OK, null, null), ok);
+        assertEquals(List.of("data.query lending"), desk.calls, "one read of source lending");
+
+        desk.dataQuery = Map.of("columns", List.of(Map.of("name", "VALUE", "type", "VARCHAR")), "rows", List.of(),
+                "rowCount", 0L);
+        ai.skillroy.testjava.protocol.Capability none = ceiling.evaluate(context(desk,
+                new ai.skillroy.testjava.data.AgentDataChannel(desk), pack.settings()));
+        assertEquals(ai.skillroy.testjava.protocol.CapabilityState.UNAVAILABLE, none.state());
+        assertEquals("no system maximum return configured (desk_setting max_return)", none.reason());
+        desk.dataQuery = Map.of("columns", List.of(Map.of("name", "VALUE", "type", "VARCHAR")), "rows",
+                List.of(List.of("not a number")), "rowCount", 1L);
+        assertEquals(ai.skillroy.testjava.protocol.CapabilityState.UNAVAILABLE, ceiling.evaluate(context(desk,
+                new ai.skillroy.testjava.data.AgentDataChannel(desk), pack.settings())).state(), "not a decimal");
+
+        desk.dataQuery = new RpcError(ErrorCodes.NOT_FOUND, "unknown source lending", null);
+        ai.skillroy.testjava.protocol.Capability failed = ceiling.evaluate(context(desk,
+                new ai.skillroy.testjava.data.AgentDataChannel(desk), pack.settings()));
+        assertEquals(ai.skillroy.testjava.protocol.CapabilityState.UNAVAILABLE, failed.state());
+        assertTrue(failed.reason().startsWith("the lending database could not be read (UNKNOWN_SOURCE): "),
+                failed.reason());
+
+        List<String> asked = new ArrayList<>();
+        DataChannel recording = new DataChannel() {
+            @Override
+            public boolean serves(String source) {
+                return true;
+            }
+
+            @Override
+            public Rows query(String source, String sql, List<Object> params, int maxRows, Duration timeout) {
+                asked.add(source + ": " + sql + " " + params + " " + maxRows + " " + timeout);
+                return Rows.of(List.of(new Rows.Column("VALUE", "VARCHAR")), List.of(List.of("90.00")), false);
+            }
+
+            @Override
+            public String kind(String source) {
+                return "jdbc";
+            }
+        };
+        assertEquals(ai.skillroy.testjava.protocol.CapabilityState.OK, ceiling.evaluate(context(new FakeDesk(),
+                recording, pack.settings().with(Map.of(LendingPack.MAX_RETURN_SETTING, "return_ceiling")))).state());
+        assertEquals(List.of("lending: SELECT value FROM desk_setting WHERE name = ? ORDER BY name [return_ceiling] 1"
+                + " PT10S"), asked, "the row an overlay's settings name, one row, 10 s");
+    }
+
+    private static PreflightCheck.PreflightContext context(AgentConnection agent, DataChannel data,
+                                                           ai.skillroy.testjava.scenario.pack.PackSettings settings) {
+        return new PreflightCheck.PreflightContext() {
+            @Override
+            public AgentConnection agent() {
+                return agent;
+            }
+
+            @Override
+            public DataChannel data() {
+                return data;
+            }
+
+            @Override
+            public String envId() {
+                return "seed-a";
+            }
+
+            @Override
+            public ai.skillroy.testjava.scenario.pack.PackSettings settings() {
+                return settings;
+            }
+        };
+    }
+
+    /**
      * The pre-flight reads the staff count through a data channel: through the agent's {@code data.query} in its
      * Phase 1 form, and through the context's channel in the Phase 2 form the executor calls (phase2-contracts.md
      * 6.1, 13.3), so that it passes where source {@code lending} is served over JDBC.

@@ -445,9 +445,13 @@ class RobustnessTest {
             return Map.of();
         });
         pack.promptPolicy = (event, a) -> PromptDecision.ignore("the pack would let it pass");
-        assertEquals(Status.PASS, run("steps:\n  - enter: { value: 1 }\n").status());
-        assertEquals(Status.PASS, run("on_prompt: { unexpected: lenient }\nsteps:\n  - enter: { value: 1 }\n")
-                .status());
+        assertEquals(Status.PASS, run("steps:\n  - enter: { value: 1 }\n").status(), "absent: the pack's policy");
+        // phase8-contracts.md 9.2 (gap 111): a value other than fail or pack no longer selects the pack's policy.
+        ScenarioException lenient = assertThrows(ScenarioException.class,
+                () -> plan("on_prompt: { unexpected: lenient }\nsteps:\n  - enter: { value: 1 }\n"));
+        assertTrue(lenient.getMessage().contains("must be fail or pack"), lenient.getMessage());
+        assertEquals(Status.PASS, run("on_prompt: { unexpected: pack }\nsteps:\n  - enter: { value: 1 }\n")
+                .status(), "pack: the pack's policy, spelled out");
         assertEquals(Status.FAIL, run("on_prompt: { unexpected: FAIL }\nsteps:\n  - enter: { value: 1 }\n")
                 .status());
     }

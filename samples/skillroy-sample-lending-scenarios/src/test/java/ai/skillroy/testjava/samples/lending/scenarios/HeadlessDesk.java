@@ -110,6 +110,8 @@ final class HeadlessDesk implements AgentConnection {
     /** The read-only account's password: test-local, the database has no listener. */
     private static final String READER_PASSWORD = "Headless-Desk-Reader-6243";
     private static final AtomicInteger DATABASES = new AtomicInteger();
+    /** Numbers the desks' agent sessions (phase8-contracts.md 9.3.2): one per launch, as one per agent start. */
+    private static final AtomicInteger SESSIONS = new AtomicInteger();
     private static final long DEFAULT_ACK_MS = 5000L;
     private static final List<String> MUTATING = List.of("lending.input", "lending.prompt.answer");
     private static final List<String> PRIMITIVES = List.of("lending.access.check", "lending.deposit",
@@ -134,6 +136,8 @@ final class HeadlessDesk implements AgentConnection {
     private long seq;
     /** The primitives asked, in order (the executor's {@code evt.query} and {@code trace.mark} included). */
     final List<String> calls = new ArrayList<>();
+    /** This launch's agent session (phase8-contracts.md 9.3.2): a new desk is a new agent start. */
+    private final String session = "headless-desk-" + SESSIONS.incrementAndGet();
 
     private HeadlessDesk(Env env, LendingDb db, Engine engine, boolean hooks, boolean swingTree) {
         this.env = env;
@@ -681,7 +685,13 @@ final class HeadlessDesk implements AgentConnection {
 
     @Override
     public Map<String, Object> ping() {
-        return map("ready", true, "protocol", Protocol.VERSION);
+        return map("ready", true, "protocol", Protocol.VERSION, Protocol.KEY_SESSION_ID, session);
+    }
+
+    /** This launch's agent session, also in {@link #ping()} (phase8-contracts.md 9.3.2); no I/O. */
+    @Override
+    public String agentSession() {
+        return session;
     }
 
     /** Stops the engine and shuts the database down. */

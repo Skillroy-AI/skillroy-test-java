@@ -17,7 +17,9 @@
 package ai.skillroy.testjava.samples.lending.scenarios;
 
 import ai.skillroy.testjava.controller.CapabilityMatrix;
+import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.samples.lending.pack.LendingPack;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import ai.skillroy.testjava.scenario.Approver;
 import ai.skillroy.testjava.scenario.BindListener;
@@ -116,6 +118,58 @@ class BranchEndToEndIT {
                 ItEnv.timing("branch scenario=" + id + " status=" + outcome.result().status() + " ms="
                         + outcome.result().duration().toMillis());
             }
+            // phase8-contracts.md 12.3, 13.2 item 40: the pack's capability, the base's, reads the branch's row
+            // return_ceiling through the overlay's settings, and is OK in scenario A's run on the branch desk.
+            Map<String, Object> capabilities = Runs.capabilitiesRecord(ItEnv.runDir(SLUG, ScenarioA.ID + "/replay"));
+            Map<?, ?> ceiling = (Map<?, ?>) ((List<?>) capabilities.get("pack")).get(0);
+            assertEquals(List.of(LendingPack.CAP_RETURNS_CEILING, "OK"), List.of(ceiling.get("id"),
+                    ceiling.get("state")), String.valueOf(capabilities));
+            List<Object> asked = new java.util.ArrayList<>();
+            ai.skillroy.testjava.data.DataChannel agentData = new ai.skillroy.testjava.data.AgentDataChannel(
+                    target.client);
+            ai.skillroy.testjava.data.DataChannel recording = new ai.skillroy.testjava.data.DataChannel() {
+                @Override
+                public boolean serves(String source) throws ai.skillroy.testjava.controller.AgentLostException {
+                    return agentData.serves(source);
+                }
+
+                @Override
+                public ai.skillroy.testjava.protocol.sql.Rows query(String source, String sql, List<Object> params,
+                        int maxRows, java.time.Duration timeout) throws ai.skillroy.testjava.data.DataException,
+                        ai.skillroy.testjava.controller.AgentLostException, InterruptedException {
+                    asked.addAll(params);
+                    return agentData.query(source, sql, params, maxRows, timeout);
+                }
+
+                @Override
+                public String kind(String source) {
+                    return agentData.kind(source);
+                }
+            };
+            ai.skillroy.testjava.protocol.Capability evaluated = pack.capabilities().get(0).evaluate(
+                    new ai.skillroy.testjava.scenario.pack.PreflightCheck.PreflightContext() {
+                        @Override
+                        public ai.skillroy.testjava.controller.AgentConnection agent() {
+                            return target.client;
+                        }
+
+                        @Override
+                        public ai.skillroy.testjava.data.DataChannel data() {
+                            return recording;
+                        }
+
+                        @Override
+                        public String envId() {
+                            return BranchVariant.ENV;
+                        }
+
+                        @Override
+                        public ai.skillroy.testjava.scenario.pack.PackSettings settings() {
+                            return pack.settings();
+                        }
+                    });
+            assertEquals(CapabilityState.OK, evaluated.state(), String.valueOf(evaluated));
+            assertEquals(List.of("return_ceiling"), asked, "the branch's row");
             CapabilityMatrix caps = target.client.capabilities();
             assertTrue(caps.isOk("hook.limit.applied"), String.valueOf(caps.get("hook.limit.applied")));
             Map<String, Object> health = LoadModeChecks.value(target.client.call("hook.health", Map.of(),

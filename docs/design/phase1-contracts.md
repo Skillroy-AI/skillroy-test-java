@@ -1800,8 +1800,15 @@ public interface AgentConnection extends AutoCloseable {          // the seam th
     List<PrimitiveDescriptor> schema() throws AgentLostException;
     Map<String,Object> ping() throws AgentLostException;
     default boolean isLost();                                      // H2 (1.x, built 2026-10-02): the lost latch, see below
+    default String agentSession() { return null; }                 // A98 (Phase 8, built 2026-10-19, EP; P8 §9.3.2)
     @Override void close();                                        // idempotent, never throws
 }
+    // A98 (Phase 8, built 2026-10-19, EP; P8 §9.3.2): agentSession() is the agent start the connection is bound to,
+    // the sessionId its /ping reply carries as last verified; null when unknown (the default); never I/O. A host's
+    // suite cache keeps a SUITE-scoped pre-flight answer or pack capability under it, and a connection that answers
+    // null is never cached for. AgentClient answers the session its connect handshake verified (null before the
+    // first verified ping; unchanged by later pings; a changed session latches the client lost, so one client is one
+    // agent start); wrappers forward it.
 public record CallOptions(String correlationId, Long timeoutMs, boolean confirm, List<String> secretParams) {
     /* defaults(), with…(), and the three-argument constructor of Phase 1 */ }
     // A34 (Phase 2, built 2026-10-02; P2 §11.4): the fourth component secretParams (default empty; the three-argument
@@ -2098,7 +2105,7 @@ steps:                              # each item is a single-key map: verb -> arg
 verify:                             # expectations evaluated after the last step
   - { "loan.change": "3.00" }
   - { "slip.last.text": { contains: "DEPOSIT DUE" } }
-on_prompt: { unexpected: fail }     # fail | <pack-defined policy>
+on_prompt: { unexpected: fail }     # fail | pack (default: the pack's policy)
 artifacts: [capture]                # extra evidence to keep even on success
 timeouts: { step: 30s }
 ```
@@ -2161,6 +2168,12 @@ and scenarios are strict in the same way (P2 §2.1).
 `launchProperties` names system properties the target must have been launched with; a property the application
 merely defaults is "not set". `on_prompt: {unexpected: fail}` (any case) selects `PromptPolicy.FAIL`; any other
 value, and the absence of the key, selects the pack's `promptPolicy()` (the name is not passed to the pack).
+A94 (Phase 8, built 2026-10-19, EP; P8 §9.2): `unexpected` is `fail` or `pack` (ignoring case and surrounding blanks,
+kept in lower case); `pack`, and the absence of the key, select the pack's `promptPolicy()`; **any other value is
+refused** when the scenario is loaded (`'on_prompt.unexpected' must be fail or pack (or leave on_prompt out for the
+pack's policy), found "…"`, at the key's line) and when a plan is read, whatever its version (`onPrompt.unexpected
+must be fail or pack, found …`), so a value that silently meant the pack's policy, `failWithBundle` say, no longer
+loads. Named pack policies are not built (P8 Q52).
 `artifacts`: only `capture` is implemented (kept on success as `artifacts/capture.png`); another kind is logged and
 ignored, and there is no SPI for pack-defined kinds yet. `timeouts` has one key, `step` (`10s`, `500ms`, `2m`, or
 a number of milliseconds; default 10 s).
@@ -2245,6 +2258,8 @@ public interface DomainPack {
     /** Called after a scenario that did not PASS, to bring the application back to a known idle state so the next
      *  scenario can run without a restart. Must be idempotent and bounded. */
     default void recover(AgentConnection agent) throws Exception { }
+    // A95 (Phase 8, built 2026-10-19, EP; P8 §9.1.1): the pack's capabilities, empty by default, read once per host
+    default List<PackCapability> capabilities() { return List.of(); }
 }
 public interface PreflightCheck { String id(); /** null = ok, else the reason */ String check(AgentConnection agent) throws Exception;
     // (Phase 2, built 2026-10-02; P2 §6.1) the entry the executor calls since Phase 2; the
@@ -2252,7 +2267,18 @@ public interface PreflightCheck { String id(); /** null = ok, else the reason */
     // agent's data.query or to a controller-side JDBC source, as every other read does (P2 §7.2):
     default String check(PreflightContext ctx) throws Exception { return check(ctx.agent()); }
     interface PreflightContext { AgentConnection agent(); DataChannel data(); String envId(); }
+    // A95 (Phase 8, built 2026-10-19, EP; P8 §9.3.1): SCENARIO (once per run, the default) or SUITE (once per suite,
+    // environment and agent start, the host's SuiteCache keeping ok or the failure reason)
+    default CheckScope scope() { return CheckScope.SCENARIO; }
 }
+// A95 (Phase 8, built 2026-10-19, EP; P8 §9.1.1): an environment fact the running pack contributes to the matrix,
+// id <packId>.<name> (name [a-z0-9]+([.-][a-z0-9]+)*, at most 128 characters, at most 64 per pack), source pack:<packId>;
+// evaluated by every host after the contributors' merge and before requires, honoured in replay; a throw is
+// UNAVAILABLE("failed: <SimpleName>"), its text in the record's error only.
+public interface PackCapability { String id(); default String description() { return null; }
+    default CheckScope scope() { return CheckScope.SCENARIO; }
+    Capability evaluate(PreflightCheck.PreflightContext ctx) throws Exception; }
+public enum CheckScope { SCENARIO, SUITE }
 /** ackTopic: null when the domain has none (ACK cannot be used then, READY waits for a ready topic only).
  *  promptTopics: topics that mean "the application is asking a question"; the executor applies PromptPolicy to
  *  them. They are usually also ready topics. Defaults to ["prompt.waiting"] when null; an empty list means the
@@ -2318,6 +2344,8 @@ public interface FactProvider { String root(); Object fetch(AgentConnection agen
     // (db.<table>): a pack whose FactProvider claims it fails compilation. No base or sample root uses it.
 
 public interface PromptPolicy {        // what the executor does when a prompt topic arrives that no step expected
+    // A94 (Phase 8, built 2026-10-19, EP; P8 §9.2): on_prompt {unexpected: fail} selects FAIL; {unexpected: pack}, and
+    // no key, the pack's promptPolicy(); no other value loads or reads
     PromptPolicy FAIL = …;             // fails the scenario on every unexpected prompt
     /** May call the agent (to answer the prompt); must be bounded. A null result counts as FAIL. */
     PromptDecision onUnexpectedPrompt(Event promptEvent, AgentConnection agent);
@@ -2436,6 +2464,11 @@ subject over 1 Mi characters refused before the search, through the shared Java 
 evaluated; it is recorded as skipped with the capability's state and reason, and the scenario can no longer be
 `PASS`: its best outcome is `DEGRADED`. Use this only for evidence whose availability genuinely differs between
 targets; anything a scenario cannot do without belongs in `requires:`.
+A97 (Phase 8, built 2026-10-19, EP; P8 §9.4): a guard may name a pack-contributed id (`<packId>.<name>`, source
+`pack:<packId>`, P8 §9.1) like any other. **Application configuration a scenario depends on is a capability**: named in
+`requires:` when the scenario cannot run without it, or in a guard when one piece of evidence depends on it; the agent
+module probes it in process, or the pack evaluates it from the environment at run start (`DomainPack.capabilities()`);
+there is no `preconditions:` key. The sample's scenario A requires `lending.returns.ceiling`.
 
 **Java shapes, as built in Phase 1, and their Phase 2 additions (Phase 2, built 2026-10-02; P2 §5.1).**
 
@@ -2508,7 +2541,12 @@ Run sequence:
    never in `resolve`: the web path, `cdp` or `agent`, is selected by the scenario's `web.path` and recorded in a
    `web.path` record; when the scenario traces, the executor decides here whether a call may carry a secret and then
    opens the path without tracing, P4 §6.4)
-2. run the pack's `preflight()` checks (`ENVIRONMENT`);
+2. run the pack's `preflight()` checks (`ENVIRONMENT`); (A96, Phase 8, built 2026-10-19, EP; P8 §9.3.3: through the
+   one helper `Preflight`, stopping at the first failure; a `SUITE`-scoped check is answered from the host's suite
+   cache, `RunOptions.suite`, under the connection's agent session when the cache holds its answer, and a cached failure
+   fails the run `ENVIRONMENT` with the suffix ` (checked once for this suite)` without running the check; a
+   `SCENARIO` check's `preflight` record is `{id, ok, reason}` as before, a `SUITE` check's adds `scope: "suite"` and
+   `cached`)
 3. bind slots (`Binder`; Phase 1: fixtures only) and check every reference in the plan; an unresolvable `$ref` is
    `RESOLUTION_FAILED` before any step touches the application;
 4. call `trace.mark` with the label `skillroy.scenario.start`. Its sequence number is where the run's waits and
@@ -2675,6 +2713,19 @@ controller-side contributors' capabilities are merged into the matrix (`Capabili
 `agentHash` and `contributed`. An anchored `pointer` call's guard is compared before it is sent; failure files
 `failure/image-<label>-expected.png`, `-actual.png`, `-diff.png`; in `approve` a baseline candidate is written to
 `candidates/image-<label>.png`, approved at its step, and the bindings file is written a second time after the steps.
+
+*(A96, Phase 8, built 2026-10-19, EP; P8 §9.1.3-§9.1.5, §9.3.3.)* In step 1, after the contributors' merge, the running
+pack's capabilities (`DomainPack.capabilities()`) are evaluated into the matrix, every declared id, source
+`pack:<packId>`, honoured in `replay` (the evaluation's context carries no bind mode, no inference settings and no
+gateway), before `capabilities.json` is archived and `requires` is checked: a pack with capabilities therefore sends
+reads (`data.query`, or JDBC) before `requires`, which this section allows (reads only before the start mark; nothing
+mutating, no cleanup, no `recover`). A declaration error (more than 64, an id that is not `<packId>.<name>`, an id twice,
+an id the agent or a contributor holds, capabilities that cannot be read, an answer under another id) is recorded as
+`capabilities {ok: false, error}` and ends the run `ERROR` / `ENVIRONMENT`; an evaluation that throws makes its id
+`UNAVAILABLE("failed: <SimpleName>")`, the exception's masked text going to the log and the record only; a `SUITE`
+capability is answered from `RunOptions.suite`. The `capabilities` record gains `pack`, the evaluated ids sorted
+`{id, state, reason, strategy, scope, cached, error?}`, absent when the pack declares none (the record is then as
+before).
 
 ### 8.6 `skillroy-junit` and `skillroy-cli`
 
@@ -3022,7 +3073,14 @@ instead of trying again.
 check `lending.database` (`data.query` on source `lending` answers and finds staff; since Phase 2 it reads through
 `PreflightContext.data()`, so over JDBC where the environment serves `lending` that way); facts `loan` (->
 `lending.loan`), `state` (-> `lending.state`), `slip` (-> `lending.slip` with the last 10, oldest first, so that
-`slip.last` is the newest), `prompt` (-> `lending.prompt`). Verbs:
+`slip.last` is the newest), `prompt` (-> `lending.prompt`). **A99 (Phase 8, built 2026-10-19, EP; P8 §9, §12.3; the
+version literal `0.7.0` is written in step R):** the pack capability `lending.returns.ceiling` ("the desk has a system
+maximum return configured", scope `SCENARIO`, source `pack:lending`, never in a capability golden): the `desk_setting`
+row named by the setting `lending.maxReturnSetting` (`max_return`; the branch overlay's `return_ceiling`), read through
+the run's data channel, `OK` when one row holds a decimal, else `UNAVAILABLE("no system maximum return configured
+(desk_setting <name>)")`, a failed read `UNAVAILABLE("the lending database could not be read (<kind>): <message>")`;
+the pre-flight check `lending.database` is `SUITE`-scoped; scenario A (`return-over-limit-needs-supervisor`) gains
+`lending.returns.ceiling` at the end of its `requires:`. Verbs:
 
 | Verb | Compiles to |
 |---|---|

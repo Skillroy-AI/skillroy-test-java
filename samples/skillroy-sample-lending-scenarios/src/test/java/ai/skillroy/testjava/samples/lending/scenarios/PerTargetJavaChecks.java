@@ -17,13 +17,16 @@
 package ai.skillroy.testjava.samples.lending.scenarios;
 
 import ai.skillroy.testjava.controller.AgentClient;
+import ai.skillroy.testjava.controller.CapabilityMatrix;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.DataException;
 import ai.skillroy.testjava.data.JdbcDataChannel;
+import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.sql.Rows;
+import ai.skillroy.testjava.samples.lending.pack.LendingPack;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import ai.skillroy.testjava.scenario.Approver;
 import ai.skillroy.testjava.scenario.BindListener;
@@ -184,7 +187,8 @@ abstract class PerTargetJavaChecks {
                 Files.readString(approved.written(), StandardCharsets.UTF_8),
                 "over JDBC the committed file differs in the channel only");
 
-        Runs.Outcome replay = Runs.run(client(), plan, out.resolve("replay-over-jdbc"), bind);
+        ResolutionChecks.Recording recording = new ResolutionChecks.Recording(client());
+        Runs.Outcome replay = Runs.run(recording, plan, out.resolve("replay-over-jdbc"), bind);
         results.add(replay.result());
         Runs.assertPassedWithoutSleeping(replay);
         List<Map<String, Object>> log = Runs.runLog(replay.dir());
@@ -192,6 +196,14 @@ abstract class PerTargetJavaChecks {
         assertEquals(1, preflight.size(), String.valueOf(preflight));
         assertEquals("lending.database", preflight.get(0).get("id"));
         assertEquals(Boolean.TRUE, preflight.get(0).get("ok"), "the pre-flight read over JDBC: " + preflight);
+        // phase8-contracts.md 9.1.3, 13.2 item 38: the pack's capability is evaluated over the controller-side
+        // channel too; no data read of the run reached the agent.
+        CapabilityMatrix archived = CapabilityMatrix.fromJson(Json.parseObject(Files.readString(replay.dir()
+                .resolve("capabilities.json"), StandardCharsets.UTF_8)));
+        assertEquals(CapabilityState.OK, archived.get(LendingPack.CAP_RETURNS_CEILING).state(),
+                String.valueOf(archived.get(LendingPack.CAP_RETURNS_CEILING)));
+        assertFalse(recording.sent.contains("data.query") || recording.sent.contains("data.sources"),
+                "every read went over JDBC: " + recording.sent);
         List<Map<String, Object>> db = records(log, "db");
         assertEquals(List.of("loan", "loan_line", "loan_authorisation"), db.stream().map(r -> r.get("table"))
                 .toList());
@@ -329,7 +341,9 @@ abstract class PerTargetJavaChecks {
         assertTrue(Files.isDirectory(lib), "the launcher's lib/: " + lib);
         assertEquals(List.of(), jarsWithAJdbcDriver(lib), "the launcher's lib/ holds no JDBC driver");
         Path yaml = layout(out.resolve("cli-jdbc").resolve("module"), true);
-        List<String> command = List.of("run", yaml.toString(), "--mode", "replay", "--env", ENV.id,
+        // phase8-contracts.md 9.3.3, 13.2 item 38: basic-loan beside scenario A, one invocation, one suite.
+        Files.copy(ItEnv.scenario("basic-loan.yaml"), yaml.getParent().resolve("basic-loan.yaml"));
+        List<String> command = List.of("run", yaml.getParent().toString(), "--mode", "replay", "--env", ENV.id,
                 "--credentials", jdbcCredentials.toString(), "--pid", String.valueOf(target.pid()),
                 "--discovery-dir", target.discoveryDir.toString(), "--pack", pack.toString());
 
@@ -340,6 +354,13 @@ abstract class PerTargetJavaChecks {
         assertNoModelCall(with);
         List<Map<String, Object>> log = Runs.runLog(withDriver.resolve(ScenarioA.ID));
         assertEquals(Boolean.TRUE, records(log, "preflight").get(0).get("ok"), "pre-flight over JDBC");
+        // The files run in name order: basic-loan evaluated the SUITE check, scenario A was answered from the
+        // invocation's cache.
+        Map<String, Object> first = records(Runs.runLog(withDriver.resolve("basic-loan")), "preflight").get(0);
+        assertEquals(List.of("suite", Boolean.FALSE), List.of(first.get("scope"), first.get("cached")),
+                String.valueOf(first));
+        assertEquals(Boolean.TRUE, records(log, "preflight").get(0).get("cached"), "the second scenario's answer"
+                + " came from the invocation's suite cache: " + records(log, "preflight"));
         List<Map<String, Object>> db = records(log, "db");
         assertEquals(List.of("loan", "loan_line", "loan_authorisation"), db.stream().map(r -> r.get("table"))
                 .toList());
@@ -351,14 +372,25 @@ abstract class PerTargetJavaChecks {
         assertEquals(1, without.exit, shown(without));
         assertTrue(without.out.lines().anyMatch(l -> l.startsWith("ERROR") && l.contains(ScenarioA.ID)),
                 shown(without));
+        assertTrue(without.out.lines().anyMatch(l -> l.startsWith("ERROR") && l.contains("basic-loan")),
+                shown(without));
         assertTrue(without.out.contains("ENVIRONMENT: pre-flight check lending.database: the lending database could"
                 + " not be read (UNAVAILABLE): ") && without.out.contains("source 'lending'"), shown(without));
-        Path failed = withoutDriver.resolve(ScenarioA.ID);
+        // basic-loan reaches the pre-flight and fails it (not cached: the first evaluation); scenario A, which
+        // requires lending.returns.ceiling (phase8-contracts.md 9.4), stops at its requires: the pack's read of
+        // the setting row failed the same way, before the pre-flight (as built, Phase 8, EP).
+        Path failed = withoutDriver.resolve("basic-loan");
         List<Map<String, Object>> preflight = records(Runs.runLog(failed), "preflight");
         assertEquals(1, preflight.size(), String.valueOf(preflight));
         assertEquals(Boolean.FALSE, preflight.get(0).get("ok"));
+        assertEquals(Boolean.FALSE, preflight.get(0).get("cached"));
         assertTrue(String.valueOf(preflight.get(0).get("reason")).contains("(UNAVAILABLE)"), String.valueOf(preflight));
         ResolutionChecks.assertNothingSent(failed);
+        Path unmet = withoutDriver.resolve(ScenarioA.ID);
+        assertTrue(without.out.contains("PRECONDITION_FAILED: unmet requirements: " + LendingPack.CAP_RETURNS_CEILING
+                + ": UNAVAILABLE (the lending database could not be read (UNAVAILABLE): "), shown(without));
+        assertEquals(List.of(), records(Runs.runLog(unmet), "preflight"), "scenario A stops at its requires");
+        ResolutionChecks.assertNothingSent(unmet);
     }
 
     /**

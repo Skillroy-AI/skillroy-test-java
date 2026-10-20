@@ -41,6 +41,7 @@ import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.ScenarioSchema;
 import ai.skillroy.testjava.scenario.SessionOpenException;
 import ai.skillroy.testjava.scenario.SessionOptions;
+import ai.skillroy.testjava.scenario.SuiteCache;
 import ai.skillroy.testjava.scenario.StepJournal;
 import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.observe.RunObservers;
@@ -200,6 +201,13 @@ public final class SkillroyMcpServer implements AutoCloseable {
     private boolean closed;
     private Path outDir;
     private Clock clock;
+    /**
+     * The server's suite cache (phase8-contracts.md 9.3.3): one per server, set on the session's options before it
+     * opens and on every {@code skillroy_scenario_run}'s options, so that a {@code SUITE} pre-flight check or pack
+     * capability is evaluated once for the server's life (per environment and agent start); the session options'
+     * own cache when the caller gave one.
+     */
+    private volatile SuiteCache suite = SuiteCache.create();
     private boolean mutating;
     private CapabilityMatrix capabilities;
     private Map<String, PrimitiveDescriptor> primitives;
@@ -547,7 +555,10 @@ public final class SkillroyMcpServer implements AutoCloseable {
         // features the capability merge of open reads, set before the session opens.
         java.util.Set<String> host = new java.util.TreeSet<>(s.host());
         host.addAll(visionHost(s));
-        return s.withRobot(s.robot() || options.robot()).withHost(host);
+        if (given.suite() != null) {
+            suite = given.suite();
+        }
+        return s.withRobot(s.robot() || options.robot()).withHost(host).withSuite(suite);
     }
 
     /**
@@ -1009,6 +1020,11 @@ public final class SkillroyMcpServer implements AutoCloseable {
 
     Clock clock() {
         return clock;
+    }
+
+    /** The server's suite cache (phase8-contracts.md 9.3.3). */
+    SuiteCache suite() {
+        return suite;
     }
 
     CapabilityMatrix capabilities() {

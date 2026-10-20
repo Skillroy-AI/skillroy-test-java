@@ -17,12 +17,17 @@
 package ai.skillroy.testjava.cli;
 
 import ai.skillroy.testjava.controller.AgentConnection;
+import ai.skillroy.testjava.protocol.Capability;
+import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.pack.AwaitSpec;
+import ai.skillroy.testjava.scenario.pack.CheckScope;
 import ai.skillroy.testjava.scenario.pack.CompileContext;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
+import ai.skillroy.testjava.scenario.pack.PackCapability;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
+import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
 import ai.skillroy.testjava.scenario.resolve.Query;
@@ -39,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The domain pack {@code clitest} the CLI tests run scenarios with, registered through
@@ -50,8 +56,34 @@ import java.util.Set;
  * with the answer in a set, an array and a record. Its one query kind, {@code Staff}, always resolves to the staff
  * member {@code S7} (a {@code java} resolver and a verifier that passes), so that a session can resolve a slot with a
  * credential.
+ *
+ * <p>Phase 8 (phase8-contracts.md 13.1 row 48): a {@code SUITE} pre-flight check {@code clitest.backend} and the pack
+ * capability {@code clitest.env.ready} ({@code OK}, or {@code UNAVAILABLE} with {@link #envUnavailable} as the reason),
+ * each counting its evaluations in a static counter, since every command loads its own instance; {@link #reset()}
+ * before and after a test that reads them.
  */
 public final class CliTestPack implements DomainPack {
+
+    /** The pack capability (phase8-contracts.md 9.1): {@code <packId>.<name>}. */
+    static final String ENV_READY = "clitest.env.ready";
+    /** The {@code SUITE} pre-flight check (phase8-contracts.md 9.3). */
+    static final String BACKEND = "clitest.backend";
+    /** How often {@link #BACKEND} ran, over every instance. */
+    static final AtomicInteger BACKEND_RUNS = new AtomicInteger();
+    /** How often {@link #ENV_READY} was evaluated, over every instance. */
+    static final AtomicInteger ENV_EVALUATIONS = new AtomicInteger();
+    /** The reason {@link #ENV_READY} is {@code UNAVAILABLE} for; null = {@code OK}. */
+    static volatile String envUnavailable;
+    /** Declares {@link #ENV_READY} twice: a declaration error every host refuses. */
+    static volatile boolean declareTwice;
+
+    /** Clears the counters and the knobs. */
+    static void reset() {
+        BACKEND_RUNS.set(0);
+        ENV_EVALUATIONS.set(0);
+        envUnavailable = null;
+        declareTwice = false;
+    }
 
     @Override
     public String id() {
@@ -114,6 +146,51 @@ public final class CliTestPack implements DomainPack {
                 throw new InternalError("pack bug");
             }
         });
+    }
+
+    @Override
+    public List<PreflightCheck> preflight() {
+        return List.of(new PreflightCheck() {
+            @Override
+            public String id() {
+                return BACKEND;
+            }
+
+            @Override
+            public CheckScope scope() {
+                return CheckScope.SUITE;
+            }
+
+            @Override
+            public String check(AgentConnection agent) {
+                BACKEND_RUNS.incrementAndGet();
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public List<PackCapability> capabilities() {
+        PackCapability ready = new PackCapability() {
+            @Override
+            public String id() {
+                return ENV_READY;
+            }
+
+            @Override
+            public String description() {
+                return "the test environment is ready";
+            }
+
+            @Override
+            public Capability evaluate(PreflightCheck.PreflightContext ctx) {
+                ENV_EVALUATIONS.incrementAndGet();
+                String reason = envUnavailable;
+                return reason == null ? new Capability(ENV_READY, CapabilityState.OK, null, null)
+                        : new Capability(ENV_READY, CapabilityState.UNAVAILABLE, reason, null);
+            }
+        };
+        return declareTwice ? List.of(ready, ready) : List.of(ready);
     }
 
     @Override

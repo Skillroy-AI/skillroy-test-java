@@ -6,7 +6,7 @@ scenario: return-over-limit-needs-supervisor
 pack: lending
 tags: [resolution, returns]
 requires: [lending.input, lending.state, lending.loan, lending.loan.authorisations, lending.prompt,
-           lending.prompt.answer, lending.slip]
+           lending.prompt.answer, lending.slip, lending.returns.ceiling]
 resolve:
   systemMax:
     query: SystemLimit

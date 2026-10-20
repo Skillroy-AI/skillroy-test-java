@@ -73,6 +73,8 @@ final class DeskConnection implements AgentConnection {
     private final LocalDate today;
     private final Map<String, Capability> capabilities = new LinkedHashMap<>();
     final List<String> calls = new ArrayList<>();
+    /** The agent session this stand-in answers (phase8-contracts.md 9.3.2): one per instance; null = none. */
+    volatile String session = "desk-connection-" + Integer.toHexString(System.identityHashCode(this));
 
     /**
      * @param db the seeded database
@@ -196,6 +198,12 @@ final class DeskConnection implements AgentConnection {
     @Override
     public Map<String, Object> ping() {
         return map("ready", true, "protocol", Protocol.VERSION);
+    }
+
+    /** {@link #session} (phase8-contracts.md 9.3.2); no I/O, recorded nowhere. */
+    @Override
+    public String agentSession() {
+        return session;
     }
 
     @Override
