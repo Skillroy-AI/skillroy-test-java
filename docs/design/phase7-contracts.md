@@ -2061,9 +2061,11 @@ compiler refuses the second ("the image label 'pad' differs from 'Pad' only in c
 
 ### 8.2 `plan.json` version 6 (D325)
 
-*(Phase 8, built 2026-10-19, EX; P8 §8.2.)* Superseded by version 7: the version rule of this section applied once
-more (a version 6 plan is read as version 7 without the Phase 8 content, which a version below 7 may not hold), and
-from version 7 on an unknown step or call key is refused. The text below describes version 6 as it was built.
+*(Phase 8, built 2026-10-19, EX, ES; P8 §8.2, §2.2, §7.3.)* Superseded by version 7: the version rule of this section
+applied once more (a version 6 plan is read as version 7 without the Phase 8 content, which a version below 7 may not
+hold: a list filter, a dotted filter field, `[json]`, `anyOf`, `containsWhere`, `{has}`, a step's `facts`, and the new
+call keys `accept`, `rungs` and `minRung`), and from version 7 on an unknown step or call key is refused. The text below
+describes version 6 as it was built.
 
 `Plan.VERSION = 6`; the reader accepts 1 to 6 and refuses version-6 content below 6 ("'images' needs a version 6
 plan", "inference 'run' needs a version 6 plan", a `visual` or `image` check likewise, a call's `guard` likewise, the
@@ -2098,9 +2100,6 @@ on a step's swing.pointer only": a cleanup call is sent without looking at its g
 and never evaluated), and an image check with **more than 64 masks** (`ImageMasks.MAX_MASKS`, the compiler's bound);
 the `ImageCheck` constructor enforces the 64 too, so every construction path has the bound (S119). A plan the compiler
 wrote holds none of these, so no committed plan changes.
-
-*(Phase 8, built 2026-10-19, ES; P8 §2.2, §7.3.)* The rule of this section is applied once more for plan version 7 (§8's,
-EX): among its new call keys are `accept`, `rungs` and `minRung`, each refused below 7.
 
 ### 8.3 `region` beside `by`
 

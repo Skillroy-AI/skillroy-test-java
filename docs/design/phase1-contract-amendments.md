@@ -220,5 +220,41 @@ here as well.
 | A64 | the SPIs `RegionResolver`, `CaptureMask`, `SurfaceSource`; `LocatorResolver.describe` | `phase7-contracts.md` §3.6, §3.7; `phase1-contracts.md` §4 |
 | A65 | the agent option `robot` | `phase7-contracts.md` §3.4, §3.9; `phase1-contracts.md` §2.4 |
 | A66 | `WebBrowser.dispatchPointer`, `WebPointerEvent`, `WebCapability.INPUT` built; `web.hitTest`, `web.pointer`; the script library's version 2 | `phase7-contracts.md` §4; `phase4-contracts.md` §3, §4 |
+| A67 | the SPI `InputVeto`: the interface, the route constants, the ancestor rule, fail closed | `phase8-contracts.md` §3.2; `phase1-contracts.md` §4 |
+| A68 | the veto on every input primitive that resolves a target (`INPUT_REJECTED vetoed`, Node and hit-test `vetoed`, the pointer's `VETOED`, the recorder's refusal, the paragraph "Input vetoes"); `AgentModule.info()` shown as `info` in `agent.info.modules[]` | `phase8-contracts.md` §3.2; `phase1-contracts.md` §4, §5, §6 |
+| A69 | the effective visible area: the Locator and snapshot rule, Node `collapsed`, `INVALID_PARAMS collapsed`, the pointer's `not visible`, A27's collapsed root | `phase8-contracts.md` §3.3; `phase1-contracts.md` §6 |
+| A70 | the routed pointer's source (the innermost unclaimed heavyweight), `source` in the hit-test and the pointer, the exit on a source change | `phase8-contracts.md` §3.4; `phase1-contracts.md` §6 |
+| A71 | AWT `Button` and `Checkbox` fired semantically on the ACTION and COMPONENT rungs; the dialog reader takes an AWT `Button` | `phase8-contracts.md` §3.5; `phase1-contracts.md` §6 |
+| A72 | `ThreadPolicy.APP_QUIESCENT`, `QuiescentPoint`, `ThreadPolicyProvider.quiescentPoint()`, `quiescentBudgetMs`, `ThreadBroker.callQuiescent`, the dispatch gates, `agent.info.threads.quiescent`, the one forbidden-thread exemption | `phase8-contracts.md` §4.1; `phase1-contracts.md` §4, §5 |
+| A73 | `ThreadPolicy.LANE`, `Lane`, `ThreadBroker.declareLane`/`callOnLane`, `DataSourceProvider.lane()`, `data.query`'s hand-off, `TIMEOUT` data and per-source gate, `data.sources.lane`, `agent.info.threads.lanes` | `phase8-contracts.md` §4.2; `phase1-contracts.md` §4, §5, §6 |
+| A74 | `QueryControl`, `DataSourceProvider.query/5` and `enforcesTimeout()`, `ReadOnlyJdbc`'s statement sink, the `TIMEOUT` data of a cancelled read | `phase8-contracts.md` §4.3; `phase1-contracts.md` §4, §6; `phase2-contracts.md` §2.2, §7.2 |
+| A75 | `SelectLabels`; the naming and width rule in place of "reported as `c1..cn`"; `DataSourceProvider.columns(String)`; the allow-list hint | `phase8-contracts.md` §4.4; `phase1-contracts.md` §4, §6; `phase2-contracts.md` §7.4; `phase5-contracts.md` §5.2 |
+| A76 | procedures retired: every `CALL`/`EXEC` refused, `SqlAllowList.procedures` reserved and required empty, no catalogue line | `phase8-contracts.md` §4.5; `phase5-contracts.md` §5.2, §5.3, §16.2 |
+| A77 | `MaskPolicy` on the events route (`event:<topic>`, the dotted column) and the publishing thread | `phase8-contracts.md` §5.1; `phase1-contracts.md` §4 |
+| A78 | the ring masks every event at publish (the key rule, the registered policies, the 10,000-scalar budget); A34's events bullet qualified; `agent.info.events` | `phase8-contracts.md` §5.1; `phase1-contracts.md` §5 |
+| A79 | `BrowserMask`; `web.browsers.masksRegistered`; the view-less rule; a masked browser's events, selection and action answers | `phase8-contracts.md` §5.2; `phase4-contracts.md` §3, §4.1-§4.3 |
+| A80 | `CdpOptions.allowDefaultOverrides`; the `web.path` record's `playwright` and `connectOptions` | `phase8-contracts.md` §5.3; `phase4-contracts.md` §5.1, §5.2, §8.2 |
+| A81 | the agent option `hooks.deny` | `phase8-contracts.md` §6.5; `phase1-contracts.md` §2.4 |
+| A82 | the SPI `ClassDeny`; `HookEngine.deny()`; `…agent.api.instrument.CodeSources` | `phase8-contracts.md` §6.2, §6.5, §6.6; `phase1-contracts.md` §4 |
+| A83 | `RpcResult.warnings` and `CallWarning` | `phase8-contracts.md` §7.1; `phase1-contracts.md` §3 |
+| A84 | `Invocation.warn`; `EventBus.publish(…, correlationId)`; the dispatcher collects, caps and redacts warnings | `phase8-contracts.md` §7.1, §7.4; `phase1-contracts.md` §4, §5 |
+| A85 | `DeviceAdapter.rungs(action)`; `device.list` entries' `rungs` | `phase8-contracts.md` §7.6; `phase1-contracts.md` §4, §5 |
+| A86 | the result conventions `InputResult` (and `INPUT_REJECTED data.reason`), `RungResult`, `CompositeResult` | `phase8-contracts.md` §7.2, §7.5, §7.6; `phase1-contracts.md` §3, §9.2 |
+| A87 | `SyncPolicy.ackByInputId`; `PlannedCall.accept/rungs/minRung`; `CompileContext.minRung`; `DomainPack.warningCodes`; the step modifiers and their reserved names | `phase8-contracts.md` §7.3, §7.4; `phase1-contracts.md` §8.1, §8.3 |
+| A88 | the executor's result checks in their order, the records `warning`, `rung`, `rungs`, `prompt.answeredBy`, the rung pre-check, the result components and report lines | `phase8-contracts.md` §7.7; `phase1-contracts.md` §8.5 |
+| A89 | the sample's semantic-input primitives, device, events and capabilities | `phase8-contracts.md` §12; `phase1-contracts.md` §9.2, §9.3 |
+| A90 | `sync.await`'s `match` gains `{has: scalar}`; an invalid `match` is `INVALID_PARAMS`; `PayloadMatch` in `skillroy-protocol` | `phase8-contracts.md` §8.9; `phase1-contracts.md` §4, §5 |
+| A91 | `plan.json` version 7; strict step and call keys from 7 | `phase8-contracts.md` §8.2; `phase1-contracts.md` §8.2 |
+| A92 | the base verb `captureFacts` (reserved); `waitFor`'s `match` validated at compile; the eighth base root `events` | `phase8-contracts.md` §8.6, §8.7, §8.9; `phase1-contracts.md` §8.3 |
+| A93 | list filters, dotted filter fields and `[json]` in paths; the matchers `anyOf` and `containsWhere`; `size` with a nested matcher documented | `phase8-contracts.md` §8.3-§8.5; `phase1-contracts.md` §8.4 |
+| A94 | `on_prompt.unexpected` is `fail` or `pack`; another value refused at load and in the plan reader | `phase8-contracts.md` §9.2; `phase1-contracts.md` §8.1 |
+| A95 | `DomainPack.capabilities()`, `PackCapability`, `CheckScope`, `PreflightCheck.scope()` | `phase8-contracts.md` §9.1.1, §9.3.1; `phase1-contracts.md` §8.3 |
+| A96 | the run sequence: the pack's capabilities after the contributors' merge, a `SUITE` check from the suite cache, `capabilities.pack`, `preflight.scope`/`cached` | `phase8-contracts.md` §9.1.3, §9.3.3; `phase1-contracts.md` §8.5 |
+| A97 | a pack-contributed id may guard; configuration is a capability (no `preconditions:`) | `phase8-contracts.md` §9.4; `phase1-contracts.md` §8.4 |
+| A98 | `AgentConnection.agentSession()`; `AgentClient` answers its verified session | `phase8-contracts.md` §9.3.2; `phase1-contracts.md` §7 |
+| A99 | the sample: `lending.returns.ceiling`, `lending.database` `SUITE`, scenario A's `requires` | `phase8-contracts.md` §12; `phase1-contracts.md` §9.3 |
 
-From A67 the orchestrator assigns any further id at integration.
+A67-A99 are Phase 8's (specified 2026-10-19 and built the same day, P8 §10; each passage is marked "(Phase 8, built
+2026-10-19, <TAG>; P8 §n)" where it lives). The Phase 8 fix wave of 2026-10-20 changed some of these passages in place,
+marked "(Phase 8 security fix, S<nnn>, <TAG>)" or "Fix wave (Phase 8 review, <TAG>, …)" as P7's fixes were, and needed no
+new id. From A100 the orchestrator assigns any further id at integration.

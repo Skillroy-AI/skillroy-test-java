@@ -690,12 +690,13 @@ activation on request, `DISPATCH`) are the base's; the scenario key `ui` chooses
   inside the agent's bounded EDT read, and a throwing veto refuses (fail closed, logged once).
 - Key bindings, mnemonics and menu accelerators are not followed: a key delivered to one component may fire an action
   another component owns (only the delivery target's chain and ENTER's default buttons are asked: every root pane's
-  up to the window, for `swing.key ENTER`, `swing.type {enter}` and a newline in DISPATCH text), so **veto the
+  up to the window, for `swing.key ENTER`, `swing.type {enter}` and a newline in DISPATCH text; a root pane placed off
+  that walk and outside a `JInternalFrame` is not asked, gap 154), so **veto the
   window, or the bound control**; a menu item's own veto does not cover the keyboard of an open menu, so for a menu
   item veto the window (fix wave of the Phase 8 review, FA). A drag released on a vetoed item of an open menu is
   refused at the release (Phase 8 security fix, S155); on the Robot route the release is asked again just before it
   happens and goes to the press point unless allowed, and a popup the application shows after that question is not
-  seen. **A veto on a window or panel does not cover `web.*` input into a browser inside
+  seen (gap 153). **A veto on a window or panel does not cover `web.*` input into a browser inside
   it**; a layer that must keep page input out vetoes nothing more for that in Phase 8 (gap 126).
 - A veto that depends on application state and refuses inside the posted task leaves the step `fired: true` (the
   call already answered "posted"; the refusal is logged and counted in the Swing module's `vetoWithheld`, which
@@ -800,12 +801,11 @@ What masking cannot do is in `SECURITY.md` ("Redaction hides a rectangle, not a 
 whole or not at all"): a mask blanks a rectangle, the layout stays visible, and a component no mask names reaches a
 model as rendered. An application's own Paste control is an ordinary click: mask it (threat model §7).
 
-**Parity of a name-keyed `MaskPolicy` (Phase 8, built 2026-10-19, ET; P8 §4.4).** A row policy keyed by column name
-sees the label the statement gives: a caller who renames a column (`password AS p`) defeats it on a JDBC source, and
-on a positional source too now that its columns take the statement's labels, no weaker. Cover every source id the
-module registers (the sample's `PasswordMask` covers `lending` and `lending-report`).
-
-**(Phase 8 security fixes S160, S163, FB.)** Compare column names without regard to case: a driver reports a label as
+**Parity of a name-keyed `MaskPolicy` (Phase 8, built 2026-10-19, ET, with the Phase 8 security fixes S160, S162,
+S163, FB; P8 §4.4).** A row policy keyed by column name sees the label the statement gives: a caller who renames a
+column (`password AS p`) defeats it on a JDBC source, and on a positional source too now that its columns take the
+statement's labels, no weaker. Cover every source id the module registers (the sample's `PasswordMask` covers `lending`
+and `lending-report`), and compare column names without regard to case: a driver reports a label as
 its database folds it, a positional source keeps the statement's spelling (and `columns(table)` the provider's); the
 agent also asks a policy under a derived label's upper- and lower-case forms. On a positional source a column the
 select list leaves unnamed is asked under the names its item reads (`(password)`, `LOWER(password)`, `password COLLATE
@@ -838,10 +838,10 @@ included, and never blocks; the bus is a bounded ring with increasing sequence n
 `evt.query` and the SSE stream (P1 §4, §5). Publish with your module id as `source` and small payloads (the ring is also
 bounded by characters, `eventRingChars`). A call's result carries the events published on its thread during the call and
 its `seq.before`, so waiting "since `seq.before`" never misses a consequence of the call (P1 §3). Event sinks run on
-the publishing thread and must not block. (Phase 8, P8 §5.1) Every payload is masked before it is stored: a value under a
+the publishing thread and must not block. (Phase 8, built 2026-10-19, EW; P8 §5.1) Every payload is masked before it is stored: a value under a
 secret-looking key becomes `<redacted>`, and the registered `MaskPolicy`s see every scalar as `event:<topic>`; mask
 personal values before you publish all the same, and prove it with `skillroy-junit`'s `OutputScan` (`Scope.EVENTS`)
-over a run. *(Phase 8 security fix S152.)* A planted value that is not digits only is found wherever a non-letter,
+over a run. *(Phase 8 security fix, S152, FD.)* A planted value that is not digits only is found wherever a non-letter,
 non-digit bounds it (so `{name=Smith}`, `(Smith)` and a name with a space inside a sentence are found); a digits-only
 value is found only as a whole string or a separated token, so plant a word or a name, not a number, when the output
 may hold it in Java's map form or `key=value` text. `Scope.EVENTS` reads the `events`-root and `hooks`-root
@@ -1002,8 +1002,9 @@ lowest rung the step allows). A verb whose call has a ladder declares it (`Plann
 `ctx.minRung()` to the primitive (the sample's `deviceScan` passes it in `args.minRung`); a verb that answers a
 question the application may or may not ask compiles to one composite primitive's call (`signOnAny`, `scanChecked`),
 never to a conditional step. A verb whose call always tolerates a caveat pre-accepts it on the call
-(`PlannedCall.withAccept`; the compiler checks the codes as it checks a step's `accept`). Declare your pack's warning codes, `ScenarioPack.warningCodes()` (`<packId>.<NAME>`;
-the compiler refuses a code that does not start with the pack's id).
+(`PlannedCall.withAccept`; the compiler checks the codes as it checks a step's `accept`). Declare your pack's warning
+codes in `DomainPack.warningCodes()` (`<packId>.<NAME>`; the compiler refuses a code that does not start with the pack's
+id).
 
 ### 8.3 Facts, prompts, pre-flight, recovery
 
@@ -1014,7 +1015,12 @@ the compiler refuses a code that does not start with the pack's id).
 - `PromptPolicy.onUnexpectedPrompt` answers `HANDLED`, `IGNORE` or `FAIL` for known interrupting prompts (a session
   lock, a reminder) deterministically (design §3.5). A scenario overrides it with `on_prompt: {unexpected: fail}`;
   `on_prompt: {unexpected: pack}` names the pack's policy explicitly; those are the two values that load (Phase 8,
-  built 2026-10-19, EP; P8 §9.2: any other value is refused, where it used to select the pack's policy silently).
+  built 2026-10-19, EP; P8 §9.2: any other value is refused, where it used to select the pack's policy silently). A
+  prompt a composite primitive answered is not unexpected (Phase 8, built 2026-10-19, ES; P8 §7.5): the executor reads
+  the `seq` of every question the result lists as answered and expects the prompt events with those `seq`s inside the
+  call's window, without asking the `PromptPolicy` (`prompt {expected: true, answeredBy}`); a listed `seq` outside the
+  window vouches for nothing and is logged (`ignoredSeqs`). An unlisted prompt goes to the policy as before, so a
+  composite cannot hide a prompt it did not list.
 - `PreflightCheck`s check the environment (backend reachable, data present, device usable) through a context that
   offers the agent, the data channel, the environment id and the pack's settings; a failure is `ENVIRONMENT` for the
   scenario. *(Phase 8, built 2026-10-19, EP; P8 §9.3.)* They run before each scenario (the default scope,
@@ -1024,12 +1030,6 @@ the compiler refuses a code that does not start with the pack's id).
   failure fails the suite. Keep `SCENARIO` checks cheap, and keep `SCENARIO` for anything that may recover.
 - `recover(agent)` must be bounded and event-driven: the sample answers any open prompt, cancels an open transaction and
   signs off, at most 20 actions and 60 s (P1 §9.3).
-
-*(Phase 8, built 2026-10-19, ES; P8 §7.5.)* A prompt a composite primitive answered is not unexpected: the executor
-reads the `seq` of every question the result lists as answered and expects the prompt events with those `seq`s inside
-the call's window, without asking the `PromptPolicy` (`prompt {expected: true, answeredBy}`); a listed `seq` outside
-the window vouches for nothing and is logged (`ignoredSeqs`). An unlisted prompt goes to the policy as before, so a
-composite cannot hide a prompt it did not list.
 
 ### 8.4 Resolution: queries, resolvers, verifiers, oracles, cross-checks
 
@@ -1143,7 +1143,7 @@ Quote every key that holds `[` (a plain YAML scalar never starts with `[` or `*`
 scenario's own (an open loan, the run's window), not on what an earlier run left. Put a negative check after a sync
 point or in `verify`: an expectation holds at its first true attempt. The plan is version 7.
 
-*(Phase 8 security fixes, FC; P8 §8.3-§8.7.)* Say "none" with a list filter and `{size: 0}`: a single filter that
+*(Phase 8 security fixes, S149, S150, S154, S173, FC; P8 §8.3-§8.7.)* Say "none" with a list filter and `{size: 0}`: a single filter that
 matches twice holds no `exists` form (it is ambiguous, `FAIL`). A regex or a `[json]` text that a bound stops (the 1 s
 budget, a text over 1 Mi characters, a regex recursing once per character such as `(.|\n)*`, a `$slot` regex that
 does not compile) decides nothing, under any `not`: the step ends `ERROR` / `ENVIRONMENT` "expectation could not be
@@ -1721,8 +1721,9 @@ Each step has an exit check. Steps 1-4 can be done in a throwaway spike module b
 
 ### 15.2 Open gaps a layer is likely to meet
 
-From TODO "Open SPI and DSL gaps" (read the row for the proposed shape). (Phase 8, built 2026-10-19, ET: gaps 9, 10
-and 11 are taken, P8 §4.1-§4.3, and their rows are removed here.)
+From TODO "Open SPI and DSL gaps" (read the row for the proposed shape). (Phase 8, built 2026-10-19, ET, ES, EX, EP:
+gaps 9-11, 18, 19, 21, 22 and 24 are taken by Phase 8, P8 §4.1-§4.3, §7, §8, §9.4, and their rows are removed here;
+the rows Phase 8 opened that a layer is likely to meet are added, tagged; P8 §16.2 has them all.)
 
 | Gap | In short |
 |---|---|
@@ -1731,8 +1732,13 @@ and 11 are taken, P8 §4.1-§4.3, and their rows are removed here.)
 | 50 | a class behind a strict-delegation loader cannot be hooked |
 | 77, 78, 81 | no Robot key input; HiDPI unverified; no key input into a page through `web.pointer` |
 | 83, 84 | one baseline per rendering; redaction hides a rectangle, not a value |
+| 126 *(Phase 8, EA)* | an `InputVeto` does not cover `web.*` input into a browser component inside the vetoed window or panel (medium; §6.7) |
 | 140 *(Phase 8, EH)* | a denied subtype loaded after a `^`/`INTERFACE` Byteman submit still receives the trigger (§9.6) |
 | 142 *(Phase 8, ES)* | no conditional planned call (`when`): a flow that cannot be one composite primitive (two packs' primitives, a base verb in the branch) has no conditional step |
+| 146 *(Phase 8, EX)* | the `events` root reads the agent's bus only: a CDP path's own events are not in it (§6.13) |
+| 151 *(Phase 8, FC)* | a client's raw `sync.await` compares an event's unmasked payload by equality: mask a short secret before you publish it (S180, `SECURITY.md`) |
+| 152, 153, 154 *(Phase 8, FA)* | a masked window's or combo's popups are not masked; the Robot route does not see what the application shows after its release question; a root pane off ENTER's walk is not asked (§6.7) |
+| 155 *(Phase 8, FE)* | a browser that becomes masked while it is open sends page data for up to about 2 s after its next event (§6.8) |
 
 ### 15.3 Not verified
 

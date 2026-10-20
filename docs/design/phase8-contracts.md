@@ -1,7 +1,25 @@
 # Phase 8 contracts: the second domain's wave 1 (the input veto, the effective visible area, routed input into heavyweight containers and AWT controls; `APP_QUIESCENT`, named lanes, query cancellation, positional columns and the retired procedure call; event payloads masked at publish, the view-less browser and the Playwright line; hook ownership by code source and the class deny-list; the warning channel, acknowledgement by input, composite primitives and rung ladders; list filters, captured facts, the `events` root and plan version 7; pack capabilities, `on_prompt` values, suite-scoped pre-flight and configuration as a capability)
 
 **Status: specified 2026-10-19, revised the same day after the contract review (three lenses, each with a sceptic; 48
-findings applied, 1 refuted) and rechecked once (15 further corrections); not yet built.** Written after the nine reader maps of 2026-10-19 (kept in the session
+findings applied, 1 refuted) and rechecked once (15 further corrections); built 2026-10-19** in seven packages (EA,
+ET, EW, EH, ES, EX and EP: the early commits of EX, EP, ET and EW first, then the seven bodies in parallel), integrated
+in the order EW, EA, ET, EH (by the orchestrator) and ES, EX, EP (by the integrator EI, with two integration fixes),
+and regenerated once by step R (§2.8, §12.5); every section a package built or deviated from carries an "As built
+(Phase 8, <TAG>)" note. **Code-reviewed 2026-10-19/20:** three lenses with a sceptic each (L1 contract fit and L2 host
+safety, privacy, secrets and bounds on `d25cf02`; L3 tests, determinism and the matrix on `f67402c`, after step R): 16
+distinct findings, 1 high (a `'\n'` in `swing.type` `DISPATCH` text pressing a vetoed default button, found by L1 and
+L2 alike), 6 medium and 9 low, none refuted. **Security-reviewed (delta) 2026-10-20:** the review of §15 over
+everything changed since `223c5fb`, eight lenses with a sceptic each, on `f67402c`: 31 findings S149-S179 (none
+critical, 3 high, 8 medium, 20 low), and S180 (low, latent), which the fix wave opened: **S149-S180, 3 high (S149,
+S173, S174), 8 medium and 21 low**. **Fixed 2026-10-20:** one fix wave of five fixers by area (FA, FB, FC, FD and FE,
+from `f67402c`) fixed all 16 code-review findings and every security finding but two, contract first, each with a test
+that fails on the old code, marked "Fix wave (Phase 8 review, <TAG>, …)" or "(Phase 8 security fix, S<nnn>, <TAG>)":
+S157 (the missing `SECURITY.md` sentences) was closed by the documentation pass (`SECURITY.md`, 2026-10-20), and S180 (a client's raw `sync.await` match on
+an unmasked payload confirming guesses at a short secret) is proposed for acceptance with a release note, its fix
+recorded as gap 151; the five session stand-in recordings were regenerated once more after S175's shared key rule
+(`bdafc52`). The decisions of the build, the integration and step R are D643-D767 and those of the fix wave D768-D810
+(§17); **B38, B39 (these decisions) and B40 (the delta review's sign-off) are open for the owner** (`../DECISIONS.md`).
+Written after the nine reader maps of 2026-10-19 (kept in the session
 notes, not in this repository; `map A §n` to `map I §n` below), which verified every claim of the second domain's wave
 1 against the code at `fcfb8dc` (every `.java` file of `main` equals the tag `v0.1.0`, the released base), and assembled
 from seven section fragments written in parallel under one set of shared defaults by the authors EA (§3), ET (§4), EW
@@ -9,19 +27,21 @@ from seven section fragments written in parallel under one set of shared default
 manner of `phase7-contracts.md`: the contract is changed first, then the code, and the build marks every passage it
 builds or deviates from with an "As built (Phase 8, <TAG>)" note under a two-letter implementer tag (§2.5); the marks
 into the earlier contracts read "(Phase 8, specified 2026-10-19, not yet built; P8 §n)" when the build starts and
-"(Phase 8, built …; P8 §n)" after it. Section references `P1 §n` to `P7 §n` are to the seven earlier contracts, `design
-§n` is the design overview `base-framework-design.md`, `guide §n` is `../guides/integration-guide.md`, `threat model §n`
-is `threat-model.md`. Decisions taken here are **D501 to D642** (§17: D501-D623 are the fragments' decisions in section
-order, D624-D635 the editor's, D636-D642 the reviser's after the contract review); amendments to the frozen Phase 1
-contract are **A67 to A99** (§10), the next free number
-after P7's A61-A66 (none of A67 onwards was used by the Phase 7 build); gaps continue from **126** (§16.2: 126-150 are
-opened here); the security delta review's findings start at **S149** (§15); the plan version becomes **7** (§8.2); the
-bindings file version stays **2**, the script library's version **2**, the fingerprint format **1**; the protocol stays
-**0.2** (§2.1, D624). The questions of §18 are answered provisionally by the orchestrator and recorded as decision
-**B38** (`../DECISIONS.md`); the build's, the review's and the fix wave's decisions will be **B39**; the security delta
-review's sign-off, over everything changed since `223c5fb` (the tree B31 covers), will be **B40** (§15). The second
-domain compiles against `v0.1.0`: nothing here breaks a pack or a module built against that tag (§2.3), and the sample
-is extended behind launch properties and agent options only (§12).
+"(Phase 8, built …; P8 §n)" after it, and where two tags marked one passage the documentation pass merged them into one
+text with both tags in its mark (D765). Section references `P1 §n` to `P7 §n` are to the seven earlier contracts,
+`design §n` is the design overview `base-framework-design.md`, `guide §n` is `../guides/integration-guide.md`, `threat
+model §n` is `threat-model.md`. Decisions taken here are **D501 to D642** (§17: D501-D623 are the fragments' decisions
+in section order, D624-D635 the editor's, D636-D642 the reviser's after the contract review); the build's are
+D643-D767 and the fix wave's D768-D810 (§17); amendments to the frozen Phase 1 contract are **A67 to A99** (§10), the
+next free number after P7's A61-A66 (none of A67 onwards was used by the Phase 7 build), and neither the build nor the
+fix wave needed another (A100 is the next free number); gaps continue from **126** (§16.2: 126-150 are opened here,
+151-155 by the build's and the fix wave's open items); the security delta review's findings are **S149-S180** (§15);
+the plan version becomes **7** (§8.2); the bindings file version stays **2**, the script library's version **2**, the
+fingerprint format **1**; the protocol stays **0.2** (§2.1, D624). The questions of §18 are answered provisionally by
+the orchestrator and recorded as decision **B38** (`../DECISIONS.md`); the build's, the integration's and the fix wave's
+decisions are **B39**; the security delta review's sign-off, over everything changed since `223c5fb` (the tree B31
+covers), is **B40** (§15). The second domain compiles against `v0.1.0`: nothing here breaks a pack or a module built
+against that tag (§2.3), and the sample is extended behind launch properties and agent options only (§12).
 
 What Phase 8 is for, in one paragraph. Phases 1 to 7 built the base and released it as 0.1.0; a second domain pack and
 its agent module were then built against that release outside this repository, and their wave 1 (rows 9-13, 18-22, 24,
@@ -44,35 +64,44 @@ calls, and nothing in Phase 8 needs a model key.
 
 ## 1. Scope and non-goals
 
-Phase 8 delivers:
+Phase 8 delivers (as built: the parentheses marked "as built" say where the build or the fix wave changed what was
+specified):
 
 - **Swing input** (Java 8, `skillroy-agent-swing`, one new SPI in `agent-api`, §3): the SPI `InputVeto`, asked on
   every input route that resolves a target (twelve of the thirteen; the `ROBOT` click rung is refused before
-  resolution) after the clickable test and before the modal test, again inside every posted
-  task and per event in the routed pointer, with an ancestor rule to the window, failing closed and never skipped by
-  `force`; readers flag `vetoed` and the recorder never offers a vetoed component (gap 105); "on screen" as a non-empty
-  effective visible area with the viewport exemption, `INVALID_PARAMS collapsed`, locators and snapshots skipping
-  collapsed components, the pointer's component form refusing a point its component does not show (gap 116); the routed
-  pointer sourced from the innermost unclaimed heavyweight under the point, with the hit-test descending into it (gap
-  115); AWT `Button` and `Checkbox` fired semantically on the ACTION and COMPONENT rungs and read by the dialog reader
-  (gap 122);
+  resolution) after the clickable test and before the modal test, again inside every posted task and per event in the
+  routed pointer, with an ancestor rule to the window, failing closed and never skipped by `force` (as built: ENTER
+  with any modifier and a `'\n'` in `DISPATCH` text ask the default button of every root pane on the walk, the
+  ancestor rule follows a popup to its opener, and a press's release is asked again on the routed and the Robot route,
+  D663, D768-D772); readers flag `vetoed` and the recorder never offers a vetoed component (gap 105); "on screen" as a
+  non-empty effective visible area with the viewport exemption, `INVALID_PARAMS collapsed`, locators and snapshots
+  skipping collapsed components, the pointer's component form refusing a point its component does not show (gap 116);
+  the routed pointer sourced from the innermost unclaimed heavyweight under the point, with the hit-test descending into
+  it (gap 115); AWT `Button` and `Checkbox` fired semantically on the ACTION and COMPONENT rungs and read by the dialog
+  reader (gap 122);
 - **threads, lanes and the data channel** (§4): `ThreadPolicy.APP_QUIESCENT` backed by the base-owned `QuiescentPoint`
   a provider drives from the application's idle callback, admission by budget and the caller's remaining time, the one
-  narrow exemption to the forbidden-thread rule, an overrun penalty, `agent.info.threads.quiescent` (gap 10); base-owned
-  named lanes, `ThreadPolicy.LANE`, `DataSourceProvider.lane()`, `data.query`'s hand-off and per-source gate (gap 9);
-  `QueryControl` and `enforcesTimeout()`, the JDBC statement sink (gap 11); column names derived from the statement's
-  select list inside the target, the zero-row width defect fixed, `DataSourceProvider.columns(table)` for the allow-list
-  start check (gaps 12, 117); the procedure call retired honestly on every path (gap 119);
+  narrow exemption to the forbidden-thread rule, an overrun penalty (as built, keyed by module for a module's own
+  tasks, D785), `agent.info.threads.quiescent` (gap 10); base-owned named lanes, `ThreadPolicy.LANE`,
+  `DataSourceProvider.lane()`, `data.query`'s hand-off and per-source gate (gap 9); `QueryControl` and
+  `enforcesTimeout()`, the JDBC statement sink (gap 11; as built, a closed handle's action never starts and a statement
+  prepared after the module gave up never runs, D781, D782); column names derived from the statement's select list
+  inside the target (as built, an unnamed column is masked under the names its item reads, or withheld while a mask is
+  registered, D776-D780), the zero-row width defect fixed, `DataSourceProvider.columns(table)` for the allow-list start
+  check (gaps 12, 117); the procedure call retired honestly on every path (gap 119);
 - **privacy and the web side** (§5): every event payload masked at publish by the registered `MaskPolicy`s under
   `event:<topic>` and by the secret-key rule, bounded, never failing publish, with `agent.info.events` and the public
   `OutputScan` helper (gap 109); a view-less browser masked while any `CaptureMask` or `BrowserMask` is registered, the
   new SPI `BrowserMask`, a masked browser's events withholding page data, the selection rules, the action answers
-  without page data (D637) and the CDP path's hand-offs (gap 110); the Playwright line detected by field presence, the sub-1.60 opt-in, the driver leak fixed, the
-  floor stated (gap 121);
-- **hooks** (§6): `target.codeSource` and qualified `packages` entries, `CodeSources` reading a location's fields only,
-  code sources reported by the probe, `touched`, `hook.health.classes` and `skillroy hooks status` (gap 113); the
-  catalogue's `deny:` in the `ClassPattern` grammar, the agent option `hooks.deny`, the SPI `ClassDeny`, the held
-  add-only deny with the install echo, Byteman honouring it before it loads (gap 114);
+  without page data (D637; as built, a locator action on a masked browser is refused unless `redact: false`, D803, a
+  masked browser's view is blanked in every Swing capture and hit-test, D805, and a browser is judged again on its
+  events, D809) and the CDP path's hand-offs (gap 110); the Playwright line detected by field presence, the sub-1.60
+  opt-in, the driver leak fixed, the floor stated (gap 121);
+- **hooks** (§6): `target.codeSource` and qualified `packages` entries, `CodeSources` reading a location's fields only
+  (as built, decoding before it cuts, `\` a separator, D799), code sources reported by the probe, `touched`,
+  `hook.health.classes` and `skillroy hooks status` (gap 113); the catalogue's `deny:` in the `ClassPattern` grammar,
+  the agent option `hooks.deny`, the SPI `ClassDeny`, the held add-only deny with the install echo (as built, asked of
+  `hook.health` before the install too, D800), Byteman honouring it before it loads (gap 114);
 - **semantic input** (§7): the warning channel in the RPC envelope (`RpcResult.warnings`, `Invocation.warn`), the
   standard semantic-input result (`InputResult`), the step modifiers `accept` and `minRung`, `DomainPack.warningCodes()`
   (gap 18); `inputId` minted by the module, late acknowledgements from the seam, `SyncPolicy.ackByInputId` (gap 107); the
@@ -82,22 +111,26 @@ Phase 8 delivers:
 - **expectations, events and plan version 7** (§8): list filters `[*field=value]` and `[*field~regex]` with dotted
   filter fields, counted by the existing `size` matcher (gap 108); the base verb `captureFacts` and deltas against a
   captured count (gap 20); `anyOf` and `containsWhere` under one regex budget per evaluation (gap 118); the base fact
-  root `events` over the agent's ring for the run's window, failing on loss, the `[json]` path segment, negation as a
-  count (gap 21); `{has: scalar}` in an event wait through the shared Java 8 `PayloadMatch`, `waitFor`'s match validated
-  (gap 120); **one `plan.json` version bump to 7**, strict step and call keys from 7 on;
+  root `events` over the agent's ring for the run's window, failing on loss (as built, on an event cut at publish too,
+  D789), the `[json]` path segment, negation as a count (gap 21); `{has: scalar}` in an event wait through the shared
+  Java 8 `PayloadMatch`, `waitFor`'s match validated (gap 120); **one `plan.json` version bump to 7**, strict step and
+  call keys from 7 on; as built, the fix wave's: a regex or a `[json]` that a bound stops is undecided and ends its
+  expectation `ERROR`, never a pass, and the checks of a session and of a model's or a client's run follow paths on the
+  fact's masked view (D787-D791);
 - **the pack** (§9): `DomainPack.capabilities()` with `PackCapability`, ids `<packId>.<name>`, source `pack:<packId>`,
-  evaluated by every host after the contributors' merge and honoured in `replay` (gap 106); `on_prompt.unexpected` is
-  `fail` or `pack`, anything else refused at load and in the plan reader (gap 111); `PreflightCheck.scope()`
-  `SCENARIO|SUITE` with the host-owned `SuiteCache` keyed by pack, version, id, environment and agent session, one
-  `Preflight` helper for every host (gap 112); the decision that application configuration a scenario depends on is a
-  capability, in `requires:` or a guard, no `preconditions:` key (gap 24); `re-resolve`'s agent-only `requires` check
-  fixed in passing;
-- **the protocol and the catalogue** (§10: A67-A99, no new error code, no new topic, four new sample agent capability
-  ids and one pack-side id), **safety and data** (§11, and `threat-model.md` extended), **the sample** (§12: desk, agent
-  module 0.3.0, pack 0.7.0, hook catalogue version 2, thirteen new scenario files: six committed (five top-level and
-  `scanner/`'s one), one test-only positional scenario and six negatives, with six new plans), **tests and acceptance**
-  (§13), **exit
-  criteria** (§14) and **the security delta review** (§15, B40).
+  evaluated by every host after the contributors' merge and honoured in `replay` (gap 106; as built, the MCP catalogue
+  that lists them stays within its answer bound and valid JSON, D795); `on_prompt.unexpected` is `fail` or `pack`,
+  anything else refused at load and in the plan reader (gap 111); `PreflightCheck.scope()` `SCENARIO|SUITE` with the
+  host-owned `SuiteCache` keyed by pack, version, id, environment and agent session, one `Preflight` helper for every
+  host (gap 112); the decision that application configuration a scenario depends on is a capability, in `requires:` or
+  a guard, no `preconditions:` key (gap 24); `re-resolve`'s agent-only `requires` check fixed in passing;
+- **the protocol and the catalogue** (§10: A67-A99, none added by the build or the fix wave; no new error code, no new
+  topic, four new sample agent capability ids and one pack-side id), **safety and data** (§11, and `threat-model.md`
+  extended), **the sample** (§12: desk, agent module 0.3.0, pack 0.7.0, hook catalogue version 2, thirteen new scenario
+  files: six committed (five top-level and `scanner/`'s one), one test-only positional scenario and six negatives, with
+  six new plans; as built, scenario D gains scenario A's `requires` entry, D766), **tests and acceptance** (§13),
+  **exit criteria** (§14) and **the security delta review** (§15, B40: run and fixed, S157 by the documentation pass, S180 proposed for acceptance; open for the
+  owner's signature).
 
 **Non-goals.** Named so that their seams are respected, not built:
 
@@ -117,6 +150,7 @@ Phase 8 delivers:
 | The conditional planned call (`when`); session step modifiers; a composite's branch as a fact | gaps 142-144 (D584): the composite rule of §7.5 covers the second domain; `when` is M-L across sessions, export and cleanup | later, low |
 | Quantifiers `some`/`every` over list elements; the `events` root on a non-agent web path; projection in expectation paths; a `json:` matcher; an `expectNoEvent` verb | gaps 145-147 (D598, D603, D601, D607): `size`, `containsWhere` and `[json]` cover the stated needs; negation is a count | later, low |
 | Step 0b in `re-resolve` and `caps`; credentials for `caps --pack`; a TTL on a `SUITE` answer; named pack prompt policies (`promptPolicies()`) | gaps 148-150 and D615: `pack` is the explicit spelling of the default and an unknown name is already refused, so names can come later without a break | later, low |
+| (As built) a client's raw `sync.await` match on an unmasked payload; a masked opener's popups; the moment between the Robot route's release question and the release; a root pane off ENTER's walk; a browser masked while it is open | gaps 151-155, opened by the build's and the fix wave's open items (§16.2): the call boundary, `InputVetoes.next`, the static refusal (D771's veto form), a window walk (D769's) and a registration signal are the seams; S180 is gap 151's residual, proposed for acceptance | later, low |
 | A `0.3` protocol minor; a new error code; a new base event topic; a new core capability id | never in this phase (D624, D523, D594): every change is additive and the major is in every bindings fingerprint; the three safety-relevant parameters are acknowledged by an echo instead (§2.1) | – |
 | Windows, macOS and Wayland peers for routed AWT events; a Playwright line other than 1.63.0; JxBrowser's view-less browsers; `Statement.cancel()` on drivers other than HSQLDB; a `SecurityManager` target; a real application server's code-source URLs | specified where the maps and the JDK's sources reach; verified nowhere here (§13.3) | when a host exists |
 
@@ -240,6 +274,15 @@ the literal conflicts to the final values at merge (`contract-notes.md` §3 name
 package that adds a committed scenario compiles that scenario's plan on its own branch; the windows that stay red until
 step R are named there too (EP's scenario A files, ES's recordings and exports, the golden check of the image on ET's
 and ES's branches) and nothing else is expected red.
+
+**As built (2026-10-19/20).** The early commits of EX, EP, ET and EW were built in parallel from `8eaedf9` and merged
+in that order (`f4b7661` to `0dfe387`; one conflict, `CoreTestModule`'s constant blocks, both kept), each reactor
+green; the seven bodies were then built in parallel from `0dfe387`; the orchestrator merged EW, EA, ET and EH, and the
+integrator EI merged ES (14 conflicting files), EX (12) and EP (8), with one merge defect and one flaky test fixed
+(D763, D764) and every pinned literal at D630's and D641's values; step R ran on `main` (`f67402c`, D766, D767). The
+build's decisions were numbered at the documentation pass of 2026-10-20 rather than at integration (§17), and no
+further amendment id was needed. The code review, the security delta review and their one fix wave (five fixers, FA to
+FE, from `f67402c`) followed (§15).
 
 ### 2.6 Threads and bounds
 
@@ -1525,23 +1568,23 @@ as before. `OutputScanTest` holds both sceptics' probe lines.
 constructor argument and `agent.info.events` as specified, with these completions. (a) The scalar bound counts the
 scalars handed to a policy, so it applies only while a policy is registered: without one no scalar is visited and
 nothing is cut (the key rule alone walks the keys, as the freeze did), which keeps "nothing changes for a target with
-no `MaskPolicy`" true for a payload of more than 10,000 scalars (D-EW-3). (b) A policy's failure is logged with the
+no `MaskPolicy`" true for a payload of more than 10,000 scalars (D659). (b) A policy's failure is logged with the
 exception's class name only (its message may quote the value, and the agent log is served by `agent.log`); a throw or
 a return that cannot be stored ends that scalar's chain as `<redacted>` (the hook encoder's precedent); NaN, the
 infinities and a `Number` of an application class count as not storable (the freeze would drop the event, or call
-application code on the publishing thread); a `null` return ends the chain and is kept (D-EW-4). (c) The key rule's
+application code on the publishing thread); a `null` return ends the chain and is kept (D660). (c) The key rule's
 secret-looking keys are the protocol's (`password`, `passwd`, `pwd`, `secret`, `token`, `credential`, `licence`,
 `apiKey`, `privateKey`, …); `pin` above is secret only through the `redact` option or a `RedactionKeys`; a key test that
 throws counts as secret, and a value that is already `<redacted>` under a secret key is left as is (no copy: the hook
 and rule payloads pass the second time unchanged). (d) `OutputScan` keeps `leaks(String, Set)` beside `leaksIn` (the
 same method), so that the one caller of the name form (`BindingsUpToDateTest:248`) and any package that follows the
-sentence above change only the class name (D-EW-1). (e) `Scope.EVENTS` reads records by their `type` field (the field
+sentence above change only the class name (D657). (e) `Scope.EVENTS` reads records by their `type` field (the field
 `run.jsonl` and the journal write) and reads a session's `journal.jsonl` beside `run.jsonl`, since `step` records exist
-only there; a line of either file that does not parse is read whole (D-EW-2). (f) The per-file form decodes UTF-8 with
+only there; a line of either file that does not parse is read whole (D658). (f) The per-file form decodes UTF-8 with
 replacement where `SecretScan` threw on a malformed byte (a binary file cannot hide an ASCII value), and a PNG is
-recognised by its name or its signature (D-EW-6). (g) The end-to-end fixture is `CoreTestModule` behind the option
+recognised by its name or its signature (D662). (g) The end-to-end fixture is `CoreTestModule` behind the option
 `coretest.eventMask=on|throw` (a new discovered fixture module would change the module lists the lifecycle tests pin),
-exercised by the new `EventMaskingTest` (D-EW-5).
+exercised by the new `EventMaskingTest` (D661).
 
 **As built (Phase 8, EW, the body, 2026-10-19).** The sample's proof as specified (`staff.signedOn {code, name}` from
 `EngineEvents.stateChanged` after `state.changed`, `PasswordMask`'s event rule, `LoadModeChecks` slot 172). §13.1 row
@@ -1549,7 +1592,7 @@ exercised by the new `EventMaskingTest` (D-EW-5).
 pass, so `CaptureTest` and `BindingEncoderTest` take the real encoders' payloads under an idempotent policy and re-apply
 the policy by this section's column rule (`event:hook.take`, `event:rule.fired`, dotted columns), and the core's
 `EventBusTest` publishes payloads of the same shapes, already masked and with a `<redacted>` secret key, through the real
-pass and asserts them stored unchanged and uncopied (D-EW-18).
+pass and asserts them stored unchanged and uncopied (D700).
 
 ### 5.2 The view-less browser and the `BrowserMask` SPI (gap 110; D545 to D551)
 
@@ -1705,7 +1748,7 @@ masks the browser (a `BrowserMask` TRUE included).
   locator carries `redact: false`: the MCP server's plan policy checks a pack verb's calls with `never` only
   (`PlanPolicy.packCall`), so it passes there, as the four reads' `redact: false` has since S111; the session facade
   applies `CallPolicy.arguments` to every call it executes, a pack verb's included, so it is refused there (the
-  restrictive form, D-FE-1). A person's committed scenario acts on a masked browser by locator through a `call` step
+  restrictive form, D803). A person's committed scenario acts on a masked browser by locator through a `call` step
   with `redact: false` (`webClick`, `webFill` and `webDispatch` take no `redact`). D637's strip stays as the second
   line: an answer of a browser judged masked while the action ran (the entry's flag, or the `BrowserMasks` rule as it
   stands, no further EDT read) keeps `role` and `tag` only. On the CDP path a selector `web.dispatchEvent` of a masked
@@ -1746,32 +1789,32 @@ outstanding; the `BrowserMasks` rule and one bounded EDT read for the browsers w
 EDT read on the publishing thread, which may be the adapter's or the EDT). The event that asks is published with the
 flag as it was, so such a browser's events carry page data for at most about 2 s after its first event following the
 change, plus the read; the SPI registry has no signal for a registration that could close this window. A pack's
-`CaptureMask` should therefore answer by a stable container (D-EW-12's statement for the CDP path's own events
+`CaptureMask` should therefore answer by a stable container (D694's statement for the CDP path's own events
 stands).
 
 **As built (Phase 8, EW, 2026-10-19).** As specified, with these completions. (a) Steps 1 to 4 live in one
 package-private class of the web module, `BrowserMasks`, which the index, the per-call reads and the selection share:
 the union stops at the first `TRUE`; a mask that throws, a registry that throws and a vendor object that cannot be read
-count `TRUE`; a failing mask is logged once per class by the exception's class name only (D-EW-7). (b) A `BrowserMask`
+count `TRUE`; a failing mask is logged once per class by the exception's class name only (D689). (b) A `BrowserMask`
 `TRUE` masks a browser with a component too, also where `web.browsers` and `web.pointer` read the component's state in
 the call: the per-call test is "nothing registered: not masked; a `TRUE`: masked; no component: masked unless released;
 else the call's `CaptureMask` read (else the entry's flag)", so `masked(e, state)` above is completed by the `TRUE` of
-step 3, and every per-call judgement refreshes `Entry.masked` (D-EW-8). (c) The selection judges a view-less entry and a
+step 3, and every per-call judgement refreshes `Entry.masked` (D690). (c) The selection judges a view-less entry and a
 `TRUE` afresh without an EDT read and reads the entry's flag for a component-bearing one; a masked entry's title is never
-read for `by.title` (D-EW-9). (d) `SeedWalk.masked`'s default (a walk without a registry) and `SwingSeeds` without an
+read for `by.title` (D691). (d) `SeedWalk.masked`'s default (a walk without a registry) and `SwingSeeds` without an
 event-dispatch thread answer every component masked; a registry that cannot answer counts as one with masks
-(`masksRegistered` true) (D-EW-10). (Phase 8 security fix, S167, FE) So does every other `SwingSeeds` read the mask
+(`masksRegistered` true) (D692). (Phase 8 security fix, S167, FE) So does every other `SwingSeeds` read the mask
 judgements use: `state` of something that is not a component, or of anything while no event-dispatch thread runs,
 answers a masked unknown state while a mask is registered (`ComponentState.UNKNOWN_MASKED`; `UNKNOWN` otherwise), and a
 per-call judgement counts a state read that answered nothing as masked, so no read that was not made lowers
 `Entry.masked`. (e) `web.dom.fill`'s `filled` keeps `tag` only (it has no `role`; `type` and `id`
 dropped), read literally from "role and tag only". (f) `web.pointer`, `web.dom.click` and `web.dom.fill` declare the
 parameter `redact` in their descriptors (a person's argument, now in `CallPolicy.MASKED_WEB_READS`), so that `/schema`
-names it as the four reads' descriptors do (D-EW-11). (g) The CDP path hands a `by: {url|title}` selection to the agent
+names it as the four reads' descriptors do (D693). (g) The CDP path hands a `by: {url|title}` selection to the agent
 while masks are registered whatever `redact` says (the agent's rule (ii) ignores `redact`, so the two paths agree), after
 one fresh `web.browsers` read; the path's own events read its cached agent list (read at open and by every call that
 reads it), so a mask registered after the last read leaves the path's events of that browser unmasked until the next
-read (the restrictive side holds for every mask present at open) (D-EW-12). (h) The refusal's message names no SPI:
+read (the restrictive side holds for every mask present at open) (D694). (h) The refusal's message names no SPI:
 "browser <ref> is masked (a pack's mask names it, or it has no view while a mask is registered), so its page is not
 read on this route (a person may pass redact: false)".
 
@@ -1842,12 +1885,12 @@ could not apply.* `CdpAttach`'s Javadoc and the threat model's "Playwright 1.63 
 **As built (Phase 8, EW, 2026-10-19).** As specified, with these completions. (a) The detection runs on the thread that
 first needs it: `CdpWebPath.open`, which must know `noDefaults` before any driver starts, reads `ConnectSupport` through
 a supplier (the tests' seam) on its caller's thread; `CdpAttach.connect` called directly reads it on its caller's thread
-too; memoised once per JVM either way (D-EW-13). (b) `CdpAttach.connect` also refuses, `PROTOCOL` before anything starts,
+too; memoised once per JVM either way (D695). (b) `CdpAttach.connect` also refuses, `PROTOCOL` before anything starts,
 a line without `noDefaults` whose options do not allow the overrides (defence in depth for a direct caller; the path's
 own refusal is the reason string), and passes no artifacts directory to a line without `artifactsDir` (logged at
-WARNING) (D-EW-14). (c) `connectOptions.noDefaults` and `isLocal` record the option's value where the line has it (true
+WARNING) (D696). (c) `connectOptions.noDefaults` and `isLocal` record the option's value where the line has it (true
 by default; `true | "unsupported"` above for the defaults) and `defaultOverridesAccepted: true` appears exactly when the
-line has no `noDefaults` (the attach then happened under the opt-in) (D-EW-15). (d) The `LinkageError` message is "the
+line has no `noDefaults` (the attach then happened under the opt-in) (D697). (d) The `LinkageError` message is "the
 Playwright on the class path (<version or unknown>) lacks <the error's class and first line>; nothing was attached",
 and a `VirtualMachineError` still propagates as is.
 
@@ -2034,7 +2077,7 @@ installer's check of §6.9 make that fail closed too (the safety rule of §2.1; 
 (guide §4.4).
 
 **As built (Phase 8, EH, 2026-10-19).** Public members beyond the list above, so that one rule serves both sides
-(D-EH-8): `HookTarget.MAX_CODE_SOURCE_LENGTH` (200), `HookTarget.codeSourceViolation(String)` (the check
+(D708): `HookTarget.MAX_CODE_SOURCE_LENGTH` (200), `HookTarget.codeSourceViolation(String)` (the check
 `HookSpec.violation()` and the catalogue reader's `packages` map apply), `HookTarget.withCodeSource(String)`;
 `HookProbe.MAX_CODE_SOURCES` (16; the constructor keeps the first 16). `ClassPattern.violation(null)` is "empty"; a
 glob segment is checked as an identifier with each `*` read as an identifier character (`9*` is "segment '9*' is not
@@ -2076,9 +2119,9 @@ untouched. This is what `skillroy hooks status` reads (D180: it calls nothing bu
 record keeps its shape; a code-source refusal's reason reaches `unavailable[].reason` as every reason does.
 
 **As built (Phase 8, EH, 2026-10-19).** The refusal's names are the copies' distinct code-source names **sorted**
-(`getAllLoadedClasses` answers in the JVM's order; D-EH-10), at most four, then " and <n> more". The qualifier's budget
+(`getAllLoadedClasses` answers in the JVM's order; D710), at most four, then " and <n> more". The qualifier's budget
 is **one** `BoundedRegex.BUDGET_MS` per spec per call, shared by its copies through a deadline, so that the time under
-the engine's lock does not grow with the number of copies (D-EH-9). `loaders` and `loaderIds` keep every copy by name
+the engine's lock does not grow with the number of copies (D709). `loaders` and `loaderIds` keep every copy by name
 and loader, `codeSources` is aligned with them, and items 4 to 7 run over the kept copies; a ledger entry takes the
 copy's name from the probe (`Probes.Match.codeSource`), never reading it again. The package-private reader seam is
 `Probes.reader` (`HookEngineImpl.probes()` for the tests).
@@ -2126,12 +2169,12 @@ that blocks holds that lock, which is why the SPI says "never blocking" and why 
 registers the `HookEngineImpl` under `ClassDeny` beside `HookEngine`, and its `refuse` answers `denied by the catalogue
 <id>: <pattern>`; every reader tells it apart from a domain module's by `instanceof HookEngine`, an `agent-api` type both
 module loaders share, so the Byteman module uses that reason as it is and wraps every other in `denied by a module: `
-(D-EH-1). **The order is the numbered list above**, whatever the registration order: the option, then the catalogue,
-then the other modules in registration order (D-EH-2; §6.4's "every registered `ClassDeny` in registration order"
+(D701). **The order is the numbered list above**, whatever the registration order: the option, then the catalogue,
+then the other modules in registration order (D702; §6.4's "every registered `ClassDeny` in registration order"
 would put a domain module installed before the hooks module ahead of the catalogue). A `VirtualMachineError` thrown by
 a `ClassDeny` is rethrown (`InputVeto`'s rule), any other throw refuses. `hooks.deny` keeps the first of equal
 patterns, `<i>` counts the non-empty items from 0, and more than 64 is `option hooks.deny: more than 64 patterns (<n>)`
-(D-EH-13). The sample's `LendingClassDeny` reads `lending.hooks.deny` with the same rule through `ctx.option`.
+(D713). The sample's `LendingClassDeny` reads `lending.hooks.deny` with the same rule through `ctx.option`.
 
 ### 6.6 `hook.install`'s `catalogue.deny`, the held list, `hook.health.deny` (D564)
 
@@ -2174,7 +2217,7 @@ it by the probe and by the Byteman module's threads. `from` lists the delivering
 first delivery. `hook.health.classes[].hooks` names the installed hooks and the residue hooks whose classes include the
 entry; `classes[].deniedNow` is the reason through the engine's `wire` redaction. **`rule.list.deny`** is `{catalogue?,
 option, modules}`: `catalogue` from `HookEngine.deny()` when the hooks module is loaded, **never `from`**, which the SPI
-does not carry (D575; D-EH-3).
+does not carry (D575; D703).
 
 ### 6.7 The Byteman module (P6 §7.3 amended; D569)
 
@@ -2198,7 +2241,7 @@ hooks module's catalogue registration counts when that module is loaded, and a d
   say so (§16.1).
 
 **As built (Phase 8, EH, 2026-10-19).** `rule.check` of a denied rule class reports the deny in `errors` and skips the
-type check (D-EH-14). The deny view reads `ctx.spi().all(ClassDeny.class)` once per call, as specified; a throwing
+type check (D714). The deny view reads `ctx.spi().all(ClassDeny.class)` once per call, as specified; a throwing
 module `ClassDeny` is logged once per implementation class.
 
 ### 6.8 The catalogue (`skillroy-scenario`, `…scenario.hooks`; P6 §5.1, §11.2 amended)
@@ -2264,8 +2307,8 @@ gains `deny` when non-empty (what `hook.install` carries).
 **As built (Phase 8, EH, 2026-10-19).** `HookEntry.withTarget(HookTarget)` is new (the bake). **The builder bakes only
 the entries it did not take from the base** (`builder(base)` marks the base's entries baked, `add` and `replace` unmark
 them), so a base entry that the base left without a qualifier is not re-baked when an overlay adds a qualified rule
-over its package (D570's "re-baking would change base entries' hashes"; D-EH-4). **An overlay's plain `packages` name
-never drops a base qualifier**; only its map form replaces one (D-EH-5). An item's line is the key's for `deny` (the
+over its package (D570's "re-baking would change base entries' hashes"; D704). **An overlay's plain `packages` name
+never drops a base qualifier**; only its map form replaces one (D705). An item's line is the key's for `deny` (the
 strict reader keeps no line of a scalar list item). The overlay refuses a union beyond 64 patterns at its `deny` line.
 `build()` returns `EMPTY` only when the id, the entries, the rules and the deny are all empty, so a deny-only
 catalogue built in Java is a catalogue (`isEmpty()` stays "no entry").
@@ -2295,9 +2338,9 @@ catalogue built in Java is a catalogue (`isEmpty()` stays "no entry").
 - Everything else of P6 §5.3 (step 0's armed-stub rule, replace, fallbacks, the matrix re-read) is unchanged.
 
 **As built (Phase 8, EH, 2026-10-19).** **`denyNotDelivered` is an object** `{patterns: [...], agentOption: "unknown" |
-[...]}` (the passage above says both `denyNotDelivered: [patterns]` and `denyNotDelivered.agentOption`; D-EH-6). The
+[...]}` (the passage above says both `denyNotDelivered: [patterns]` and `denyNotDelivered.agentOption`; D706). The
 `rule.list` read happens when any `rule.*` id is in the matrix, whatever its state; a failed read is `unknown`
-(D-EH-11). Under `off` the catalogue is read for the record only, and a catalogue that cannot be read records nothing.
+(D711). Under `off` the catalogue is read for the record only, and a catalogue that cannot be read records nothing.
 The record's `deny` and `deniedNow` come after its other keys, so a record without them is byte-identical to today's;
 the echo's ERROR record carries the catalogue reference and both keys.
 
@@ -2323,7 +2366,7 @@ lines read `unknown (the agent reports no deny list)`. Exit codes unchanged.
 
 **As built (Phase 8, EH, 2026-10-19).** The class table is printed only when `hook.health` carries `classes` (an old
 agent reports none, and then no table); the catalogue line of `deny (target)` names the `from` ids before the
-patterns; a deny-only pack catalogue prints "no hook entry" in place of its empty table (D-EH-15).
+patterns; a deny-only pack catalogue prints "no hook entry" in place of its empty table (D715).
 
 ### 6.11 Bounds, threads and the failure paths in one table
 
@@ -2719,41 +2762,41 @@ is the envelope, never a value key (D576).
 **As built (Phase 8, ES), 2026-10-19.** Where §7 was silent or the build chose among readings (the report's
 `D-ES-n`):
 
-- **7.1 wire (D-ES-1).** `CallWarning` also has `NEVER_ACCEPTABLE` (the two reader codes), `isValidCode`,
+- **7.1 wire (D718).** `CallWarning` also has `NEVER_ACCEPTABLE` (the two reader codes), `isValidCode`,
   `isPackCodeShape` and `tooMany(n)`. Data that cannot be written as JSON becomes `{"truncated": true}` like an
   oversized one; `fromJson` also turns an element with a non-string `message` or a non-object `data` into
   `INVALID_WARNING`; `readAll` of a value that is not a list gives one `INVALID_WARNING`; a `TOO_MANY_WARNINGS`
   element beyond the 16th adds its own `dropped`, so a folded list folds to itself (the 7-argument `RpcResult`
   folds the same way).
-- **7.1 agent (D-ES-3).** The agent's log has no FINE level: a `warn` after the call returned is dropped and logged
+- **7.1 agent (D720).** The agent's log has no FINE level: a `warn` after the call returned is dropped and logged
   once per call at INFO, naming the code and the primitive, never the message or data. The dispatcher's margin before
   redaction is 4096 characters; data whose text exceeds four times 2048 plus that margin is `{"truncated": true}`
   before redaction.
-- **7.1 reports (D-ES-9, D-ES-10, D-ES-11).** A cleanup call's warnings and rungs are records only (`cleanup: true`),
+- **7.1 reports (D726, D727, D728).** A cleanup call's warnings and rungs are records only (`cleanup: true`),
   never lines of `RunResult.warnings`. The run-end record, the journal's step record and the MCP scenario-run reply
   carry `warnings` only when non-empty; `run --json` always carries `warnings` (an empty list, as
   `degradedFidelity`), and the text output prints the `warning:` lines for every status. Telemetry: the `warning`
   event carries `skillroy.warning.code` and `skillroy.accepted` (both kept by `minimal`); `rung` and `rungs` reuse
   `skillroy.requested`, `skillroy.actual` and `skillroy.ok`.
-- **7.2 (D-ES-2).** `InputResult.inputId(value)` is null also for a string that does not match `INPUT_ID_PATTERN` (a
+- **7.2 (D719).** `InputResult.inputId(value)` is null also for a string that does not match `INPUT_ID_PATTERN` (a
   malformed id counts as none, the fail-closed path of 7.4); extra constants `ACCEPTED`, `INPUT_IDS`, `TAKEN`,
   `STATE_CONSUMED`, `STATE_QUEUED`, `VETOED`, `NOT_VISIBLE` and a reader `queued(value)`. The sample refuses a
   caller's malformed `inputId` with `INVALID_PARAMS {param: inputId, reason: malformed}`, and reports caveats only
   for an input the desk consumed within the call (`ANSWERED_NESTED` when the desk took it under another prompt line
   than the one it showed at the post).
-- **7.3 (D-ES-8).** Every verb that compiles to no call refuses both modifiers, not only the four named; codes a verb
+- **7.3 (D725).** Every verb that compiles to no call refuses both modifiers, not only the four named; codes a verb
   pre-accepts (`withAccept`) are checked at compile time like a step's ("pre-accepts …"). The reader's refusal below
   7 reads "call P: 'accept' needs a version 7 plan" (after the reader's "invalid plan: " prefix).
-- **7.4 (D-ES-14).** A `SYNC_TIMEOUT` names the match as JSON (`matching {"inputId":"lending-42"}`), the form the
+- **7.4 (D731).** A `SYNC_TIMEOUT` names the match as JSON (`matching {"inputId":"lending-42"}`), the form the
   existing `EVENT` wait message uses. The sample's pending table, when full, evicts the oldest entry and releases its
   waiter as not taken (one acknowledgement per input still holds: an evicted input is never acknowledged late).
-- **7.5 (D-ES-5, D-ES-7, D-ES-13).** The secret-echo check compares the text of every scalar leaf (numbers too) with
+- **7.5 (D722, D724, D730).** The secret-echo check compares the text of every scalar leaf (numbers too) with
   every leaf of a structured secret; its detail key is `parameter` (`parameters` for the too-large failure), never
   `secretParam`, which the run mask would hide as a secret-looking key. Listed `seq`s outside the window are one
   `prompt {step, primitive, ignoredSeqs}` record, apart from the per-event records. A composite that runs out of
   time is the agent's `TIMEOUT` error; the sample's composites list a `question.seq` for `input.requested` from the
   listener's last request.
-- **7.6 (D-ES-4, D-ES-6, D-ES-12).** `RungResult.of` returns a mutable map, so a primitive adds its own keys; readers
+- **7.6 (D721, D723, D729).** `RungResult.of` returns a mutable map, so a primitive adds its own keys; readers
   `rung(value)`, `minRung(value)`, `isName`. A `Rung` capability is null or a non-blank id of at most 128 characters
   without whitespace; `Rung.check` is shared by `PlannedCall` and `Plan.Call`. The executor reads a forwarded
   `minRung` at the call's top level or in `args.minRung` (where `device.act` carries an action's arguments). A device
@@ -3069,7 +3112,7 @@ count or a negation over it cannot be exact ("fact 'events' could not be read: e
 (truncated: true); a check over the window cannot be exact: publish smaller payloads or raise the agent option
 eventRingChars"). Restrictive: a module's own top-level `truncated` key, and one long console line in the window, make
 every `events` expectation of the run `ERROR`; the alternative (only a check that reads into a cut payload undecided)
-is the veto form, `D-FC-3` in the fix report.
+is D789's veto form.
 
 **As built (Phase 8, EX).** `BaseFacts.events(LongSupplier)` is public (§10's table) and `BaseFacts.all()` gives eight
 providers. Each page is checked whole: besides the first page's `oldestSeq`, every event's `seq` must be the previous
@@ -3786,7 +3829,7 @@ name}` (§12.2); its `input.acked` payload becomes `{source, inputId}` (§7.4); 
 **Errors and `data.reason` values.** No new error code (`ErrorCodes` and `ErrorCodesTest` unchanged). New `data`
 uses of existing codes, each a token a consumer switches on (P7 §3.9's style, D504):
 
-| Code | `data.reason` or `data` key | From | §
+| Code | `data.reason` or `data` key | From | § |
 |---|---|---|---|
 | `INPUT_REJECTED` (-32005) | `reason: "vetoed"` (+ `veto`, `ref`, `vetoed`, `route`, `hit?`) | every Swing input route | §3.2 |
 | `INPUT_REJECTED` | `reason: "not visible"` (+ `ref`, `point`, `param: "at" \| "to"`) | `swing.pointer`'s component form | §3.3 |
@@ -3988,18 +4031,40 @@ place):
     under a pack whose catalogue uses `codeSource` or `deny` fails the install closed (§6.3);
 12. an `on_prompt.unexpected` value other than `fail`/`pack` no longer loads; a pack with capabilities sends reads
     before `requires`; a `SUITE` check that failed fails every later scenario of its suite without running; the JUnit
-    glue and the CLI own a suite cache; `re-resolve` checks `requires` against the merged matrix (§9.6).
+    glue and the CLI own a suite cache; `re-resolve` checks `requires` against the merged matrix (§9.6);
+13. *(the fix wave, 2026-10-20; FC's are in item 8)* `DISPATCH` text holding a `'\n'` is refused while a default
+    button on the target's walk is vetoed (SET is the way around); a popup's items are flagged and refused under a
+    vetoed opener, window or combo; a routed release over a vetoed component is refused `VETOED`; on the Robot route a
+    covered point whose covering window's component is vetoed answers `vetoed` (was `covered`), with or without
+    `force`, and a refused drag releases at its press point (§3.2, FA); on a positional source with any `MaskPolicy`
+    registered, the cells of a column no name can be given are `<redacted>`; a provider's `columns(table)` receives a
+    quoted part in double quotes; `ReadOnlyJdbc`'s statement sink receives null before the statement is closed and may
+    stop the call with `CancellationException`; a `QueryControl` handle's `close()` may wait up to 2 s for a running
+    action; `data.query`'s `TIMEOUT` may carry `cancelNotStarted: true`; a module's own quiescent task that overruns
+    twice its budget penalises that module; a scalar match never equals a map, a list or an array (§4, §8.9, FB);
+    `skillroy_catalogue` writes its sections in a new order and withholds verb schemas rather than cutting its answer;
+    `OutputScan` finds a planted word wherever a non-letter bounds it and its `EVENTS` scope reads more records; a
+    code-source name ends at a `\` too (§9.1.4, §5.1, §6.2, FD); a locator action on a masked browser is refused unless
+    `redact: false`; a masked browser's tap events carry the tap's pattern as `name`; a masked browser's view is grey in
+    every Swing capture; the CDP path's frozen-target refusal names a masked page by its id only (§5.2, §5.4, FE).
 
 **The limitation sentences the build writes into `SECURITY.md`'s "Known limitations"** (§15's L2 and L8 check that
 they are there; `threat-model.md` §7 and §8 carry the same facts): (a) Swing key bindings, mnemonics and accelerators are
 not followed by the input veto (veto the window or the bound control); a veto on a window or panel does not cover
 `web.*` input into a browser inside it, and a layer that must keep page input out vetoes nothing more for that (gap
-126); a failed layer module served under `allowFailedModules=true` serves without its veto; (b) a quiescent task that
-overruns its budget holds the application's thread until it returns (admission and a penalty, no pre-emption), and a
-provider read that ignores cancellation keeps its lane or its source busy until it ends; (c) events are masked by key
-and by the pack's policies at publish (on attach, the events of the module-install window are masked by key only);
-the CDP path's own events are not; a browser without a view is masked while any mask is registered and released only
-by a `BrowserMask`; (d) a denied subtype loaded after a `^`/`INTERFACE` Byteman submit receives Byteman's trigger, and a deny
+126); a failed layer module served under `allowFailedModules=true` serves without its veto; *as built (fix wave, FA)*:
+a menu item's own veto does not cover the keyboard of an open menu (veto the window); on the Robot route a drag's
+release is asked again just before it happens, but a popup or a drop zone the application shows after that question
+is not seen (gap 153); a `JRootPane` embedded off the key target's walk and outside a `JInternalFrame` has its default
+button pressed by ENTER without being asked (gap 154); (b) a quiescent task that overruns its budget holds the
+application's thread until it returns (admission and a penalty, no pre-emption), and a provider read that ignores
+cancellation keeps its lane or its source busy until it ends; *as built (fix wave, FB)*: a positional source's unnamed
+columns are masked under the names their items read, or withheld while a mask is registered, and a rename (`password
+AS p`) defeats a name-keyed mask on any source; (c) events are masked by key and by the pack's policies at publish (on
+attach, the events of the module-install window are masked by key only); the CDP path's own events are not; a browser
+without a view is masked while any mask is registered and released only by a `BrowserMask`; *as built (fix wave,
+FE)*: a browser that becomes masked while it is open sends page data in its events for up to about 2 s after its next
+event (gap 155), and the listener that keeps a middle click from pasting into a page is best effort; (d) a denied subtype loaded after a `^`/`INTERFACE` Byteman submit receives Byteman's trigger, and a deny
 list only tightens for the life of an agent instance; (e) the secret-echo check compares short secrets by equality
 only; a composite that answers a question it does not own cannot be detected by the base; `taken` records application
 data; (f) the `events` root sees the run's window only while the ring holds it: a target that publishes more than
@@ -4007,7 +4072,10 @@ data; (f) the `events` root sees the run's window only while the ring holds it: 
 at publish (`truncated: true`, a long console line included; Phase 8 security fix, S151, FC); a regex or a `[json]` text
 that a bound stops makes its expectation `ERROR`, never a pass (S149); (g) a pack capability's evaluation and a
 pre-flight check run pack code on the controller with no host timeout (the data channel's per-query bound is the
-bound); (h) the CDP path's gate for an older Playwright is proved through a seam: only 1.63.0 was run.
+bound); (h) the CDP path's gate for an older Playwright is proved through a seam: only 1.63.0 was run; *as built*
+(i), S180's release note (FC, proposed for acceptance): a client's raw `sync.await` (a base read on every MCP server)
+compares an event's raw payload by equality, so where a module publishes a short secret unmasked a client can confirm
+guesses at it, one call per guess; mask such a payload with a `MaskPolicy` or a secret-looking key (gap 151).
 
 ---
 
@@ -4304,7 +4372,7 @@ package that writes the test (§2.5).
 **As built (Phase 8, EH, 2026-10-19), rows 22-28.** Row 24's "class from another code source" uses a fixture of its
 own, `fixture.hooks.TwoJars`, defined a second time by `ChildFirstLoader` from a temporary jar (`two-jars-1.4.jar`),
 not `Returns`: other test classes of the shared JVM leave child-loader copies of `Returns` loaded, which would widen
-the copy set (D-EH-7); its pathological qualifier is `(.*a){20}`, because the JDK 25 regex engine memoises the classic
+the copy set (D707); its pathological qualifier is `(.*a){20}`, because the JDK 25 regex engine memoises the classic
 `(a|aa)+` and `(a+)+` and answers them at once. Row 22 pins `LIMIT`'s v0.1.0 spec hash and row 26 the sample-shaped
 corpus hash, each computed by the code before the change; row 28 pins `lending.yaml` version 2's hash. Row 27 asserts
 the `CODE SOURCE` column with `-` (the CLI test pack's catalogue has no qualifier and stays unchanged). The agent
@@ -4498,9 +4566,9 @@ named per item host the agent-level half of a proof.
    control: the same `by.url` finds it before the mask); on the CDP path the selection is handed to the agent and
    answers the same. **As built (Phase 8, EW):** under `webhost.mask=tag-back` alone, `detached` (off screen) **is**
    masked: any registered `BrowserMask` puts the view-less rule in force (§5.2, D545), so "and, off screen, detached are
-   not" is corrected and the check asserts it masked (D-EW-16); the control `by.url` runs under
+   not" is corrected and the check asserts it masked (D698); the control `by.url` runs under
    `front,release-detached`; the item ends on a fresh agent without a mask, and `gap95e…` moves from `@Order(15)` to
-   `@Order(18)` so that it stays the launch's last act (it may leave the page unresponsive) (D-EW-17).
+   `@Order(18)` so that it stays the launch's last act (it may leave the page unresponsive) (D699).
 18. **The Playwright line recorded** (EW). (`WebHostChecks`, new item `@Order(17)`, the launches with a port; the first
    half may instead extend `item3BorrowInPagePassesWithoutSleeping`, `@Order(3)`, which already reads that run's
    `web.path` record, leaving only the traced run at `@Order(17)`): a run of `borrow-in-page` over the CDP
@@ -4544,7 +4612,7 @@ named per item host the agent-level half of a proof.
    correlated wait ends `SYNC_TIMEOUT` naming the `inputId` rather than passing on another input's acknowledgement;
    `input.acked` payloads never carry a value (the password check of slot 200 extended to `taken` and warnings).
 
-   As built (Phase 8, ES; D-ES-17), recorded by the fix wave (Phase 8 review, FD, 2026-10-19; L3-F1): the
+   As built (Phase 8, ES; D734), recorded by the fix wave (Phase 8 review, FD, 2026-10-19; L3-F1): the
    late-acknowledgement half is a race a remote caller cannot arrange (the second input passes its pre-check only if
    it reads the desk's state before the engine takes the first input), so it runs up to 10 bounded attempts in one
    session and writes `correlatedAckRaceObserved=<bool> attempts=<n>` to the timing log; ES saw the race on two Java 8
@@ -4556,7 +4624,7 @@ named per item host the agent-level half of a proof.
    `SYNC_TIMEOUT`, so the defect the half exists for counted as "not observed". Each attempt then waits (bounded, on
    the desk's ready event after the queued `SIGN_OFF`) before it reads the state, which a Java 8 target's embedded leg
    once read mid-take (`SIGNED_OFF`, `awaitingInput: false`). Alternative not taken (an owner's
-   choice, D-ES-17's rejected seam): a test-only desk option that delays the engine's take of an input, set on one
+   choice, D734's rejected seam): a test-only desk option that delays the engine's take of an input, set on one
    leg, which would make the race happen every time.
 28. **Composites** (ES). (`@Order(174)`): `sign-on-any` PASS (branches `auto` and `password` in the `call` records,
    `state.staff.code` held); `scan-checked` PASS with the `prompt` record `expected: true, answeredBy:
@@ -4644,13 +4712,12 @@ named per item host the agent-level half of a proof.
 42. **`InferenceChecks`' MCP subprocess item** (EP): `skillroy_catalogue` lists `lending.returns.ceiling` with
    `source: pack:lending`.
 
-   Fix wave (Phase 8 review, FD, 2026-10-19; L1-F2): asserted as written: the catalogue is parsed (within the bound,
-   never cut, §9.1.4's fix-wave note) and lists `lending.returns.ceiling` `OK` with `source: pack:lending`; the
-   `caps`-root read EP used instead stays as a second check. `CatalogueBoundTest` (`skillroy-mcp`) proves the bound on
-   a pack whose verb schemas overflow it.
-
-   As built (Phase 8, EP): items 36-42 and §13.1 rows 42-50 with the corrections of §9.7 (the calls before `requires`
-   include `data.sources`; slot 177's `contributed`; item 38 without the driver; the CLI pack's id `clitest`).
+   As built (Phase 8, EP), with the fix wave (Phase 8 review, FD, 2026-10-19; L1-F2): items 36-42 and §13.1 rows 42-50
+   with the corrections of §9.7 (the calls before `requires` include `data.sources`; slot 177's `contributed`; item 38
+   without the driver; the CLI pack's id `clitest`). Item 42 is asserted as written since the fix wave: the catalogue
+   is parsed (within the bound, never cut, §9.1.4's fix-wave note, D795) and lists `lending.returns.ceiling` `OK` with
+   `source: pack:lending`; the `caps`-root read EP built while the catalogue was cut (D759) stays as a second check.
+   `CatalogueBoundTest` (`skillroy-mcp`) proves the bound on a pack whose verb schemas overflow it.
 
 ### 13.3 Not verified in this phase, and why
 
@@ -4745,9 +4812,37 @@ security notes):
 | L7 Windows and file-system trust | no new writer, directory or file format: `run.jsonl`'s new records and keys, `capabilities.json`'s pack entries and `bindings.json`'s `captured` through the existing `OutputFiles` route; the `SuiteCache` never written; the ACL branch unverified as before (threat model §8) |
 | L8 evidence at rest | `run.jsonl`'s `call`, `prompt`, `capture` and `step` records, `failure/events.json`, the JUnit XML, the MCP `events/recent` resource and the CLI's stream carrying masked payloads (check with `OutputScan` `Scope.EVENTS` on §13.2 item 15's run that the planted name is in none, and that `Scope.ALL` finds it only in a snapshot of the status line); `data.veto` and `data.vetoed` entering `run.jsonl` and the failure detail as any error data does (bounded, module-authored; no pixel change); `thread: LendingEngine` and the new `TIMEOUT` keys for a quiescent call; log lines naming sources, lanes, primitives and exception classes only; the regenerated inference fixture holding no procedure line and no value; the `hooks` record's `deny`, `denyNotDelivered`, `deniedNow` (patterns and hook ids; `touched` a count); the catalogue hash now covering `deny` so an archived record says which deny list a run ran under; the new records `warning`, `rung`, `rungs`, `prompt.answeredBy`, the result lists and a coerced `taken` masked as every record and line is; `capture {source: facts}` and `bindings.json`'s `captured` through the run's mask; `actual` of an `events` expectation writing module payloads into `run.jsonl` as published, bounded in number by the cut; `web.path`'s `playwright` and `connectOptions` as versions and booleans; `capabilities.json` and the `preflight` record gaining masked pack entries and two fields; nothing written outside the run directory; §11's `SECURITY.md` sentences (c), (e), (f), (g) present |
 
+**The run and the fix (2026-10-19/20).** The code review ran first, in P7's manner: three lenses with a sceptic each,
+L1 (contract fit) and L2 (host safety, privacy, secrets and bounds) on `d25cf02` (the integrated tree before step R)
+and L3 (tests, determinism and the matrix) on `f67402c` (after step R, which it found byte-stable in four reruns in
+four JVMs): 17 findings, one of them found by L1 and L2 alike (a `'\n'` in `swing.type` `DISPATCH` text pressing a
+vetoed default button), so **16 distinct: 1 high, 6 medium and 9 low**, none refuted, two added by the sceptics (L2-S1,
+L3-S1). The delta review ran on `f67402c` over everything since `223c5fb`: the eight lenses, each with a reviewer and a
+sceptic; three runs that stopped mid-file (L4's reviewer and sceptic, L5's sceptic) were run again, writing mechanisms
+and never a recovered value. Its items were numbered **S149-S179**, a defect found by two or three lenses once (S150,
+S152, S157, S173, S178), at the sceptic's severity: **none critical, 3 high** (S149: an undecidable regex or `[json]`
+counted as "no match", so a negation passed with the forbidden event in the window; S173: path filters, regexes and
+indexes ran on the unmasked fact, an oracle with which a model or a client could rebuild a masked secret; S174: `[json]`
+parsed a text without the key rule), **8 medium** (S150, S151, S155, S159, S160, S165, S166, S176) **and 20 low**, all
+counted (S173, S174 and S176 latent); three items were recorded and not counted (L5-S4 and L7-S2 operator-only, L8-F6
+token-holder only and fixed anyway). One fix wave closed both reviews from `f67402c`, five fixers by area in parallel
+worktrees: FA (`b32e0d5`), FB (`bab19e8`), FC (`8cb51e7`), FD (`9db797d`) and FE (`618fb52`), merged without a
+conflict (`fa1512d` to `d4daa0f`), the five session stand-in recordings regenerated key-free after S175's shared key
+rule (`bdafc52`); every finding was fixed contract first, with a test that fails on `f67402c`, and none was found wrong
+or already fixed. **Everything medium or above is fixed, and every low but two:** S157 (`SECURITY.md` lacked §11's
+sentences (a)-(h) and §16.1's "Run outputs" change) was closed by the documentation pass (2026-10-20), and **S180** (low, latent; opened by
+FC's report: a client's raw `sync.await`, or a pack verb whose argument flows into a `match`, compares the raw payload
+on the agent by equality, so it can confirm guesses at a short secret in a payload the agent did not mask, and a
+refusal of a literal the mask changes would itself be the oracle) is proposed for acceptance with a release note, its
+sound fix (rewriting such an entry, or the marker, into one that never matches, at the session's raw-call and
+verb-argument boundary before the call is sent) recorded as gap 151. **S149-S180: 3 high, 8 medium and 21 low.** The
+fix wave's decisions are D768-D810 (§17), with the veto forms its fixers recorded for the owner; the record
+(`record.json`, `dispositions.md`, the lens files and the five fix reports) is in the session notes, its summary in
+`../TODO.md`; the owner's signature is B40.
+
 The delta review's "not verified" list (§13.3) joins `threat-model.md` §8, `README.md` and `SECURITY.md` by the
-build's documentation package; the release checklist's item 6 repeats it. The build reserves B39 for its own, the code
-review's and the fix wave's decisions, in P7's form (D359-D430, D431-D486).
+build's documentation package; the release checklist's item 6 repeats it. B39 holds the build's, the integration's,
+step R's and the fix wave's decisions, D643-D810, in P7's form (§17).
 
 ---
 
@@ -4759,6 +4854,11 @@ Written into the files named when the build starts, marked "(Phase 8, specified 
 "(Phase 8, built …; P8 §n)" once built; the P1 passages carry their A-numbers (§10). Each package writes its notes under
 its tag (in parentheses after each row) and never rewrites another's passage; the orchestrator merges by tag. One table
 per document; where two packages mark one section, both rows stand and the build merges them into one passage.
+**As built** (2026-10-19/20): every row below is written where it names, marked "(Phase 8, built 2026-10-19, <TAG>; …)"
+or with its A-number; the fix wave's corrections carry their own marks ("Fix wave (Phase 8 review, <TAG>, …)", "(Phase 8
+security fix, S<nnn>, <TAG>)"); the integration kept two tags' passages side by side (D765), and the documentation pass
+of 2026-10-20 merged each such pair into one text, each fact once, both tags in its mark; the threat model's Phase 8
+rows and lines are marked built in its status line and §9.
 
 **`phase1-contracts.md` (P1)**
 
@@ -4971,7 +5071,7 @@ only its "(Phase 8, built …)" marks and the delta review's findings)
 
 | Section | Change |
 |---|---|
-| "Known limitations" | the eight limitation sentences of §11, (a) to (h): the veto's uncovered key bindings, a window veto not covering `web.*` input into a browser inside it (gap 126) and the failed-module case (EA); the quiescent overrun and the uncancellable read (ET); events masked by key and policy at publish (on attach, the module-install window by key only), the CDP path's own events not, the view-less browser masked while any mask is registered (EW); the Byteman later-loaded subtype and the add-only deny (EH); the secret-echo check's equality for short secrets, an undetectable composite, `taken` as application data (ES); the `events` root's window (EX); pack code on the controller with no host timeout (EP); the Playwright gate proved through a seam (EW) |
+| "Known limitations" | the eight limitation sentences of §11, (a) to (h), as built (the fix wave's additions to (a), (b), (c) and (f)), and (i), S180's release note: the veto's uncovered key bindings, a window veto not covering `web.*` input into a browser inside it (gap 126) and the failed-module case (EA); the quiescent overrun and the uncancellable read (ET); events masked by key and policy at publish (on attach, the module-install window by key only), the CDP path's own events not, the view-less browser masked while any mask is registered (EW); the Byteman later-loaded subtype and the add-only deny (EH); the secret-echo check's equality for short secrets, an undetectable composite, `taken` as application data (ES); the `events` root's window (EX); pack code on the controller with no host timeout (EP); the Playwright gate proved through a seam (EW) |
 | "Run outputs", "A page's pixels are masked as a whole" | events are masked by key and by the pack's policies; a browser without a view is masked while any mask is registered, released only by a `BrowserMask` (EW) |
 | "Reviews" | the delta review's record (§15, B40), written by the build's documentation pass (EE) |
 
@@ -4991,44 +5091,47 @@ only its "(Phase 8, built …)" marks and the delta review's findings)
 
 ### 16.2 Open SPI and DSL gaps: what Phase 8 takes, what it defers, what it opens
 
-**Taken** (the row's number, what the wave asked, where it lands, what closes):
+**Taken** (the row's number, what the wave asked, where it lands, what closes). **As built** (2026-10-20): the last
+column gives each row's final state, **closed**, **partly closed** (what stays open has a gap number of its own) or
+**open (deferred)**, the package that built it on 2026-10-19 and what the fix wave of 2026-10-20 changed:
 
 | # | Gap | In Phase 8 |
 |---|---|---|
-| 9 | one application lane | **closed** (§4.2): base-owned named lanes, `ThreadPolicy.LANE`, `DataSourceProvider.lane()`, `data.query`'s hand-off and per-source gate; `APP` stays unbounded by decision (D528, Q13; gap 136) |
-| 10 | a thread policy for the engine thread at a quiescent point | **closed** (§4.1): `APP_QUIESCENT`, `QuiescentPoint`, admission by budget, the one exemption, the penalty, `agent.info.threads.quiescent`; the hook-entered runner stated, not proven (§13.3) |
-| 11 | query timeout advisory, no cancellation | **closed** (§4.3) for provider reads and the JDBC form: `QueryControl`, `enforcesTimeout()`, the statement sink; `open()` stays unbounded (gap 135) |
-| 12 | positional sources | **closed** (§4.4) for reading by name and the masks: labels derived from the statement inside the target; the zero-row width defect fixed (§4.8) |
-| 13 | session-scoped data reads | **deferred** (§1, D533): the second domain's agent primitives cover its cases; admission of a procedure call is this gap's prepared read, not a lone `CALL`; a security pass owed when taken |
-| 18 | the semantic-input result contract | **closed** (§7.1-§7.3): the warning channel in the envelope, `InputResult`, `accept`, `data.reason` |
-| 19 | conditional or optional planned calls | **closed by the stated rule** (§7.5): one agent-side composite, `CompositeResult`, the prompt reconciliation and the secret-echo check; the conditional call form stays open (gap 142) |
-| 20 | expectations relative to an earlier step | **closed** (§8.7, §8.8): `captureFacts` and deltas against a captured count |
-| 21 | event expectations | **closed for the agent's bus** (§8.6, §8.5, §8.8, §8.3): the `events` root with a regex on the source, `[json]`, negation as a count, dotted filter fields; a CDP path's own events are gap 146; no negated-wait verb by decision (D607) |
-| 22 | rung ladders for pack verbs | **closed** (§7.6, §7.3): `rungs`/`minRung` on the call, the rung chosen agent-side and enforced, the rung in device results, `DeviceAdapter.rungs` |
-| 24 | scenario-level preconditions on application configuration | **closed as a decision** (§9.4): configuration is a capability, probed or pack-evaluated, in `requires:` or a guard; no `preconditions:` key; the sample proof is scenario A's `requires` |
-| 28 | pack-defined artifact kinds | **deferred** (§1): low; the workaround stands; the seam named |
-| 29 | a pack-contributed CLI subcommand | **deferred** (§1): low; the seam named |
-| 105 | an agent module cannot veto input to a component | **closed** (§3.2) for the Swing routes; `web.*` input into a vetoed browser component stays open (gap 126) |
-| 106 | a pack cannot contribute a capability | **closed** (§9.1): the SPI, the merge, the sources, the records, every host; `re-resolve` fixed |
-| 107 | input-correlated acknowledgement | **closed** (§7.4): `inputId`, late acknowledgements, `ackByInputId`, the EVENT pattern in the guide |
-| 108 | counting and list-valued filters | **closed** (§8.3, §8.4): the list form, dotted fields, `size` with a nested matcher documented |
-| 109 | personal data in module event payloads | **closed** (§5.1), with the residual gap 138 (the CDP path's own events) |
-| 110 | a browser that has no view is never masked | **closed** (§5.2): the view-less rule, `BrowserMask`, the events, the selection, the action answers (D637), the CDP hand-offs; `web.evaluate`/`web.waitFlag` on a masked browser stay S111's residual; JxBrowser unverified (gap 41) |
-| 111 | a named `on_prompt` value silently means "pack policy" | **closed** (§9.2): `fail` or `pack`, anything else refused; named policies left for later without a break |
-| 112 | pre-flight runs once per scenario; the guide says once per suite | **closed** (§9.3): the scope, the cache, one helper, the prose corrected |
-| 113 | hook ownership by code source | **closed** (§6.2-§6.4, §6.8, §6.10): `target.codeSource`, qualified `packages`, the reporting; the deliberate limit is D556's file-name rule |
-| 114 | a per-catalogue class deny-list | **closed** (§6.3, §6.5-§6.9) but one residual (gap 140) |
-| 115 | routed pointer into heavyweight containers | **closed** (§3.4) on the Linux image; the Windows/macOS peers unverified |
-| 116 | `isShowing()` is not "on screen" | **closed** (§3.3); the custom-scroller case documented (gap 130) |
-| 117 | positional sources and the allow-list start check | **closed** (§4.4) for the start check's path; the metadata primitive is gap 133 |
-| 118 | an "any of" matcher, partial-object list membership | **closed** (§8.4) as asked; quantifiers over scalar lists are gap 145 |
-| 119 | `SqlAllowList.procedures` cannot be used | **closed by retirement** (§4.5): every `CALL`/`EXEC` refused with a reason, the field reserved and required empty, the catalogue silent; admission deferred with 13 |
-| 120 | a list-valued `await` match | **closed** (§8.9): `{has: scalar}` through `PayloadMatch` |
-| 121 | Playwright cannot be pinned below 1.60 | **closed as a gate** (§5.3): field-presence detection, the opt-in, the leak fixed, the floor stated; an older line unverified |
-| 122 | AWT `Button` and `Checkbox` in the click ladder | **closed** (§3.5) for `Button`/`Checkbox`; other AWT controls are gap 129 |
-| 123, 124, 125 | custom-painted text; a `DISPATCH` click at a region; a posted-key rung | **deferred** (§1): low; the seams named |
+| 9 | one application lane | **closed**, built (ET; §4.2): base-owned named lanes, `ThreadPolicy.LANE`, `DataSourceProvider.lane()`, `data.query`'s hand-off and per-source gate; `APP` stays unbounded by decision (D528, Q13; gap 136) |
+| 10 | a thread policy for the engine thread at a quiescent point | **closed**, built (ET; §4.1): `APP_QUIESCENT`, `QuiescentPoint`, admission by budget, the one exemption, the penalty (keyed by module for a module's own tasks: fix wave, FB, L2-F3, D785), `agent.info.threads.quiescent`; the hook-entered runner stated, not proven (§13.3) |
+| 11 | query timeout advisory, no cancellation | **closed**, built (ET; §4.3) for provider reads and the JDBC form: `QueryControl`, `enforcesTimeout()`, the statement sink; the fix wave (FB: S159, S161, L1-F4, L1-F5; D781-D784): a closed handle's action never starts, a statement prepared after the module gave up never runs, a rejected cancel batch is reported, a read ending on the interrupt gets the module's own answer; `open()` stays unbounded (gap 135) |
+| 12 | positional sources | **closed**, built (ET; §4.4) for reading by name and the masks: labels derived from the statement inside the target; the zero-row width defect fixed (§4.8); the fix wave (FB: S160 with L1-F3, S162-S164; D776-D780): an unnamed column is masked under the names its item reads or withheld while a mask is registered, only a wider result drops the labels, derived names are asked in both cases, a quoted star table keeps its quotes |
+| 13 | session-scoped data reads | **open (deferred)** (§1, D533): the second domain's agent primitives cover its cases; admission of a procedure call is this gap's prepared read, not a lone `CALL`; a security pass owed when taken |
+| 18 | the semantic-input result contract | **closed**, built (ES; §7.1-§7.3): the warning channel in the envelope, `InputResult`, `accept`, `data.reason` |
+| 19 | conditional or optional planned calls | **closed by the stated rule**, built (ES; §7.5): one agent-side composite, `CompositeResult`, the prompt reconciliation and the secret-echo check; the conditional call form stays open (gap 142) |
+| 20 | expectations relative to an earlier step | **closed**, built (EX; §8.7, §8.8): `captureFacts` and deltas against a captured count; the fix wave (FC: S150, S177): a captured value is judged on the masked view before its size is measured and holds at most 64 KiB of JSON |
+| 21 | event expectations | **partly closed**, built (EX; §8.6, §8.5, §8.8, §8.3) for the agent's bus: the `events` root with a regex on the source, `[json]`, negation as a count, dotted filter fields; the fix wave (FC: S149, S151): an event cut at publish fails the read, and a regex or `[json]` a bound stops ends `ERROR`; a CDP path's own events stay open (gap 146); no negated-wait verb by decision (D607) |
+| 22 | rung ladders for pack verbs | **closed**, built (ES; §7.6, §7.3): `rungs`/`minRung` on the call, the rung chosen agent-side and enforced, the rung in device results, `DeviceAdapter.rungs` |
+| 24 | scenario-level preconditions on application configuration | **closed as a decision**, built (EP; §9.4): configuration is a capability, probed or pack-evaluated, in `requires:` or a guard; no `preconditions:` key; the sample proof is scenario A's `requires` (and scenario D's, D766) |
+| 28 | pack-defined artifact kinds | **open (deferred)** (§1): low; the workaround stands; the seam named |
+| 29 | a pack-contributed CLI subcommand | **open (deferred)** (§1): low; the seam named |
+| 105 | an agent module cannot veto input to a component | **partly closed**, built (EA; §3.2) for the Swing routes and widened by the fix wave (FA: L1-F1 = L2-F1, L2-S1, L2-F2, L2-F5, S155, S156; D768-D773): a popup's items through their opener, the default button of every root pane on the walk and a `'\n'` in `DISPATCH` text, a press's release asked again on the routed and the Robot route; `web.*` input into a vetoed browser component stays open (gap 126, medium), and the fix wave's residuals are gaps 153 and 154 |
+| 106 | a pack cannot contribute a capability | **closed**, built (EP; §9.1): the SPI, the merge, the sources, the records, every host; `re-resolve` fixed; the MCP catalogue that lists them within its answer bound (fix wave, FD, L1-F2; D795) |
+| 107 | input-correlated acknowledgement | **closed**, built (ES; §7.4): `inputId`, late acknowledgements, `ackByInputId`, the EVENT pattern in the guide; §13.2 item 27's race seen end to end only sometimes, its check able to fail since the fix wave (FD, L3-F1; D734, D801, D802) |
+| 108 | counting and list-valued filters | **closed**, built (EX; §8.3, §8.4): the list form, dotted fields, `size` with a nested matcher documented; a single filter that matches twice is ambiguous (fix wave, FC, S154; D791) |
+| 109 | personal data in module event payloads | **closed**, built (EW; §5.1), with the residuals gap 138 (the CDP path's own events) and gap 139 (the module-install window on attach, masked by key only); `OutputScan` finds more and reads more (fix wave, FD, S152; D796-D798) |
+| 110 | a browser that has no view is never masked | **closed**, built (EW; §5.2): the view-less rule, `BrowserMask`, the events, the selection, the action answers (D637), the CDP hand-offs; the fix wave (FE: S165-S172, S179; D803-D810): a locator action on a masked browser refused, a masked browser blanked in every Swing capture and hit-test, a browser judged again on its events, a tag kept only while the seed gives it; `web.evaluate`/`web.waitFlag` on a masked browser stay S111's residual; a browser masked while it is open is gap 155; JxBrowser unverified (gap 41) |
+| 111 | a named `on_prompt` value silently means "pack policy" | **closed**, built (EP; §9.2): `fail` or `pack`, anything else refused; named policies left for later without a break |
+| 112 | pre-flight runs once per scenario; the guide says once per suite | **closed**, built (EP; §9.3): the scope, the cache, one helper, the prose corrected |
+| 113 | hook ownership by code source | **closed**, built (EH; §6.2-§6.4, §6.8, §6.10): `target.codeSource`, qualified `packages`, the reporting; the deliberate limit is D556's file-name rule (a name decoded before it is cut, `\` a separator: fix wave, FD, S178; D799) |
+| 114 | a per-catalogue class deny-list | **closed**, built (EH; §6.3, §6.5-§6.9) but one residual (gap 140); the echo is asked of `hook.health` before the install too (fix wave, FD, L2-F4; D800) |
+| 115 | routed pointer into heavyweight containers | **closed**, built (EA; §3.4) on the Linux image; the Windows/macOS peers unverified |
+| 116 | `isShowing()` is not "on screen" | **closed**, built (EA; §3.3); the custom-scroller case documented (gap 130) |
+| 117 | positional sources and the allow-list start check | **closed**, built (ET; §4.4) for the start check's path; the metadata primitive is gap 133 |
+| 118 | an "any of" matcher, partial-object list membership | **closed**, built (EX; §8.4) as asked; an undecidable regex is `ERROR` under `anyOf` and `containsWhere` too (fix wave, FC, S149); quantifiers over scalar lists are gap 145 |
+| 119 | `SqlAllowList.procedures` cannot be used | **closed by retirement**, built (ET; §4.5): every `CALL`/`EXEC` refused with a reason, the field reserved and required empty, the catalogue silent; admission deferred with 13 |
+| 120 | a list-valued `await` match | **closed**, built (EX; §8.9): `{has: scalar}` through `PayloadMatch` (no text of a nested value under the ring lock: fix wave, FB, S158); a client's raw match on an unmasked payload is gap 151 (S180) |
+| 121 | Playwright cannot be pinned below 1.60 | **closed as a gate**, built (EW; §5.3): field-presence detection, the opt-in, the leak fixed, the floor stated; an older line unverified |
+| 122 | AWT `Button` and `Checkbox` in the click ladder | **closed**, built (EA; §3.5) for `Button`/`Checkbox`; other AWT controls are gap 129 |
+| 123, 124, 125 | custom-painted text; a `DISPATCH` click at a region; a posted-key rung | **open (deferred)** (§1): low; the seams named |
 
-**New, numbered 126-150** (the TODO table's five columns; the tag names the section that opened the gap):
+**New, numbered 126-150** (the TODO table's five columns; the tag names the section that opened the gap). **As built:** all
+twenty-five stay **open** as written; neither the build nor the fix wave closed one.
 
 | # | Gap | Why it matters | Proposed shape | Phase |
 |---|---|---|---|---|
@@ -5058,6 +5161,17 @@ only its "(Phase 8, built …)" marks and the delta review's findings)
 | 149 | `caps --pack` evaluates pack capabilities without credentials | a source served over JDBC only shows `UNAVAILABLE` there while a run reads it `OK` | `--env` and `--credentials` on `caps` through `BindArgs` | later; low (EP) |
 | 150 | a `SUITE` answer has no time-to-live | a very long suite keeps a stale `OK`; the failure then shows at bind or a step | `SuiteCache.create(int, Duration maxAge)` | later; low (EP) |
 
+**New, numbered 151-155** (opened by the open items of the build's and the fix wave's reports and numbered at the
+documentation pass of 2026-10-20; the tag names the report that opened the gap; all five **open**):
+
+| # | Gap | Why it matters | Proposed shape | Phase |
+|---|---|---|---|---|
+| 151 | A client's raw `sync.await`, or a pack verb whose argument flows into a `match`, compares the raw payload of an event the agent did not mask, by equality | an MCP client or a model that can call `sync.await` (a base read on every MCP server) can confirm guesses at a short secret in such a payload, one call per guess; a refusal of a literal the mask changes would itself be the oracle; the residual is S180 (low, latent), proposed for acceptance with a release note (§15) | rewrite such an entry, or the marker, into one that never matches, at the session's raw-call and verb-argument boundary (§7's `CallRunner`) before the call is sent | later; low (FC) |
+| 152 | The privacy chain (`ComponentView.masked`) walks parents only: a masked combo's popup list and the items of a masked window's heavyweight popup are not masked | the veto's walk had the same gap and the fix wave closed it there (D768); a mask's walk still misses a popup drawn as its own window | the veto's successor `InputVetoes.next` (a popup to its invoker, a popup window to its owner) for the mask's walk too | later; low (FA) |
+| 153 | The Robot route's release question is not atomic with the native release | a popup or a drop zone the application shows after the question (a submenu's open delay, a timer, a native drag's own window) receives the release (D771) | D771's veto form (a): a static refusal of a Robot `DRAG` while a veto is registered when the press target is a menu element, has a component popup menu or the button is `RIGHT` | if asked; low (FA) |
+| 154 | A `JRootPane` placed off the key target's walk and outside a `JInternalFrame` is not asked for ENTER | such a root pane registers its default button under the window, so ENTER presses it without the veto being asked (D769) | D769's veto form: walk the window for every `JRootPane` whose top ancestor is the window (a walk of the whole window per ENTER) | if asked; low (FA) |
+| 155 | A browser that becomes masked while it is open sends page data until it is judged again | the judgement is event-driven, at most once per 2 s (D809), so its events carry page text for up to about 2 s after its next event; the SPI registry has no registration signal | a registration signal in the agent's SPI registry on which the web module judges its flags again at once | later; low (FE) |
+
 **Defects found in passing and fixed by this contract** (each in its section; none left open): the pointer's component
 form delivered to whatever lay at a point its component does not show, and `swing.hitTest`'s `deepest` descended
 heavyweights while `mouseTarget` did not (§3.3, §3.4; the bare `isShowing()` check duplicated in three target forms is
@@ -5074,25 +5188,32 @@ filter on the field `*…` and silently never matching, step and call keys unche
 nested matcher built since Phase 1 but documented as `{size: n}` only, nine copies of the payload-match rule (§8);
 `ReResolveCommand`'s `requires` check against the agent-only matrix (§9.1.5). Observed and left as stated:
 `HookInstaller` reads `hook.health`'s `catalogue` leniently, which is what lets the `alreadyInstalled` echo check sit
-beside it without a wire change (§6.9).
+beside it without a wire change (§6.9). **As built**, the build, the integration and the fix wave found and fixed more in passing, each
+with a test: a no-op version replacement that left `Phase3CompileTest`'s version 2 read untested (EX); the desk's
+listener list iterated by the engine thread while other threads change it (D683); the `devices` root not mirroring
+`rungs` (ES, found by the scanner leg); a `captureFacts` step losing its `facts` under a strict UI after the merge
+(D763); a `containsWhere` message test depending on `Map.of`'s order (D764); a race in `EngineIdleTest` (FB) and a timing
+hole in §13.2 item 27's loop (D802).
 
 ---
 
-## 17. Decisions taken in this contract (D501-D642)
+## 17. Decisions taken in this contract (D501-D642), by its build (D643-D767), and by its fix wave and security fixes (D768-D810)
 
 D501-D623 are the seven fragments' decisions in section order (the tag and the fragment's own number in parentheses:
 EA D501-D518, ET D519-D538, EW D539-D555, EH D556-D575, ES D576-D593, EX D594-D608, EP D609-D623); D624-D635 are the
 editor's, taken while harmonising; D636-D642 are the reviser's, taken on 2026-10-19 after the contract review (the
-finding in parentheses; rows amended by the review carry "(revised: <finding>)"). The build's decisions follow from
-D643, numbered by the orchestrator at integration (B39), in a table of their own.
+finding in parentheses; rows amended by the review carry "(revised: <finding>)"). The build's, the integration's and
+step R's decisions, D643-D767, and those of the fix wave that closed the code review and the security delta review,
+D768-D810, follow the table below in tables of their own, numbered by the orchestrator at the documentation pass of
+2026-10-20 (B39); a row below that one of them amends or widens carries a mark in italics.
 
 | # | Decision | Alternatives rejected | Reason |
 |---|---|---|---|
-| D501 | One SPI `InputVeto` (`String refuse(Component, String route)`, route constants, `ANY`), ancestor rule to the window, fail closed, memoised per call (§3.2) (EA 1) | a three-valued `ActionFirer`; `LocatorResolver` hiding; a pack-side deny-list; an option-configured veto; a `STUB` hook; reusing `masked` | only an agent-side check on every route covers refs, coordinates, raw calls and the routed pointer's real target; `CaptureMask` is the fail-closed precedent; the ancestor rule lets a layer veto a panel in one answer |
-| D502 | Asked on every route after `requireClickable`, before the modal test; default type/key targets and ENTER's default button included; never skipped by `force` (EA 2) | explicit targets only; `force` skips | a focused vetoed key takes SPACE/ENTER like a click; ENTER fires the default button by Swing's own binding; `force` is a person's way past a dialog, never past a safety rule |
+| D501 | One SPI `InputVeto` (`String refuse(Component, String route)`, route constants, `ANY`), ancestor rule to the window, fail closed, memoised per call (§3.2) (EA 1) *(Widened by D768: a popup's chain runs through its opener.)* | a three-valued `ActionFirer`; `LocatorResolver` hiding; a pack-side deny-list; an option-configured veto; a `STUB` hook; reusing `masked` | only an agent-side check on every route covers refs, coordinates, raw calls and the routed pointer's real target; `CaptureMask` is the fail-closed precedent; the ancestor rule lets a layer veto a panel in one answer |
+| D502 | Asked on every route after `requireClickable`, before the modal test; default type/key targets and ENTER's default button included; never skipped by `force` (EA 2) *(Widened by D663: ENTER with any modifier; by D769: the default button of every root pane on the walk, and a `'\n'` in `DISPATCH` text is an ENTER; by D772: the Robot route asks every covering window.)* | explicit targets only; `force` skips | a focused vetoed key takes SPACE/ENTER like a click; ENTER fires the default button by Swing's own binding; `force` is a person's way past a dialog, never past a safety rule |
 | D503 | Every posted task re-asks the veto before it acts; a refusal there is logged and counted (`vetoWithheld` in the Swing module's `AgentModule.info()`, a new additive default shown in `agent.info.modules[]`), not reported; the residual is stated where an author reads it: such a step passes with `fired: true` and only its `sync` or an expectation on the effect fails it (EA 3; revised: C2-F7) | report it in the result; no re-ask | the call answered "posted" and cannot be amended; a state-dependent veto must be atomic with the action; no run host reads `agent.info` after a step, so the counter is an operator's evidence (`skillroy info`) and the statement is what reaches the author |
 | D504 | `reason: "vetoed"` token with the text in `veto`, plus `ref`, `vetoed`, `route`, `hit?` (EA 4) | the row's literal `"vetoed: <text>"` | P7 §3.9's reasons are tokens a consumer switches on; the text has its own key |
-| D505 | The pointer checks per event the component AWT delivers to (the pressed one while a press is down); a refusal is `VETOED` with the press balanced; not skipped by `force` (EA 5) | pre-check only; check the component under every drag point | a drag's events go to the pressed component; the pre-check cannot see a veto that depends on state changed by the press |
+| D505 | The pointer checks per event the component AWT delivers to (the pressed one while a press is down); a refusal is `VETOED` with the press balanced; not skipped by `force` (EA 5) *(Widened by D770 and D771: a press's release is asked again, on the routed and on the Robot route.)* | pre-check only; check the component under every drag point | a drag's events go to the pressed component; the pre-check cannot see a veto that depends on state changed by the press |
 | D506 | Readers flag with route `ANY`: Node `vetoed` only when true, hit-test `vetoed` always, no capture mark, snapshots not pruned (EA 6) | prune vetoed from snapshots; flag on every node | the pinned node shape and every committed golden stay; a model must see the component flagged, not absent |
 | D507 | The recorder and V2's raw pointer refuse a vetoed hit with `Recorder.VETOED`; `UiSnapshotText` flags `vetoed` (EA 7) | rely on the agent's refusal alone | nothing vetoed should become a step, a journal line or an export (D358's reason) |
 | D508 | No capability id, option, topic, code or plan change for Phase 8's Swing input (EA 8) | an id `swing.veto`; a 0.3 protocol | the goldens and matrix hashes stay; `/schema` shows the new keys (D299) |
@@ -5108,7 +5229,7 @@ D643, numbered by the orchestrator at integration (B39), in a table of their own
 | D518 | Additive result keys placed after `masked` (`vetoed`) and after `surface` (`source`); `hitSubset` gains `vetoed` (EA 18) | – | lenient readers; the recorder reads by key |
 | D519 | `APP_QUIESCENT` backed by a base-owned `QuiescentPoint`; admission by declared budget and the caller's remaining time, never pre-empted, overruns measured (ET 1) | a provider-owned `callAtQuiescentPoint` (the row's shape); a separate `QuiescentPointProvider` SPI; a lane with a budget (gap 9's vocabulary) | every module gets one semantics; the core can see, bound and report the queue; the exemption needs one provider; the lane and the point differ in admission, exemption and interruption |
 | D520 | the forbidden-thread exemption is granted only to tasks the core submits through `QuiescentPoint`; nested `call` still `FORBIDDEN_THREAD`; never interrupted (ET 2) | a general "may run on a forbidden thread" flag | the exemption must be as narrow as the mechanism; the sample's engine dies on interrupt |
-| D521 | a 2x overrun penalises the primitive until `reprobe` (ET 3) | log and count only | restrictive default: a module that cannot keep its budget is found at the first run |
+| D521 | a 2x overrun penalises the primitive until `reprobe` (ET 3) *(Amended by D785: a module's own task penalises its module (`module:<id>`).)* | log and count only | restrictive default: a module that cannot keep its budget is found at the first run |
 | D522 | no `WORKER` fall-back for `APP_QUIESCENT` (reads included) (ET 4) | A19's read fall-back | the read is correct only at the point |
 | D523 | no core capability id; a primitive names its own (ET 5) | `app.quiescent` | five goldens and every core capability test would move for an id nothing gates |
 | D524 | enum order `…, APP, APP_QUIESCENT, LANE`; `post` refuses both and names every constant (ET 6) | `LANE` before `APP_QUIESCENT` | one decision for both packages' tests; `post`'s silent worker branch is a defect |
@@ -5116,10 +5237,10 @@ D643, numbered by the orchestrator at integration (B39), in a table of their own
 | D526 | `ThreadPolicy.LANE` for a module's primitives now (ET 8) | `DataSourceProvider.lane()` only | a module's slow non-SQL reads need the same lane; the cost is one builder method and a dispatch case |
 | D527 | `data.query` keeps `WORKER`; the read runs on the lane or a nested worker task; the module times out 250 ms before the dispatcher; a per-source gate (ET 9) | `data.query` on `CALLER` (the caller pool as the waiter); the read inline with a timer thread | `/schema` and `DataModuleTest` unchanged; the worker pool is sized for nested calls; the cancel must fire from another thread anyway |
 | D528 | `APP` not bounded in Phase 8 (ET 10) | at most 8 `APP` calls in flight | a new `BUSY` path for every existing `APP` primitive for a case no target has shown; Q13 |
-| D529 | a scoped `QueryControl` through a five-argument default `query` (ET 11) | `Invocation.onCancel` for every primitive; `cancel(id)` on the provider; interrupt only; `enforcesTimeout` only | Phase 8 needs the data path; the general form is gap 132; an id adds state and races; interrupts do not reach blocking JDBC |
-| D530 | the JDBC form cancels through a `ReadOnlyJdbc` statement sink; seconds rounding unchanged (ET 12) | a watchdog thread in `JdbcExecutor`; rounding up | the sink cancels only an open statement; the cancel covers the rounding's remainder |
-| D531 | labels from the statement inside the target, provider names win; the width from types, returned rows and the derived list (ET 13) | an explicit `columns:[…]` parameter; controller-side relabelling from `SqlGuard`'s parse; a helper only; a `synthetic` flag | parity with `getColumnLabel`; masks in the target see real names; no fifth parameter; the zero-row defect is fixed in the same rule |
-| D532 | `columns(String table)` default null, asked for the star form only; the check unchanged but for a hint (ET 14) | a count fallback; a `data.columns` primitive (gap 133); a pack-declared full column order | the list has no total order; D100 trusts the source, not the pack; the primitive is a later phase's |
+| D529 | a scoped `QueryControl` through a five-argument default `query` (ET 11) *(Amended by D782: a closed handle's action never starts, and `close()` waits for a running one.)* | `Invocation.onCancel` for every primitive; `cancel(id)` on the provider; interrupt only; `enforcesTimeout` only | Phase 8 needs the data path; the general form is gap 132; an id adds state and races; interrupts do not reach blocking JDBC |
+| D530 | the JDBC form cancels through a `ReadOnlyJdbc` statement sink; seconds rounding unchanged (ET 12) *(Amended by D781: a statement prepared after cancellation never runs.)* | a watchdog thread in `JdbcExecutor`; rounding up | the sink cancels only an open statement; the cancel covers the rounding's remainder |
+| D531 | labels from the statement inside the target, provider names win; the width from types, returned rows and the derived list (ET 13) *(Amended by D776-D779: an unnamed column is masked by the names its item reads, or withheld while a mask is registered; only a wider result drops a list; derived names are asked in both cases.)* | an explicit `columns:[…]` parameter; controller-side relabelling from `SqlGuard`'s parse; a helper only; a `synthetic` flag | parity with `getColumnLabel`; masks in the target see real names; no fifth parameter; the zero-row defect is fixed in the same rule |
+| D532 | `columns(String table)` default null, asked for the star form only; the check unchanged but for a hint (ET 14) *(Amended by D780: a quoted part comes in double quotes.)* | a count fallback; a `data.columns` primitive (gap 133); a pack-declared full column order | the list has no total order; D100 trusts the source, not the pack; the primitive is a later phase's |
 | D533 | 119 retired: the guard refuses every `CALL`, `procedures` reserved and required empty where used, the catalogue silent; admission is gap 13's (ET 15) | admit `CALL` on a channel that declares it (two keys, a structured `data.call`, a `ReadOnlyJdbc.call` envelope) | nothing ever ran it; a routine can write through a read-only account; a lone `CALL` serves none of the second domain's cases; a security pass would be owed |
 | D534 | `DataModule.VERSION` literal `0.2.0`, bumped in step R (ET 16) | `${project.version}` as the other modules | the one bump of §2.4; the literal is the contract's own number |
 | D535 | the desk's idle tick (default 100 ms), a dropped input keeps today's timer reset; `IdleView` is the plant; the 1 s lock proof lives in the module's unit test (ET 17) | `inputRequested` as the only point; a new `LendingTarget.Mode` for the lock proof | an idle desk would always be `NOT_READY`; a Mode per proof is heavy for a property that changes the shared desk's behaviour |
@@ -5131,19 +5252,19 @@ D643, numbered by the orchestrator at integration (B39), in a table of their own
 | D541 | 10,000 scalars per event, the rest `<redacted>` and `truncated: true`; mask before the character bound (EW 3) | bound first, then mask (policies see cut strings); no scalar budget (the character bound alone) | a policy must see whole values to recognise one; a 64 Mi character bound admits millions of short scalars, so the publishing thread needs a count bound of its own; `truncated` is the key the bound already uses |
 | D542 | The thread rule of `MaskPolicy` is amended, not a second SPI (EW 4) | an `EventMask` with its own rule | the P6 precedent amended it for hooks; one SPI for "what masks a value" |
 | D543 | `agent.info.events` counters, `slowPasses` and `maxPassMs` among them (EW 5; revised: C2-F11) | a new primitive; nothing | a reader of the matrix sees whether any policy is registered, whether one failed and whether one slows the host's thread; nothing on the wire of `Event` |
-| D544 | `OutputScan` in `skillroy-junit` with the directory form and the per-file form the ten callers use, `SecretScan` deleted; `Scope.EVENTS` (EW 6; revised: C3-F4) | the scenario module's test-jar; keep the sample's copy; the directory form alone | the glue is the layer-facing module and the sample already depends on it; a test-jar is awkward for a layer's tests; a whole-run scan would find the status line's snapshot in a failing run; the callers walk their own directories and loop over `List<String>`, so the directory form alone would mean ten rewrites |
+| D544 | `OutputScan` in `skillroy-junit` with the directory form and the per-file form the ten callers use, `SecretScan` deleted; `Scope.EVENTS` (EW 6; revised: C3-F4) *(Amended by D796-D798: the boundary search, XML character references, the wider `EVENTS` scope.)* | the scenario module's test-jar; keep the sample's copy; the directory form alone | the glue is the layer-facing module and the sample already depends on it; a test-jar is awkward for a layer's tests; a whole-run scan would find the status line's snapshot in a failing run; the callers walk their own directories and loop over `List<String>`, so the directory form alone would mean ten rewrites |
 | D545 | A view-less browser is masked while any `CaptureMask` or `BrowserMask` is registered (EW 7) | fail closed always; `WebBrowser.viewComponent()` so a `CaptureMask` can name it | always-closed changes every web run without masks (the web host's item 2) and contradicts S111's "only while a mask is registered"; JxBrowser has no component at all for a browser found through an engine, and `CaptureMask.masks(Component)` cannot name a null |
 | D546 | `BrowserMask {Boolean masks(String tag, Object vendorObject, boolean hasView)}` in `spi.web` (EW 8) | `default Boolean masksBrowser(tag, vendorObject)` on `CaptureMask`; V1 alone | one interface with two thread rules (EDT and worker) and a web concept in an AWT-typed SPI; V1 alone gives no way to release a page a scenario must read or to mask by tag |
 | D547 | The flag is computed at rebuild (one EDT read for all components, no read for view-less ones) and refreshed per call; a FALSE never overrides a `CaptureMask` (EW 9) | compute only per call (events would need an EDT read on the adapter's thread); FALSE overrides everything | the events of §5.2 (i) need a flag that costs no EDT read on the adapter's thread; a release that could cancel a component mask would be the unsafe side |
 | D548 | `web.browsers.masksRegistered`, absent counts as true on the CDP path (EW 10) | a capability id; a new primitive | an answer field is read where the path already reads the listing; a capability costs five goldens; fail closed for an older agent is §2.1's rule |
-| D549 | A masked browser's events withhold `url`, `text`, `source`, `error` and `detail`, keep `name` and `signal` (EW 11) | let `detail` pass gap 109's policies; withhold `name` too | "no text, no tree" (S111) admits no page data in a payload; `name` and `signal` are what a step waits on, and a pattern name is the pack's, not the page's content |
+| D549 | A masked browser's events withhold `url`, `text`, `source`, `error` and `detail`, keep `name` and `signal` (EW 11) *(Amended by D808: a tap event carries the tap's pattern as `name`.)* | let `detail` pass gap 109's policies; withhold `name` too | "no text, no tree" (S111) admits no page data in a payload; `name` and `signal` are what a step waits on, and a pattern name is the pack's, not the page's content |
 | D550 | `by: {url\|title}` never match a masked entry; summaries withhold URL and title (EW 12) | match but withhold (the match itself is an oracle) | a regex on withheld text reveals it one bit at a time |
 | D551 | The CDP path hands unmapped-page reads, `by: {url\|title}` selections and masked pages' own events to the agent or withholds them while `masksRegistered` (EW 13) | serve unmapped pages as today; apply `rowMasks()` to `PathEvents` | an unmapped page with masks registered is exactly the view-less case the agent now judges; `rowMasks()` on the path's events is a second masking route in Phase 8 for a path parity nobody has asked for (gap 138) |
 | D552 | `ConnectSupport` by field presence, once per JVM, no reflective invocation (EW 14) | `Method.invoke`; a version-string gate; a stated minimum only; compile against an older line | field presence is the real fact and a shaded jar may carry no manifest version; the design already promised the gate; nothing offline resolves an older line |
 | D553 | Without `noDefaults` the CDP path is unused unless the **operator** opts in with `skillroy.cdp.allowDefaultOverrides` (the one departure from the shared defaults: they said "unless the pack opts in") (EW 15) | a `web:` scenario key (`Plan` v7 top-level `web`, `ScenarioLoader`, `ScenarioSchema`, `WebSettings`: four shared files across EX/EP for a line nobody can run); a `DomainPack` default method; accept and log by default (design §3.8's wording) | the overrides change the application's own browser context, which is an operator's risk to accept, as `skillroy.robot` is; the restrictive default is §1's; a pack key would need plan gating and three other packages' files; the veto form is Q21 |
 | D554 | `LinkageError` caught in `connect`: the pending Playwright closed, the thread shut down, `PROTOCOL` (EW 16) | leave `WebRun`'s catch as the only handling | a driver process and a thread leaked per attempt |
 | D555 | The floor stated as "1.61 full, 1.60 untraced, 1.58-1.59 opt-in, below refused; only 1.63.0 run" (EW 17) | "1.58 (unverified)"; "1.60 or later" | say only what the gate guarantees and what was run |
-| D556 | `CodeSources` in `agent-api` reads the location with the URL's field getters only and names it by the outer file name plus inner entry paths, directories never, control characters replaced after decoding, cut at 200; `(none)` and `(unreadable)` as sentinels (§6.2) (EH 1; revised: C2-F6) | the full location; `toExternalForm`/`toURI`; resolving the jar's manifest | a custom protocol's handler is application code and `equals`/`hashCode` may hit the network; a path may hold a user name (D154's precedent); the manifest would mean I/O on a worker for every probe |
+| D556 | `CodeSources` in `agent-api` reads the location with the URL's field getters only and names it by the outer file name plus inner entry paths, directories never, control characters replaced after decoding, cut at 200; `(none)` and `(unreadable)` as sentinels (§6.2) (EH 1; revised: C2-F6) *(Amended by D799: the outer part is decoded before the cut, and `\` is a separator.)* | the full location; `toExternalForm`/`toURI`; resolving the jar's manifest | a custom protocol's handler is application code and `equals`/`hashCode` may hit the network; a path may hold a user name (D154's precedent); the manifest would mean I/O on a worker for every probe |
 | D557 | `target.codeSource` is a regex on the whole name, ≤ 200, compiled in `violation()` (§6.3) (EH 2) | a glob; a plain file name | the row asks for a regex; version suffixes and classifiers are regex-shaped; an anchored match keeps `lending-app.*` honest |
 | D558 | A filter, like `loader`: a non-matching copy is left alone; inheritance from the longest qualified `packages` name, baked into the spec at read or build (§6.4, §6.8) (EH 3) | requirement semantics (every loaded copy must match); a catalogue-level default `codeSource` | a plugin loader's second copy from another jar is legitimate and must not fail the hook; one default cannot say "package A from jar X only"; baking keeps spec, entry hash and catalogue hash in one place |
 | D559 | Report code sources in the probe, `touched`, a new `hook.health.classes` and the CLI; never the directory (§6.4, §6.10) (EH 4) | code sources in `hook.probe` only | `skillroy hooks status` reads `hook.health` only (D180) |
@@ -5152,7 +5273,7 @@ D643, numbered by the orchestrator at integration (B39), in a table of their own
 | D562 | `ClassDeny.refuse(String className)` in `agent-api`, null or a reason, a throw refuses, name-only, workers only (§6.5) (EH 7) | a loader argument; a boolean | parallel to `InputVeto.refuse`; the Byteman check runs before any class is found; a reason is evidence |
 | D563 | Three sources (option, catalogue, modules), the option first then registration order, first refusal wins, consulted at every probe, install, check and submit; item 2b before "loaded?" (§6.4, §6.5) (EH 8) | the catalogue only; a transform-time check | a Byteman-only target has no catalogue; a module knows its application; only ledger classes are transformed, so a denied class never reaches a transformer |
 | D564 | The held catalogue deny is add-only for the engine instance, merged before the conflict check, bounded at 256; loosening needs a restart (§6.6) (EH 9) | replace on `replace: true`; clear on `hook.remove {}` | an engine must never be looser than an earlier reviewed statement it accepted; the bound keeps the union finite |
-| D565 | The installer requires the echo (`catalogue.deny` in the install answer, `deny.catalogue` in health on the `alreadyInstalled` path) and fails closed without it (§6.9) (EH 10) | a capability id for the feature; a `/schema` check | an id costs five goldens for a gate; the echo proves the agent *applied* the list, which a schema cannot (§2.1, §2.4) |
+| D565 | The installer requires the echo (`catalogue.deny` in the install answer, `deny.catalogue` in health on the `alreadyInstalled` path) and fails closed without it (§6.9) (EH 10) *(Amended by D800: `hook.health`'s `deny` is asked before `hook.install` as well.)* | a capability id for the feature; a `/schema` check | an id costs five goldens for a gate; the echo proves the agent *applied* the list, which a schema cannot (§2.1, §2.4) |
 | D566 | A deny the installer cannot deliver is recorded (`denyNotDelivered`, with `agentOption` read from `rule.list` when a `rule.*` capability exists) and the option `hooks.deny` is the remedy; no core primitive; a 0.1.0 agent's silent ignoring of the option is stated (§6.5, §6.9, §6.12) (EH 11; revised: C2-F10) | a core primitive `agent.deny` sent whatever the hooks mode | a hooks feature should not add a core primitive and a controller call; the option covers the Byteman-only target; the record makes the gap visible, and says whether the remedy is in force |
 | D567 | A deny-only catalogue is sent as a zero-spec `hook.install` (§6.9) (EH 12) | treat it as "no catalogue" | its deny would otherwise never reach the target; D183 keeps it unrecorded as installed |
 | D568 | A hook installed before its class was denied is flagged (`deniedNow`), not removed (§6.6) (EH 13) | removing it at the next install | a removal nobody asked for is a mutation; the flag and the record make it visible to a person |
@@ -5184,18 +5305,18 @@ D643, numbered by the orchestrator at integration (B39), in a table of their own
 | D594 | No new capability id, topic, error code, option or SPI in this section; the protocol stays 0.2 (EX 1) | a `0.3` minor to gate `{has}`; a capability id for the events root | every change is controller-side or an additive meaning of an existing parameter; a minor bump buys nothing (`/ping` compares majors) and an id would churn five goldens; a 0.1.0 agent fails closed (`SYNC_TIMEOUT`) |
 | D595 | One plan version, 7, written always; the reader accepts 1-7 and gates each new item with a named message (EX 2) | the lowest version a plan needs (no churn for unchanged scenarios) | guide §4.4's rule and every earlier phase; `resolveHash` is untouched, so bindings survive; one version serves every Phase 8 package (regenerated once per cause, D626) |
 | D596 | From 7 on, step and call objects are key-checked (an allow-list each, the §7 modifier keys reserved by name) (EX 3) | keep the leniency; check only EX's keys | an unknown key silently dropped is how a plan runs without its own rules; reserving §7's names lets EP add readers without touching the check |
-| D597 | `[*…]` on a non-list is unresolved (so `{size: 0}` needs a real list); `exists` holds on an empty filtered list (EX 4) | resolve to an empty list on null; make the single filter return a list when several match | the first hides a missing fact behind a passing "none"; the second changes every committed path's meaning and `exists` |
+| D597 | `[*…]` on a non-list is unresolved (so `{size: 0}` needs a real list); `exists` holds on an empty filtered list (EX 4) *(Amended by D791: a single filter that matches twice is ambiguous.)* | resolve to an empty list on null; make the single filter return a list when several match | the first hides a missing fact behind a passing "none"; the second changes every committed path's meaning and `exists` |
 | D598 | No projection (`lines[*…].qty` does not resolve); counting through the existing `size` (EX 5) | a `.count` pseudo-field or `[#]`; a `some`/`every` quantifier in Phase 8 | `.field` on a list means an index today; `.count` collides with real fields; `size` is built and tested; quantifiers are gap 145 |
-| D599 | One regex budget per matcher evaluation threaded through nested matchers; the path's budget separate (EX 6) | a budget per `matches` as today | `containsWhere` over 10,000 entries would allow 10,000 s; S24 said "one per evaluation" |
+| D599 | One regex budget per matcher evaluation threaded through nested matchers; the path's budget separate (EX 6) *(Amended by D790: a spent budget is undecided, never a pass.)* | a budget per `matches` as today | `containsWhere` over 10,000 entries would allow 10,000 s; S24 said "one per evaluation" |
 | D600 | `containsWhere` refused in stored-row checks; `anyOf` allowed (EX 7) | let it fail at run | a cell is a scalar; refusing at compile is the restrictive and the clearer form |
-| D601 | `[json]` as a path segment with a 1 Mi and depth-200 bound; no `json:` matcher (EX 8) | a `json: matcher` matcher | a segment can be followed by `.qty` and filters; a matcher cannot; both later if asked |
-| D602 | The `events` root fails the read on any loss (first-page eviction, a gap while paging, ten full pages) (EX 9) | `truncated: true` and a lower bound as `hooks` does | `hooks` counts "at least"; a count that a `{size: 0}` or a delta rests on must be exact or absent |
+| D601 | `[json]` as a path segment with a 1 Mi and depth-200 bound; no `json:` matcher (EX 8) *(Amended by D787 and D790: the view masks what `[json]` parses again, and a stop at its bounds is undecided.)* | a `json: matcher` matcher | a segment can be followed by `.qty` and filters; a matcher cannot; both later if asked |
+| D602 | The `events` root fails the read on any loss (first-page eviction, a gap while paging, ten full pages) (EX 9) *(Widened by D740: each page is checked whole; by D789: a cut event fails the read.)* | `truncated: true` and a lower bound as `hooks` does | `hooks` counts "at least"; a count that a `{size: 0}` or a delta rests on must be exact or absent |
 | D603 | The root reads the agent's bus only; payloads as published (§5's masking at publish applies unchanged) (EX 10) | merge the CDP path's events with a `path` marker | two sequences that do not interleave; a session's `eventsSince` merges them for display, not for counting; gap 146 |
 | D604 | `captureFacts` is a base verb, reserved; the step has no calls and no retry (EX 11) | `capture:` on `mark`; a `since: <step>` modifier on expectations; keep agent-published counts | `mark` mixes an agent call with a controller read; `since` needs a history the controller has not; the verb is explicit and reviewable; §2.2 reserves new base verb names |
-| D605 | Under `expectationsOnMaskedValues` a masked captured value fails the step; sessions carry the verb (the session mask always) (EX 12) | drop or refuse the verb in sessions; capture masked text | a captured secret would become an operand or an argument; a dropped member is the defect map E found; a session export must replay it |
-| D606 | `{has: scalar}` only, text equality, named `has`; validated at compile (`waitFor`, pack `sync.await` calls), at read (7), and by the agent (`INVALID_PARAMS`) (EX 13) | controller-side evaluation of operator entries (intercept every `sync.await`); nested key paths; `contains` | the interception would loop every wait on the controller; a dotted key is a literal key today; `contains` promises the expectation matcher's numeric and substring rules |
+| D605 | Under `expectationsOnMaskedValues` a masked captured value fails the step; sessions carry the verb (the session mask always) (EX 12) *(Widened by D787 and D788: every path is followed on the masked view.)* | drop or refuse the verb in sessions; capture masked text | a captured secret would become an operand or an argument; a dropped member is the defect map E found; a session export must replay it |
+| D606 | `{has: scalar}` only, text equality, named `has`; validated at compile (`waitFor`, pack `sync.await` calls), at read (7), and by the agent (`INVALID_PARAMS`) (EX 13) *(Amended by D786: a scalar entry builds no text of a nested value.)* | controller-side evaluation of operator entries (intercept every `sync.await`); nested key paths; `contains` | the interception would loop every wait on the controller; a dotted key is a literal key today; `contains` promises the expectation matcher's numeric and substring rules |
 | D607 | Negation is `{size: 0}` / a delta on the `events` root; no `expectNoEvent` verb (EX 14) | `expectNoEvent {topic, match, since: <mark>, within}` | a second mechanism with its own plan shape, mark bookkeeping and step timing; the expectation form answers both stated needs exactly |
-| D608 | `actual` in `run.jsonl` cut at 200 list elements with `actualTruncated: true` (EX 15) | no cap; a character cap | a filtered `events` list or the root itself would write up to the ring's 64 Mi; a count keeps the record readable and deterministic |
+| D608 | `actual` in `run.jsonl` cut at 200 list elements with `actualTruncated: true` (EX 15) *(Widened by D792: the session's journal, a captured value and a quoted matcher are bounded too.)* | no cap; a character cap | a filtered `events` list or the root itself would write up to the ring's 64 Mi; a count keeps the record readable and deterministic |
 | D609 | Pack capabilities are an SPI on `DomainPack` (`capabilities()` → `PackCapability`), evaluated by the host (EP 1) | a guide rule only ("agent-declared from an owner-only agent option"); `inference.` contributors not forced in replay; a fact-based guard `when:` | the fact lives in the controller's environment (credentials, settings), not the target's launch configuration; a module per fact changes the goldens and cannot read JDBC; D326/P7 Q15 reserved `inference.` for model-backed ids; a fact guard is a grammar change decided from target facts while steps run |
 | D610 | Honoured in `replay`: the context offers no mode, settings or gateway, so the answer cannot depend on the mode; the ledger check guards (EP 2) | force `UNAVAILABLE("replay")` as contributors | the point of 106 is a CI guard that is `OK` where the environment has the fact |
 | D611 | An evaluation failure is `UNAVAILABLE("failed: <exception class>")`, not a refusal; the exception's masked text goes to the log and the record's `error`, never the matrix (EP 3; revised: C2-F9) | D367's refusal; the exception's `toString` as the reason | an evaluation reads the environment; a hiccup must degrade one expectation, not error every scenario; a driver's message can quote a row value, and the reason reaches the `caps` root a model reads (S22's rule on the agent side) |
@@ -5207,7 +5328,7 @@ D643, numbered by the orchestrator at integration (B39), in a table of their own
 | D617 | `AgentConnection.agentSession()` default null, no I/O; `AgentClient` answers its verified session; null never caches (EP 9) | one `/ping` per run when a `SUITE` item exists | no new call on the wire; fakes and wrappers that do not answer are safe by construction |
 | D618 | One helper `Preflight.run` for the four loops; the JUnit glue creates a cache per stream even when options are given (EP 10) | four loops kept in step; a cache only on the `options == null` path | the scope rule cannot drift; the stream is the suite whoever built the options |
 | D619 | `SessionOptions.suite` so the MCP server's `open` and its run executors share one cache (EP 11) | the server's cache for runs only | a `SUITE` check would otherwise run at open and again at the first run |
-| D620 | The sample: `lending.database` becomes `SUITE`; `lending.returns.ceiling` is `SCENARIO`; scenario A requires it (EP 12) | a new `SUITE` check (changes the pinned record count); a new scenario | one record per run stays; scenario A really needs the setting (it resolves `SystemLimit`); the negative lives in a headless test |
+| D620 | The sample: `lending.database` becomes `SUITE`; `lending.returns.ceiling` is `SCENARIO`; scenario A requires it (EP 12) *(Amended by D766: scenario D gains the same entry.)* | a new `SUITE` check (changes the pinned record count); a new scenario | one record per run stays; scenario A really needs the setting (it resolves `SystemLimit`); the negative lives in a headless test |
 | D621 | Gap 24: configuration is a capability (probed or pack-evaluated), in `requires:` or a guard; no `preconditions:` key (EP 13) | a pack-evaluated `preconditions:` key with arguments; a per-scenario pre-flight | duplicates `requires:` plus 106 across a new key, plan field, SPI and failure kind; couples pre-flight to scenarios |
 | D622 | `re-resolve` merges contributors and evaluates pack capabilities before its `requires` check (EP 14) | record only | 106 makes the agent-only check wrong for every pack id; the fix is one hunk |
 | D623 | `caps --pack` evaluates through the agent's channel with empty credentials and env `default` (EP 15) | `UNAVAILABLE("not evaluated")`; `--env`/`--credentials` on `caps` | useful where the agent serves the source; the CLI surface stays; gap 149 for JDBC-only sources |
@@ -5224,12 +5345,239 @@ D643, numbered by the orchestrator at integration (B39), in a table of their own
 | D634 | The `INPUT_REJECTED` and `INVALID_PARAMS` reasons of §3 and §7 are tokens in one registry (§10) beside P7 §3.9's, each with its `data` keys; the sample's `malformedFrame` is the sample's (EE) | the row's literal `"vetoed: <text>"`; free-form reasons | a consumer switches on a token; the text has its own key (D504) |
 | D635 | The core bus lands in the order EW (publish-side masking) → ES (the `publish` overload delegating to the masked path) → EX (`payloadMatches`); the `events` root reads masked payloads by construction and never unmasks (EE) | parallel edits to `RingEventBus` | the masked payload is the one object every reader sees; the order makes it so from the first commit that reads it |
 | D636 | The `v0.1.0` compatibility rules of §2.3 are a decision of their own: the agent API grows by default methods, new types and appended enum constants; controller records grow by components with every older constructor kept; `DomainPack` by defaults forwarded by `DelegatingDomainPack`; the protocol's Java 8 classes by a constructor each, their keys written only when set and read leniently (`HookTarget` strict); reserved names stated (C1-F10) | leaving the rules to `settled` §4 and map I §2.6 | §17 is where the owner sees every choice (B38), and §2.3 was cited as "(D624)", a decision about the protocol and the echo rule that says nothing of the API |
-| D637 | Acting on a masked browser returns no page data (§5.2 (iv)): `web.pointer` carries no `hit`, `web.dom.click`/`web.dom.fill` and the `AMBIGUOUS` candidates carry `role` and `tag` only, on both paths; `redact: false` a person's argument there too (`CallPolicy.MASKED_WEB_READS`) (C2-F1) | refusing the three actions on a masked browser; stripping on the agent path only; emptying the keys instead of dropping them | S111 allows acting on a masked browser (a pack's own flow); the hit summary and the candidates are page text a model or an opted-in client could read one point or one selector at a time (`selector: "*"` returns twenty accessible names), which breaks "masked on every route" in the mask's own terms; the CDP path serves the three itself, so an agent-only fix leaves the route open; dropped keys cannot be mistaken for empty text |
-| D638 | A `data.query` cancel batch runs on a nested worker task of its own, never the dispatching worker; the dispatching worker waits `reserve - 50 ms` for the actions and the read together and answers inside the 250 ms reserve; `cancelled` stays a boolean and `cancelPending: true` is a new key (C2-F2) | the actions on the dispatching worker (the fragment's form); a reserve of 300 ms; `cancelled` as `true \| false \| "pending"` | up to four actions of 2 s plus 500 ms cannot fit a 250 ms reserve, so a slow `cancel()` would let the dispatcher abandon the call by primitive name and bring back §4.8 defect 4, and a synchronous action on the only thread cannot be "abandoned after 2 s"; §2.1 allows new `data` keys, not a changed type on an existing one |
+| D637 | Acting on a masked browser returns no page data (§5.2 (iv)): `web.pointer` carries no `hit`, `web.dom.click`/`web.dom.fill` and the `AMBIGUOUS` candidates carry `role` and `tag` only, on both paths; `redact: false` a person's argument there too (`CallPolicy.MASKED_WEB_READS`) (C2-F1) *(Amended by D803: a locator action on a masked browser is refused unless `redact: false`; the strip stays as the second line.)* | refusing the three actions on a masked browser; stripping on the agent path only; emptying the keys instead of dropping them | S111 allows acting on a masked browser (a pack's own flow); the hit summary and the candidates are page text a model or an opted-in client could read one point or one selector at a time (`selector: "*"` returns twenty accessible names), which breaks "masked on every route" in the mask's own terms; the CDP path serves the three itself, so an agent-only fix leaves the route open; dropped keys cannot be mistaken for empty text |
+| D638 | A `data.query` cancel batch runs on a nested worker task of its own, never the dispatching worker; the dispatching worker waits `reserve - 50 ms` for the actions and the read together and answers inside the 250 ms reserve; `cancelled` stays a boolean and `cancelPending: true` is a new key (C2-F2) *(Amended by D783: a batch the pool rejected is reported `cancelNotStarted`.)* | the actions on the dispatching worker (the fragment's form); a reserve of 300 ms; `cancelled` as `true \| false \| "pending"` | up to four actions of 2 s plus 500 ms cannot fit a 250 ms reserve, so a slow `cancel()` would let the dispatcher abandon the call by primitive name and bring back §4.8 defect 4, and a synchronous action on the only thread cannot be "abandoned after 2 s"; §2.1 allows new `data` keys, not a changed type on an existing one |
 | D639 | `QuiescentPoint.await` refuses `FORBIDDEN_THREAD` at once on the application's thread (`appThread` set by `runOne`) and from inside a task of the point; `timeoutMs` is capped at 120,000; the exemption's text says "a nested call is refused", not "can never wait"; `EventBus.await` stays unchecked and forbidden to a quiescent task by rule (C2-F4) | a forbidden-thread and EDT check inside `RingEventBus.await`; no guard (the Javadoc alone) | the broker's caller check cannot see a direct `await` from the provider's own idle callback, and that wait always runs to its timeout and ends `NOT_READY`; the guard is a few lines in a helper the base owns (D519's reason); a check in the bus changes an API every module uses for a route that is not new in Phase 8 |
 | D640 | `target.codeSource` is matched through `BoundedRegex.find` on the anchored pattern under `BUDGET_MS`; a `TooSlow` refuses the copy `UNAVAILABLE("codeSource regex too slow")`, all copies or none (C2-F5) | "a self-inflicted stall of one worker, recorded" | the base already has the clocked matcher for a caller's pattern on text the target supplies (S46), the probe runs under the engine's lock that every `hook.*` call waits on, and a name is the target's text even when the pattern is a reviewed catalogue's |
 | D641 | The branch-truth rule: a pinned assertion that several packages change (the SPI type list and count, the committed and negative scenario lists, the JUnit glue's id list) is edited by each package on its own branch to its own branch's truth and resolved to the final values by the integrator at merge; a package that adds a committed scenario compiles its plan on its own branch; the windows that stay red until step R are named (EP's scenario A files; ES's recordings and exports; the image's golden check on ET's and ES's branches) and nothing else is expected red (C3-F1, C3-F3, C3-F5, C3-F7) | the counts edited once in step R; no package compiling its plans before step R; "red until R" left unstated | a test red on three branches for the whole phase blocks every rebase and hides real failures; `PlansUpToDateTest.planFor` throws on a scenario without a plan; an integrator resolving a handful of literals is cheaper than a phase without green branches |
 | D642 | Two test rules for the new negatives and plans: `PlansUpToDateTest.theNegativeScenariosCompile` expects a `ScenarioException` naming the message for `accept-unknown-code.yaml` and `min-rung-without-ladder.yaml` and a plan for every other negative; `noScenarioOrPlanHoldsAPassword` allows a `"password"` key whose value is exactly a `$<slot>.password` reference to a credential-declaring slot and refuses every other `"password"` or `password:` (C3-S1, C3-S2) | the two compile-error negatives held in memory in `Phase8CompileTest` (the count then 32); renaming `signOnAny`'s parameter | the negatives belong beside the others and the count stays 34; `password` is the name the agent's secret-key rule masks, which §12.2 relies on, and the test's intent (no literal password) is kept |
+
+
+### Decisions taken by the build, D643-D767
+
+The seven packages took 118 decisions while they built Phase 8 on 2026-10-19 and recorded them in their reports as a
+tag and a number (EX 1 to 14, EP 1 to 16, ET 1 to 20, EW 1 to 18, EA 1 to 12, EH 1 to 17, ES 1 to 21, each package's
+numbers running from 1 without a gap; EX 1-4, EP 1-4, ET 1-6 and EW 1-6 are the decisions of the four early commits,
+and the bodies continue from there). The integrator EI recorded five choices in its report without a number (EI 1 to 5
+below, in the report's order), and step R two in its "As built" note of §12.5 (R 1, R 2). The orchestrator numbered
+them at the documentation pass of 2026-10-20, in the order the commits were built (the early commits EX, EP, ET, EW,
+then the bodies EA, ET, EW, EH, ES, EX, EP, then EI and step R) and by that number within a tag: **EX D643-D646, EP
+D647-D650, ET D651-D656, EW D657-D662 (the early commits); EA D663-D674, ET D675-D688, EW D689-D700, EH D701-D717, ES
+D718-D738, EX D739-D748, EP D749-D760 (the bodies); EI D761-D765; step R D766-D767**. Every "As built" note of this
+contract and every code comment that cited a decision by its tag now cites the number, and the last column keeps the
+tag and the package's own number for the reader of the reports (the session notes' `phase8/docs/id-map.md` has the
+whole map). The section in parentheses after each decision says where it is built. Together they are decision **B39**
+(`../DECISIONS.md`), provisional until the owner answers, as B38 is; the decisions of the code review's fix wave and of
+the security delta review's fixes (§15) are D768-D810, in the table after this one, and join B39. No decision of B1-B37
+is reversed by any of them. Where a decision differs from the contract's own sentence, the passage carries an "As
+built" note, and an amended row of D501-D642 a mark: D663 widens D502 (ENTER with any modifier asks the default button,
+§3.2), D672 settles §3.3's table against item 6 (a collapsed dismiss button is `NOT_FOUND`), D685 changes §13.2 item 12
+(1000 ms), D690 corrects §5.2's per-call formula, D695 §5.4's thread, D698 §13.2 item 17, D702 and D706 settle passages
+where §6 said two things, D739 changes §12.4's capture point, D750, D751, D753, D759 and D760 are among §9.7's deviations, and D766 amends D620
+(scenario D's `requires`).
+
+| # | Decision | Alternatives rejected | Reason | Tag |
+|---|---|---|---|---|
+| D643 | **`PayloadMatch.matches` lets an invalid entry hold never**: a list or map value other than a valid `{has: scalar}` never holds; a scalar is anything but a map, a collection or an array (a set or array element never equals); `problem` quotes at most 100 characters of a key or key list, ASCII only (§8.9) | keep the whole-value text comparison for an invalid entry; throw | every caller refuses an invalid match with `problem` first; never holding is the fail-closed reading, and the agent must not throw under its ring lock | EX 1 |
+| D644 | **The version gates name what they found**, in Phase 7's style: `ExpectationPath.version7Item()` ("a list filter", "a dotted filter field", `[json]`) and `Matchers.version7Matcher()` (the first of `anyOf`, `containsWhere`, walking `not`, `size`, `anyOf` and `containsWhere`; an operand of `equals`, `contains` or `in` is a value), package-private, with messages such as "expectation P: a list filter needs a version 7 plan" (§8.2) | one combined message for the three path items | the contract's table names each item | EX 2 |
+| D645 | **The plan reader's messages where §8.7 is silent**: "step sN: captureFacts needs 'facts'"; "step sN: 'facts' needs a version 7 plan" (a `facts` member below 7 is refused); a check on a `captureFacts` step reads "captureFacts has no calls"; the operator gate on a `sync.await` call's `args.match` reuses the await message, and that match is checked by `AwaitRules.checkMatch` at every version when it is an object (§8.2, §8.7, §8.9) | dropping a `facts` member below 7 silently | a member the reader cannot honour is refused, never lost | EX 3 |
+| D646 | **The whole `facts` reader and writer and the stored-row `containsWhere` refusal land in the skeleton commit**, not in the body (a build order, not a contract change) (§2.5, §8.2) | the body's step 4, as planned | EX's later hunks then leave `Plan.java` to ES (the call keys) and EP (the `onPrompt` check) | EX 4 |
+| D647 | **`AgentClient.agentSession()` answers the session only once a ping verified it** (`lastPing` set; both fields volatile, `lastPing` written after `sessionId`) (§9.3.2) | the raw field, the endpoint's unverified id | §9.3.2 says "as last verified"; `connect` always pings, so the public behaviour is the same | EP 1 |
+| D648 | **Until the body landed, a pack that declared a capability made the evaluation throw `UnsupportedOperationException`** (the early commit's stubs; a pack that declared none was served) (§9.1) | a silent no-op (a `requires:` on a declared id would read "missing"); an `Abort` | honest over silent; nothing declared a capability before the body | EP 2 |
+| D649 | **`SuiteCache`'s open details**: `Key` refuses an unknown kind and a null pack id, id or agent session (null is never cached for); `put` refuses a null answer; at the bound a known key may still be replaced (the last answer wins) and a new one is dropped; the bound is exact (a lock held only while an answer is put, never while a check runs); `maxEntries()`, `KIND_PREFLIGHT`, `KIND_CAPABILITY` and `MAX_MAX_ENTRIES` package-private (§9.3.2) | – (the contract leaves them open) | no public surface beyond §9.3.2; a check never runs under that lock | EP 3 |
+| D650 | **The early commit's stubs name `PackCapability` fully qualified** (§2.5) | imports | the import blocks of `PlanExecutor` and `ExecutorSession`, which ES and EX also extend, stay untouched | EP 4 |
+| D651 | **`SqlTokens` is a token stream** (`WORD`, `SEMICOLON`, `STRING`, `IDENTIFIER`, `OTHER`, `UNTERMINATED_COMMENT`; `unterminated()` on a quoted token); the dialect features, the four readings and the lexical helpers move with it, and `StatementGuard.scan` keeps its rules in the same order over the tokens (§4.4, D537) | a callback visitor | `SelectLabels` needs random access to the tokens, and a stream keeps the guard's loop readable; proven by the unchanged `StatementGuardTest` and a differential run of the old and the new guard over 4.5 million statements (no difference) | ET 1 |
+| D652 | **How `SelectLabels` combines the dialect readings**: a reading that meets an unterminated construct or unbalanced brackets does not count; an item holding a backtick or a bracket that a reading does not treat as a quote is unknown in that reading; the readings that count must split the list alike (else no list) and agree on each entry (else no label); a bracket identifier is an alias only after `AS`; a string literal is never a label; labels keep their case; `[]` and `{}` nest like `()`; `DISTINCT ON (…)` is skipped; the clause words end the list as `FROM` does; `of` and `starTable` run `StatementGuard.check` themselves; `starTable` takes at most three name parts and answers null for `WITH`, `DISTINCT`, `TOP` or a rest holding a set operation, a join, a grouping or a row-pattern word (§4.4) | one standard reading | dialects disagree on comments and quotes; every doubt answers null, the conservative side | ET 2 |
+| D653 | **`QuiescentPoint`'s details**: the public bounds `MAX_ALLOWANCE_MS`, `MAX_CAPACITY`, `MAX_TIMEOUT_MS` (120,000) and `DEFAULT_BUDGET_MS` (50); one task at a time per point (`runOne` returns false while another call of it runs a task); a null task is `IllegalArgumentException`; the counters `refused` and `notReady`; `TIMEOUT` data `{reason, budgetMs, waitedMs}`; an interrupted `await` withdraws its task and rethrows; the exactly-once decision is one compare-and-set on a terminal state that carries the outcome; the monitor is never held while a task runs (§4.1) | – (the contract is silent) | a losing caller never waits again, and the application's thread never waits on an agent monitor | ET 3 |
+| D654 | **`Lane` carries the bounds and `isValidName`**: `PrimitiveSpec.Builder.lane(name)` refuses a bad name at once; `declareLane` throws `IllegalArgumentException` for a name, a thread count or a queue out of bounds and `IllegalStateException` for the ninth lane, a duplicate and a declaration while the agent closes; `ThreadBroker.call(LANE, …)` is refused (§4.2) | serving `call(LANE)` on a default lane | a call names no lane, and the contract named only `post(LANE)` | ET 4 |
+| D655 | **`QueryControl`'s bounds are public constants**, `MAX_ACTIONS` 4 and `ACTION_TIMEOUT_MS` 2000 (§4.3) | private numbers | a provider reads the bounds it must keep | ET 5 |
+| D656 | **The early commit names the two new policies in the broker's switches**: `post` refuses both (final), `run` answered `CAPABILITY_UNAVAILABLE` until the body replaced it, and the core fixture names its lane (§4.1, §4.2, §4.8 defect 5) | the silent `default:` worker branch until the body | the reactor stays green and no interim build routes either policy onto a worker | ET 6 |
+| D657 | **`OutputScan` keeps `leaks(String, Set)` beside `leaksIn(String, Set)`**, the same method (§5.1) | renaming the one caller's form to `leaksIn`; dropping `leaksIn` | §5.1's code block names `leaksIn` while its text and D544 say the callers change only the class name, and a parallel package could follow either sentence | EW 1 |
+| D658 | **`Scope.EVENTS` reads records by their `type` field and reads a session's `journal.jsonl` beside `run.jsonl`**; a line of either file that does not parse is read whole (§5.1) | `run.jsonl` only | `RunLog` and `StepJournal` write `type`, and `step` records exist only in the journal; the restrictive side for a broken line | EW 2 |
+| D659 | **The 10,000-scalar bound applies only while a policy is registered**; without one no scalar is visited and nothing is cut (§5.1) | cutting at 10,000 always | the bound limits policy calls (D541); "nothing changes for a target with no `MaskPolicy`" must hold for large payloads too | EW 3 |
+| D660 | **A failing policy is logged with its exception's class only**; a throw or a return that cannot be stored (NaN, an infinity, a `Number` of a class outside the JDK) ends that scalar's chain as `<redacted>`; a `null` return ends the chain and is kept (§5.1) | logging the message; storing what the policy returned | a message may quote the value, and `agent.log` serves the log; the re-freeze would drop the event or call application code on the publishing thread | EW 4 |
+| D661 | **The end-to-end fixture is `CoreTestModule` behind `coretest.eventMask=on\|throw`**, with the new test `EventMaskingTest` (§5.1, §13.1 row 15) | a new discovered test module | a new entry in the fixture's service file would change the module lists several core tests pin | EW 5 |
+| D662 | **`OutputScan`'s per-file form decodes UTF-8 with replacement** (where `SecretScan` threw) **and recognises a PNG by its name or its 8-byte signature** (§5.1) | throwing on a malformed byte | a binary file cannot hide an ASCII value | EW 6 |
+| D663 | **ENTER with any modifier asks the root pane's default button**, and `swing.type {enter}` asks it in both modes (rule 2 said: without CTRL, ALT or META) (§3.2 rule 2) | the contract's narrower rule | the Basic look and feel binds `ctrl ENTER` to the default button too, so `swing.key ENTER [CTRL]` would have pressed a vetoed button (widened by D769) | EA 1 |
+| D664 | **A default-button refusal keeps rule 5's keys** (`ref` the target, `vetoed` the refusing component by the ancestor rule) **and adds `defaultButton`**; the message says that ENTER would press it (§3.2 rule 5) | `vetoed` = the button (item 3's wording) | `vetoed` keeps one meaning on every route; the button is named by its own key | EA 2 |
+| D665 | **A component whose chain to its window holds more than 64 components is refused**, and flagged `vetoed` by the readers (§3.2 rule 1) | asking 64 levels and allowing the rest | a window or panel veto must not be escaped by depth; failing closed is the SPI's policy | EA 3 |
+| D666 | **The hit-test's `vetoed` is true when the target or the deepest component is vetoed** (§3.2 rule 7, §3.4) | the target only | the pre-check asks both chains, and the recorder must not offer a hit the pre-check refuses | EA 4 |
+| D667 | **An AWT control is its own routed `source`** (a heavyweight leaf); the `Panel` is the source only for a lightweight inside it (§3.4, §13.2 item 7) | item 7's "source the scanner panel" for all three | D513's rule 1 as written (the innermost heavyweight on the path) and its leaf rules | EA 5 |
+| D668 | **The tools leg passes `force: true` on the routed and Robot calls that act into the tools window** (§13.2 items 1-10) | activating the tools window first; moving it off the desk frame | the desk frame (active, full display) is ranked above the tools window (P7 §3.2) and Robot refuses every covering window; `force` skips covering and modal only, never the veto (asserted both ways) | EA 6 |
+| D669 | **§13.2 item 9 asserts that the message names `INPUT_REJECTED` and the veto's text, and that `data.reason` is `vetoed`** (§13.2 item 9) | adding "vetoed" to the agent's message | D504 fixes the message; the token is in the data | EA 7 |
+| D670 | **The routed pointer's per-event veto runs outside the call's state lock** (two phases; a cancellation meanwhile wins); the exit event is asked too; every event is dispatched to its own source (§3.2 rule 6, §3.4) | asking under the lock | layer code must not delay the caller's `cancel`; the exit is an event like the others | EA 8 |
+| D671 | **`vetoWithheld` and its warning count calls, once per call** (§3.2 rule 4) | per task | a `DISPATCH` type withholds every remaining character task: one call, one fact | EA 9 |
+| D672 | **`collapsedBy` names an ancestor's culprit when the parent is collapsed, else the component when it has no size, else the parent**; Node `collapsed` only for a showing component; `not visible`'s point in the component's own coordinates; a collapsed dismiss button is `NOT_FOUND`, as §3.3's table says, not `INVALID_PARAMS collapsed` (§3.3) | the nearest empty ancestor always; window coordinates | the frame set's button names its zero-width pane (item 6); the table's rule wins over item 6's wording for the agent half | EA 10 |
+| D673 | **`lending.tools` accepts only `true` or `false`** (anything else stops the desk), and `DeskTools` lays out with explicit bounds (§12.1) | a lenient parse; layout managers | as the desk's other properties; one geometry on every JDK and font | EA 11 |
+| D674 | **`AgentModule.info()` is shown by `ModuleLoader.Record.toJson`, for an installed module only**; `SwingModule.info()` reads without the module lock; `skillroy info` prints `{k=v}` after the state; the tests are in new files (`ModuleInfoTest`, `VisionVetoTest`) (§3.2 rule 4, §3.6) | hunks in shared test files | `agent.info` must never wait on a module's lock; no shared hunk | EA 12 |
+| D675 | **A lane is a `ThreadPoolExecutor` whose core size is the bound, its core threads timing out after 30 s**; a retired name is remembered (the newest 64) so that a call says `lane closed`, not `unknown lane`; an abandoned task's interrupt flag is cleared when it ends (§4.2) | `DaemonThreads.boundedPool` (core 0 runs one thread until the queue fills); a custom executor | standard semantics make "every thread busy and the queue full" exactly the abort | ET 7 |
+| D676 | **The quiescent machinery lives in `CoreThreadBroker`** (the gate, the run, the wrapper, the penalties, the JSON), the dispatcher passing the primitive's name; a broker field marks the running quiescent task's thread, so that nested waits are refused even when the provider does not forbid that thread (§4.1) | a `ThreadLocal` on the application's thread; `isForbidden` alone | nothing may stay on the application's thread, and a provider need not forbid its idle thread | ET 8 |
+| D677 | **Quiescent points are closed per module too**: `ModuleContext.closeQuiescentPoints()` before each module's `uninstall` and after a failed install, beside the core's close of the first provider's point (§4.1) | the core's close only | a module's point need not be the first provider's; closing is idempotent | ET 9 |
+| D678 | **The cancel batch is posted to `WORKER`** (§4.3, D638) | `call(WORKER, batch, t)` | a call would hold the dispatching worker, or interrupt the batch when bounded to the answer's wait; the cost, a full pool dropping the batch, is answered by D783 | ET 10 |
+| D679 | **The read task converts the rows** (LOBs read) on the lane's or the nested worker's thread; the masks run on the dispatching worker; the provider's `timeoutMs` argument is the budget (§4.3) | converting on the dispatching worker | the conversion is part of the read the hand-off bounds | ET 11 |
+| D680 | **The answer waits `min(200 ms, the dispatcher's remaining time - 50 ms)`, at least 1 ms** (§4.3) | the whole 250 ms reserve | even a call with less than 250 ms left answers before the dispatcher does | ET 12 |
+| D681 | **`cancelled` is true when a provider action returned without throwing, or when the JDBC action found an open statement and `cancel()` returned**; a JDBC cancel with nothing open is not counted (§4.3) | true whenever a cancellation was asked | the key reports an effect, not an intent | ET 13 |
+| D682 | **A naming candidate (the select list, else `columns(table)`) whose size differs from a non-zero names or rows width, or from the final width, is not used**, one log line each (§4.4) | using it padded or cut | a list that miscounts would put labels on the wrong columns (amended by D778: only a wider result drops it) | ET 14 |
+| D683 | **The desk's listener list is guarded**: `addListener`, `removeListener`, `listenerCount` and the engine's snapshot hold the list's monitor; no callback runs under it (§12.1) | a `CopyOnWriteArrayList` | the idle tick makes the engine thread iterate the list while it waits, exactly when other threads add or remove listeners; the sample keeps a plain list on purpose | ET 15 |
+| D684 | **`lending-report` names its lane only when the module's `declareLane` succeeded**; on an agent without lanes its reads run on a worker (logged) (§12.2) | failing every read `unknown lane` | the sample serves on an agent that declares no lane | ET 16 |
+| D685 | **§13.2 item 12's JDBC half runs with 1000 ms instead of 1500**, and the runaway statement is a seven-way cross join over the desk's 13 items (§13.2 item 12) | rounding the query timeout's seconds up | with the 250 ms reserve the JDBC query timeout is the budget in whole seconds (a rule with its own test), so at 1500 ms the database's own 1 s timeout fired before the module's 1250 ms; at 1000 ms the module cancels at 750 ms | ET 17 |
+| D686 | **`EngineViewAndReportTest` queues the admission case at an idle point with less than 105 ms before the lock** (tick 90), so that the next point has less than the 20 ms budget or does not come (§13.1 row 13) | a fixed time window | the first version failed once natively when drift moved the points | ET 18 |
+| D687 | **`agent.capabilities {reprobe: true}` clears the quiescent penalties whether or not the target is ready**; the probes still run only when it is (§4.1) | clearing on a ready reprobe only | the penalty is the operator's to lift; readiness concerns the probes | ET 19 |
+| D688 | **The MCP server's start refuses an allow-list that names procedures before it checks for `data.query`** (§4.5) | after the presence check | a list naming procedures is refused whatever the target offers | ET 20 |
+| D689 | **Steps 1-4 of §5.2 live in one package-private class, `BrowserMasks`**, shared by the index, the per-call reads and the selection; the union stops at the first `TRUE`; a throwing mask, a throwing registry and an unreadable vendor object count `TRUE`; a failing mask is logged once per class by its exception's class only (§5.2) | the logic in `BrowserIndex`, copied into `WebPrimitives` and `Selection` | three copies of a security rule | EW 7 |
+| D690 | **The per-call masked test is: nothing registered, no; `TRUE`, yes; no component, yes unless `FALSE`; else the call's `CaptureMask` read, else the entry's flag**, and each judgement refreshes `Entry.masked` (§5.2) | §5.2's formula `state != null ? state.masked : e.masked` | step 3 ("`TRUE` masks whatever the view") must hold where a call reads a component's state, and the formula dropped it there | EW 8 |
+| D691 | **The selection judges view-less entries and `TRUE`s afresh (no EDT read) and reads the flag for the others**; a masked entry's title is never read (§5.2 (ii)) | the rebuild's flag only | stale after a mask registered within 2 s of the last rebuild | EW 9 |
+| D692 | **`SeedWalk.masked`'s default and `SwingSeeds` without an event-dispatch thread answer every component masked**; a registry that throws counts as masks registered (§5.2) | answering unmasked | the restrictive side, as `UNREAD` is (completed for the per-call reads by D806) | EW 10 |
+| D693 | **`web.pointer`, `web.dom.click` and `web.dom.fill` declare `redact` in their descriptors**, a person's argument documented in `/schema` like the four reads' (§5.2 (iv)) | an undeclared argument the dispatcher passes anyway | `/schema` and the MCP projection then say that it exists | EW 11 |
+| D694 | **The CDP path hands a `by: {url\|title}` selection to the agent while masks are registered**, whatever `redact` says, after one fresh `web.browsers` read; the path's own events read its cached agent list (read at open and by every call that reads it) (§5.2 (iii)) | an agent read on the poller every tick; a read per event on the Playwright thread | the agent's rule (ii) ignores `redact`, so the paths agree; an agent call every 100 ms is too dear; a mask registered after the last read left that browser's path events unmasked until the next read (narrowed by D809) | EW 12 |
+| D695 | **`ConnectSupport` is detected on the thread that first needs it** (the path's `open`, before any driver), through a supplier the tests replace, memoised once per JVM (§5.3) | on the first attach's Playwright thread (§5.4's sentence) | the path's `open` needs the answer before any driver starts | EW 13 |
+| D696 | **`CdpAttach.connect` itself refuses, `PROTOCOL`, a line without `noDefaults` whose options do not allow the overrides**, before anything starts, and passes no artifacts directory to a line without `artifactsDir` (logged) (§5.3) | the path's check alone | defence in depth for a direct caller (the soak, a layer's own code) | EW 14 |
+| D697 | **`connectOptions.noDefaults` and `isLocal` record the option's value where the line has it** (true by default); `defaultOverridesAccepted` is true exactly when the line lacks `noDefaults` (§5.3) | – | the record says what the attach ran under | EW 15 |
+| D698 | **§13.2 item 17's tag-back launch asserts `detached` masked**, and the release-detached launch carries the by-url control (§13.2 item 17) | the item's "is not masked" | any `BrowserMask` puts the view-less rule in force (D545) | EW 16 |
+| D699 | **The gap 95 (e) check moves to `@Order(18)`** and stays the launch's last act; the new items take 16 and 17 (§13.2 items 16-18) | the new items after it | it "may leave the page unresponsive", and the traced run of the front page would follow a middle click | EW 17 |
+| D700 | **§13.1 row 18 re-applies the policy to the hooks and Byteman encoders' real payloads by the column rule**, and the core's `EventBusTest` publishes payloads of those shapes through the real pass and asserts them stored unchanged and uncopied (§13.1 row 18) | a test dependency of both modules on `agent-core`, with a public seam | the two modules cannot reach the core's package-private pass; two poms and their class-path checks stay as they are | EW 18 |
+| D701 | **The catalogue's `ClassDeny` is the hooks engine itself**, registered under `ClassDeny` beside `HookEngine`; readers tell it apart by `instanceof HookEngine` and use its own reason (`denied by the catalogue <id>: <p>`) (§6.5) | a separate class identified by name; a reason-prefix convention | an `agent-api` type both module loaders share is the one sound identity; a name check is fragile, and a prefix is a label any module could write | EH 1 |
+| D702 | **The deny sources are asked in §6.5's numbered order, option, catalogue, other modules** (registration order among them), whatever the registration order (§6.4, §6.5) | §6.4's "every registered `ClassDeny` in registration order", the catalogue's among them | deterministic reasons; a domain module may install before the hooks module | EH 2 |
+| D703 | **`rule.list.deny` is `{catalogue?, option, modules}`**, `catalogue` from `HookEngine.deny()` when the hooks module is loaded, never `from` (§6.7) | widening the SPI to carry `from`; reflection into the engine | D575 keeps the SPI to `deny()`; `hook.health.deny.from` has the ids | EH 3 |
+| D704 | **`HookCatalogue.Builder.build()` bakes only the entries not taken from the base** (`builder(base)` marks them baked; `add` and `replace` unmark) (§6.8) | baking every entry with a null qualifier | an overlay's qualified rule would otherwise re-bake a base entry and change its hash behind the base author's back (D570) | EH 4 |
+| D705 | **An overlay's plain `packages` name never drops a base qualifier**; only its map form replaces one (§6.8) | the plain form resets the qualifier | an overlay narrows (P6 §11.2); a silent loosening by the old form is the wrong direction | EH 5 |
+| D706 | **`denyNotDelivered` is an object `{patterns, agentOption}`** (§6.9) | `denyNotDelivered: [patterns]` beside a sibling `agentOption` | the contract named both forms; the object keeps the remedy with the gap | EH 6 |
+| D707 | **`ProbeItemsTest`'s two-jar case uses a fixture of its own, `TwoJars`** (§13.1 row 24) | `Returns`, the contract's text | other test classes of the shared JVM leave child-loader copies of `Returns` loaded | EH 7 |
+| D708 | **Public members beyond §6.3's list**: `HookTarget.MAX_CODE_SOURCE_LENGTH`, `codeSourceViolation`, `withCodeSource`; `HookProbe.MAX_CODE_SOURCES`; `HookEntry.withTarget` (§6.3) | private checks duplicated on both sides | one rule for the agent's `violation()` and the reader's `packages` map; the bake needs a copy with a target | EH 8 |
+| D709 | **One `BoundedRegex.BUDGET_MS` per spec per call, shared by its copies through a deadline** (§6.4) | a budget per copy | bounded under the engine's lock whatever the number of copies | EH 9 |
+| D710 | **A refusal's code-source names are distinct and sorted** (§6.4) | the copies' order | `getAllLoadedClasses` answers in the JVM's order, and a reason must be reproducible | EH 10 |
+| D711 | **`agentOption` is read when any `rule.*` id is in the matrix, whatever its state; a failed read is `unknown`** (§6.9) | only when `rule.engine` is `OK` | the contract's "shows a `rule.*` capability"; an unavailable engine is answered by the dispatcher and recorded, never a failure | EH 11 |
+| D712 | **A `VirtualMachineError` from a `ClassDeny` is rethrown** (§6.5) | counting it as a refusal | `InputVeto`'s rule; nothing is installed either way | EH 12 |
+| D713 | **`hooks.deny` keeps equal patterns once; `<i>` counts the non-empty items from 0; more than 64 is `option hooks.deny: more than 64 patterns (<n>)`** (§6.5) | – | the contract gave the violation's form only | EH 13 |
+| D714 | **`rule.check` of a denied rule class skips the type check** (§6.7) | type-checking anyway | nothing of a denied class is read | EH 14 |
+| D715 | **`skillroy hooks status` prints the class table only when `hook.health` carries `classes`**; a deny-only pack catalogue prints "no hook entry"; the catalogue's deny line names the `from` ids before the patterns (§6.10) | – | an old agent reports no classes; the format was left open | EH 15 |
+| D716 | **`hook.health.classes[].hooks` names the installed and the residue hooks whose classes include the entry** (§6.6) | installed hooks only | a residue still carries advice in that class | EH 16 |
+| D717 | **The pathological-qualifier test uses `(.*a){20}`** (§13.1 rows 22-28) | `(a\|aa)+` | the JDK 25 regex engine memoises `(a\|aa)+` and `(a+)+` | EH 17 |
+| D718 | **`CallWarning`'s details**: `NEVER_ACCEPTABLE` (the two reader codes), `isValidCode`, `isPackCodeShape`, `tooMany`; data that cannot be represented becomes `{truncated: true}`; a message that is not a string or data that is not an object is `INVALID_WARNING`; `readAll` of a non-list is one `INVALID_WARNING`; a `TOO_MANY_WARNINGS` beyond the 16th adds its `dropped`, folding idempotently (§7.1) | throwing on data that cannot be represented; counting a folded element as one | never throw into the host from a bound; a result survives a round trip unchanged | ES 1 |
+| D719 | **`InputResult.inputId` is null for a string that does not match the pattern**, with extra constants and `queued`; the sample refuses a caller's malformed `inputId` (`INVALID_PARAMS {param, reason: malformed}`), reports caveats only for an input consumed within the call, and answers `ANSWERED_NESTED` when the prompt changed between the post and the take (§7.2, §12.2) | returning any string; caveats for queued inputs | a malformed id would enter an event match, so it is treated as none and fails closed; a queued input's value is not known to be taken | ES 2 |
+| D720 | **A late `warn` is dropped and logged once per call at INFO** (code and primitive only) (§7.1) | adding a FINE level to the agent log | the agent log has no FINE level; once per call bounds the noise; never the message, which may hold a secret | ES 3 |
+| D721 | **`RungResult.of` returns a mutable map**; readers `rung`, `minRung`, `isName`; a `Rung`'s capability is null or a non-blank id of at most 128 characters without whitespace; `Rung.check` is shared by `PlannedCall` and `Plan.Call` (§7.6) | an immutable builder | a ladder primitive adds `accepted`, `inputId` and `minRung` to the same map; one check for both records | ES 4 |
+| D722 | **The secret-echo check compares the text of every scalar leaf, numbers included, with every leaf of a structured secret**; the detail key is `parameter` (`parameters` for "too large") (§7.5) | strings only; the key `secretParam` | a numeric PIN echoed as a number is the secret; the run mask hides secret-looking keys, which blanked the parameter's name | ES 5 |
+| D723 | **A forwarded `minRung` is read at the call's top level or in `args.minRung`** (§7.6) | the top level only | `device.act` nests the action's arguments in `args`, and `deviceScan` forwards there | ES 6 |
+| D724 | **Listed `seq`s outside the call's window are one `prompt {step, primitive, ignoredSeqs}` record** (§7.5) | a key on every per-event record | an ignored `seq` belongs to no event inside the window | ES 7 |
+| D725 | **Every verb that compiles to no call refuses both modifiers**; pre-accepted codes are checked at compile ("pre-accepts …"); the reader's message is "call P: 'accept' needs a version 7 plan" (§7.3) | only the four verbs named | the contract's own reason, a modifier silently dropped, holds for any verb without calls | ES 8 |
+| D726 | **A cleanup call's warnings and rungs are records only** (`cleanup: true`), not lines; the run-end record, the journal's step and the MCP scenario-run reply carry `warnings` only when non-empty (§7.1) | always present | existing outputs and recorded sessions stay unchanged byte for byte | ES 9 |
+| D727 | **Telemetry: a `warning` event with `skillroy.warning.code` and `skillroy.accepted`** (kept by `minimal`); `rung` and `rungs` reuse `skillroy.requested`, `skillroy.actual` and `skillroy.ok` (§7.1) | a new span; new rung attributes | §7.1 names no attribute and no new span | ES 10 |
+| D728 | **`run --json` always carries `warnings`** (an empty list), and the text form prints `warning:` lines for every status (§7.1) | only when non-empty | parity with `degradedFidelity`, which `--json` always carries | ES 11 |
+| D729 | **`ScannerDevice` has no `Invocation`**: no warnings, a fixed 5 s wait, late acknowledgements without a correlation id; a `minRung` outside the ladder is `INVALID_PARAMS`; a malformed frame reports its `length` only (§7.6, §12.2) | extending `DeviceAdapter.act` with an invocation | A85 adds only `rungs`; the scanned code stays out of the error | ES 12 |
+| D730 | **A composite's wait that ends is the agent's `TIMEOUT`**, and `question.seq` of `input.requested` comes from the listener's last request (§7.5) | `INPUT_REJECTED` | `TIMEOUT` is the existing code for a bounded wait that ends | ES 13 |
+| D731 | **A `SYNC_TIMEOUT` names the match as JSON** (`matching {"inputId":"lending-42"}`); a full pending table evicts the oldest entry and releases its waiter as not taken, never acknowledged late (§7.4) | the contract's `{inputId=lending-42}`; keeping the waiter | the existing wait description reused; a waiter never outlives its bound | ES 14 |
+| D732 | **`EngineEvents.awaitChange` waits on a request's or a prompt's sequence number, not on its text** (§12.2) | comparing the prompt's text | the same prompt can be asked twice | ES 15 |
+| D733 | **The new scenarios end on `key: CANCEL` or a sign-on and rely on the verbs' cleanup sign-off**; in `sign-on-any` the earlier cleanup is refused after the later one signed off, logged only (§12.4) | an explicit final `signOff` | the cleanup path is the contract's; a refused cleanup never changes the verdict | ES 16 |
+| D734 | **§13.2 item 27's late-acknowledgement half runs up to 10 bounded attempts with a timing line** (`correlatedAckRaceObserved`); the deterministic proofs are `LendingPrimitivesTest` (a gated engine listener) and `CorrelatedAckTest` (§13.2 item 27) | a test seam that delays the desk's engine | no change to the sample's engine for a test; the end-to-end assertion runs whenever the race occurs (made able to fail by D801 and D802) | ES 17 |
+| D735 | **`PlansUpToDateTest.committedScenarios()` walks `scenarios/` and `scenarios/scanner/`** (sorted by file name); `ScenarioSchemaCommittedTest` compares the glue with the top-level ones and skips the two compile-error negatives (§12.4, §13.1) | a separate list for `scanner/` | the scanner scenario needs the scanner leg, and the glue runs the top-level directory | ES 18 |
+| D736 | **Test fakes no longer echo a secret in a result** (`SecretMaskTest`'s toy input, the MCP `Desk`'s `desk.input`); the echo stays in an event (§7.5) | keeping the echo | the secret-echo check now fails such a result by design | ES 19 |
+| D737 | **`Phase5CompileTest` pins `RESERVED_VERBS` with `accept` and `minRung`** (§7.3) | – | the pin is a list | ES 20 |
+| D738 | **§16.1's P6 mark sits in P6 §7.3** (`rule.check`'s section), not §4.5 (§16.1) | P6 §4.5 | P6 §4.5 is "Error codes" | ES 21 |
+| D739 | **`loan-counts-and-events` captures after the first scan, on the open loan** (`scans` 1, `signOffs` 0, `lines` 1, `qty` "1"), and asserts `loan.lines {size: $before.lines}` and the line's `qty {gt: $before.qty}` (§12.4) | the contract's capture right after `signOn` with `{size: {gt: $before.lines}}`; a second capture slot; counting on the `events` root only; resetting the desk | `lending.loan` answers the most recently recorded loan when none is open, so on every shared desk the specified capture counted the earlier loan's lines; one capture, deterministic on every desk, still a size delta and a value delta | EX 5 |
+| D740 | **The `events` root checks each page whole** (contiguous `seq` inside a page, an empty page with `oldestSeq` past the cursor, a missing `events` list), beyond the contract's two loss conditions; a read failure takes the ordinary path (retried until the step timeout, then `ERROR / ENVIRONMENT`) (§8.6) | a terminal failure without retry | fail closed on every shape of loss; one code path for every root (widened by D789) | EX 6 |
+| D741 | **One package-private `FactCapturing` serves the run and the session** (§8.7) | two private copies | one rule; mechanical merges | EX 7 |
+| D742 | **The `actual` cut is `RunLog.cutActual`**, applied by `RunLog.write` to `expect` records and by the executor to an expectation failure's detail; `db` records and `capture` values are not cut (§8.10) | – | the cut sits where the value is written (extended to the session by D792) | EX 8 |
+| D743 | **The compile check of a `sync.await` match sits in `PlanCompiler.toCall` for every call**; a `waitFor` whose `{has: $x}` resolves to a list is refused by the agent (`INVALID_PARAMS`), not by `AwaitRules.resolve` (§8.9) | the check in `AwaitRules.resolve` | `CallRunner` (ES's file) sends a `sync.await` call's substituted arguments as they are | EX 9 |
+| D744 | **Test placement**: the `ScenarioSchemaTest` part of §13.1 row 38 is in `Phase8CompileTest`; additions to shared test files are methods of their own, anchored in the middle where possible (§13.1) | – | `ScenarioSchemaTest` is EP's; mechanical merges | EX 10 |
+| D745 | **`LoanCountsHeadlessTest` runs each plan without its launch property** on the headless desk (§13.1) | adding `jvm.properties` to the shared `HeadlessDesk` | the headless desk is seed A's and answers no `jvm.properties` | EX 11 |
+| D746 | **`PlansUpToDateTest.thePlansUseEventDrivenSyncOnly` admits a `mark` step's `trace.mark`** (sync `NONE`) (§12.4) | – | the mark publishes before it answers, and the `[json]` probe needs it | EX 12 |
+| D747 | **Grammar details**: `[ json ]` is the segment; a filter field with an empty part (`a..b`, `.a`) is a parse error; only a map element can match a filter (§8.3, §8.5) | – | a literal key with a dot is a sub-path anyway (§8.3's behaviour change) | EX 13 |
+| D748 | **The messages where §8.7 and §8.9 are silent**: the compiler's `captureFacts` texts and the agent's "invalid match: <problem>" (§8.7, §8.9) | – | written into the "As built" notes | EX 14 |
+| D749 | **The plan reader accepts `fail` and `pack` ignoring case and blanks**, as the loader does (§9.2) | exact lower case only | one rule in both places; the compiler writes lower case; an old hand-written `FAIL` meant the strict policy and still does | EP 5 |
+| D750 | **`PackCapabilities.Entry.error` is a seventh record component**, the contract's six-argument constructor kept (§9.7) | a side map in `Result` | the record's `pack[]` entry carries it, and a cached answer must repeat it | EP 6 |
+| D751 | **A capability's error is masked before it is cut at 500 characters** (an `evaluate` overload taking the host's `SecretMask`) (§9.1.3, §9.7) | cutting in `PackCapabilities` and masking when the record is written | a cut first can split a known secret so that the mask no longer recognises it; the contract's form stays as the overload without a mask | EP 7 |
+| D752 | **A `scope()` that answers null or throws counts as `SCENARIO`**, for checks and capabilities; a capability whose `id()` throws refuses the host ("cannot be read") (§9.1.2, §9.3.1) | – | the restrictive default runs every time; an unreadable declaration is a declaration error | EP 8 |
+| D753 | **`Preflight.Outcome.failed()`, `CACHED_SUFFIX` and the run's failure detail with `cached: true`**; a pack whose `preflight()` throws is `ERROR / ENVIRONMENT "pack <id>: its pre-flight checks cannot be read: <e>"` on every host (§9.3.3, §9.7) | "internal error" | one message for all hosts | EP 9 |
+| D754 | **`caps` evaluates the pack's capabilities only with `--pack` given** (§9.1.5) | also when `--inference` alone finds one pack on the class path | the contract's "caps without --pack shows no pack row" | EP 10 |
+| D755 | **The MCP server takes the session options' cache when the caller gave one, else its own** (§9.3.3) | – | an embedding host can share one; the CLI's server owns one | EP 11 |
+| D756 | **`HeadlessDesk`'s sessions are `headless-desk-<n>` from a JVM counter, and `DeskConnection` has one per instance** (§9.3.2, §13.1) | random ids | deterministic outputs: the desk feeds recorded sessions | EP 12 |
+| D757 | **`ReResolver.preflight` rethrows `InterruptedException` when the helper reports an interrupted check** (§9.3.3) | failing the scenarios `PREFLIGHT` | the job's behaviour before Phase 8: it ends | EP 13 |
+| D758 | **The sample's hand-written delegating test packs (`FailingPreflight`, `OverlayPack`) forward `capabilities()`** (§12.3) | – | scenario A requires the id; without the forward item 37's pre-flight case stops at `requires` | EP 14 |
+| D759 | **§13.2 item 42 read the matrix through the `caps` root** (`skillroy_facts`, `caps[id=lending.returns.ceiling].source`), the catalogue's own entry asserted on a small pack (§13.2 item 42) | raising the MCP answer bound; paging the catalogue | the lending pack's catalogue was longer than the 25,000-character answer bound (superseded by D795: the catalogue now stays within it, and the item asserts it as written) | EP 15 |
+| D760 | **`ScenarioSchemaCommittedTest` checks JSON-Schema keywords as keys** (§13.1) | rewording the capability's description | the check is about keywords; prose may say "maximum" | EP 16 |
+| D761 | **`LendingModule.install` keeps ES's composites loop with one probe choice that knows both** `EngineViewProbe` for `lending.engine.view` (ET) and `InputProbe` for the composites (ES) (§12.2) | either side's choice alone | each capability needs its own probe, and a merge must not drop one | EI 1 |
+| D762 | **`@Order(20) JavaAgentSmallRing` moves to the end of `LendingEndToEndIT`**, after `@Order(19) JavaAgentScanner` (§13.2, D627) | where the textual merge put it, after the Robot leg | D627's "appended in order"; no behaviour change | EI 2 |
+| D763 | **`PlanCompiler.step()`'s rebuild under `ui.strict` or with modifiers keeps the step's `facts`** (`compiled.facts()`), with the test `Phase8CompileTest.underAStrictUiACaptureFactsStepKeepsItsFacts`; every other `Plan.Step` and `Plan.Call` rebuild of the controller checked (§7.3, §8.7) | – (a merge defect) | ES's branch had no `facts` component, so after the merge a `captureFacts` step in a strict-UI scenario compiled without its facts and no error was raised | EI 3 |
+| D764 | **`ExpectationsTest.containsWhereHoldsWhenSomeElementMatchesEveryField` builds its matcher as an ordered mapping**, as a scenario's YAML gives; the assertion unchanged (§8.4) | loosening the assertion | `Map.of`'s iteration order changes from one JVM to the next; a flaky test, not a merge defect | EI 4 |
+| D765 | **Where two tags marked one passage of an earlier document, the merges keep both, each under its own tag**, and the documentation pass merges them into one text (§16.1) | merging the texts at integration | the integrator resolves conflicts without rewriting another package's text; one editorial pass, after the fix wave's marks, merges each passage once | EI 5 |
+| D766 | **Scenario D (`supervisor-return-llm-sql`) gains the same `requires` entry `lending.returns.ceiling` as scenario A** (amending D620, which named A only); D's tier (b) request does not carry `requires`, so its two live recordings stay; its plan and its two bindings files' `planHash` change, `resolveHash` does not (§12.5) | leaving D without it | `PlansUpToDateTest` pins D's plan to A's but for the supervisor's strategy | R 1 |
+| D767 | **Step R's script ran its steps in the order 1, 2, 3, 5 (native), 4, 5 (image), 6** (§2.8, §12.5) | the script's own order | the image run of step 4 executes the scenario module's unit tests first, and they need step 5's recordings | R 2 |
+
+### Decisions taken by the code review's fix wave and the security fixes, D768-D810
+
+One fix wave closed both reviews. The code review's three lenses (§15's method: L1 contract fit and L2 host safety,
+privacy, secrets and bounds on `d25cf02`, L3 tests, determinism and the matrix on `f67402c` after step R) and the
+security delta review's eight lenses (§15, on `f67402c`) were fixed together, from `f67402c`, by five fixers in
+parallel worktrees, one area each: FA the agent's Swing side (the veto's popups, the default buttons, the drag
+release), FB the agent core and the data channel, FC expectations, facts, sessions and the model-facing masks, FD the
+controller and the CLI (the catalogue's bound, the hooks installer, `OutputScan`, code sources, the scenario checks) and
+FE the web side (with the Swing capture and hit-test hunks S166 needs). They took 43 decisions and recorded them in
+their reports as a tag and a number (FA 1 to 8, FB 1 to 11, FC 1 to 8, FD 1 to 8, FE 1 to 8). The orchestrator numbered
+them at the documentation pass of 2026-10-20 in the order FA, FB, FC, FD, FE and by that number within a tag: **FA
+D768-D775, FB D776-D786, FC D787-D794, FD D795-D802, FE D803-D810**. Every `D-<tag>-<n>` of this contract now cites the
+number, and the last column keeps the tag, the fixer's own number and the review's finding (`Ln-Fm` and `Ln-Sm` of the
+code review, `S<nnn>` of the security record). They join decision **B39** (`../DECISIONS.md`); the veto forms the
+fixers recorded for the owner are named in the "Alternatives" column. No decision of B1-B37 is reversed by any of
+them. Several amend or widen an earlier row, and that row carries a mark: D768 widens D501 (a popup's chain runs through
+its opener), D769 widens D502 and D663 (the default button of every root pane on the walk), D770 and D771 widen D505 (a
+press's release asked again on the routed and the Robot route), D772 widens D502 (the Robot route asks every covering
+window), D776-D780 amend D531 and D532 (unnamed columns masked by the names their items read or withheld, the width,
+the case, a quoted star table), D781 and D782 amend D530 and D529 (a statement prepared after cancellation never runs,
+a closed handle's action never starts), D783 amends D638 (`cancelNotStarted`), D785 amends D521 (the penalty keyed by
+module), D786 amends D606, D787-D790 amend D599, D601, D602 and D605 (paths followed on the masked view, three outcomes,
+a cut event fails the `events` read), D791 amends D597, D792 widens D608 (the cut in the session), D795 supersedes
+D759, D796-D798 amend D544 (`OutputScan`'s search and scope), D799 amends D556 (the code-source name), D800 amends
+D565 (the deny's echo asked before the install as well), D801 and D802 amend D734 (item 27 able to fail), D803 amends
+D637 (a locator action on a masked browser is refused) and D808 amends D549 (a masked browser's tap events carry the
+tap's pattern). The fix that needed no decision of its own (the `'\n'` in `DISPATCH` text, L1-F1 = L2-F1) is marked in
+§3.2 rule 2.
+
+| # | Decision | Alternatives rejected | Reason | Tag |
+|---|---|---|---|---|
+| D768 | **The veto's successor hops from a `JPopupMenu` with an invoker to the invoker, and from any `Window.Type.POPUP` window with an owner to the owner**, instead of to their parents; one successor (`InputVetoes.next`) serves both walks, the readers and the default-button walk, the 64 bound counting across the hops (a cycle refused) (§3.2 rule 1) | walking both the popup's parents and its invoker (a tree, not a chain) | a popup's parents are its invoker's window's layered pane or a popup window it owns, so the invoker's chain holds them; Swing hands a heavyweight popup's key to its owner's window-wide bindings the same way | FA 1 (L2-F2) |
+| D769 | **ENTER asks the default button of every `JRootPane` on the walk from the target to its window** (a `RootPaneContainer` window's own included), nearest first, each once, at most 64 steps, in the read and in every ENTER task (SET, `DISPATCH` with `enter`, a `'\n'` in `DISPATCH` text, `swing.key`); `defaultButton` names the button whose veto refused; a root pane placed off the walk and outside a `JInternalFrame` is not asked, a residual stated in rule 10 (gap 154) (§3.2 rules 2 and 10) | **veto form**: walk the window for every `JRootPane` whose top ancestor is the window | a nested root pane's ENTER pressed the enclosing window's vetoed default button; asking the off-walk case costs a walk of the whole window per ENTER | FA 2 (L2-S1, with L1-F1 = L2-F1) |
+| D770 | **The routed pointer asks again at every release of a press of the call**: the target and the deepest component at the release's screen point, in the call's window and in every covering window ranked above it or of type `POPUP`; a full covering list or an unreadable point refuses; the refusal is rule 6's `VETOED` with the press balanced (§3.2 rule 6) | the reviewer's mirror of `MenuSelectionManager`'s search | that follows Swing's internals and misses application popups and drop zones; with `force`, a release under a ranked covering window whose component is vetoed is refused too (the safe side) | FA 3 (S155) |
+| D771 | **The Robot route asks a drag's release again**: after the press is observed (at most 1000 ms) and the queue has passed twice, one bounded read at the end point; a refusal, a failed or timed-out read, an interruption or an unobserved press releases at the press point; the read is not atomic with the native release, a residual stated in rule 6 (gap 153) (§3.2 rule 6) | **veto forms**: (a) add a static refusal of a Robot `DRAG` while a veto is registered when the press target is a menu element, has a component popup menu or the button is `RIGHT`; (b) drop the re-check and state the whole Robot drag as a residual | the restrictive option is built; what the press posted (a lightweight popup's layout) runs before the read | FA 4 (S155) |
+| D772 | **The Robot route asks the veto of every covering window that holds the point** (and a drag's end), `force` or not; a full covering list refuses only while a veto is registered; a covered point whose covering window's component is vetoed answers `vetoed`, not `covered` (§3.2 rule 2, R11) | the exempt owners only | one sentence for the rule; the veto comes before the covering rule (§3.1); nothing changes for a target without a veto | FA 5 (S156) |
+| D773 | **One `Withheld` per COMPONENT call**: the re-activations and the final click count once together; the second read before `requestFocusInWindow()` answers `INPUT_REJECTED vetoed`, as the first does (§3.2 rule 4) | – | rule 4's "once per call"; a read, not a posted task | FA 6 (L2-F5) |
+| D774 | **`Redaction.failed` and `SwingSpis.failed` log the exception's class only**, as `InputVetoes` now does (§3.2 rule 8) | leaving the two Phase 7 lines | the reviewer's "for consistency"; a layer's message may quote a value | FA 7 (L8-F6) |
+| D775 | **The fix wave's veto proofs are agent-level display tests in frames of their own** (`PopupVetoDisplayTest`) (§13.2 items 2, 3, 10) | **veto form**: a menu in the sample's tools window and an `InputSafetyChecks` item, in a later step R | changing the sample's window would move its committed snapshots and the tools leg's shapes, which only step R regenerates | FA 8 |
+| D776 | **A positional source's unnamed column is masked, not refused**: an unnamed item of a readable list is asked under the names it reads (`SelectLabels.references`); a column no name can be given (the whole list unreadable and no star names, the list dropped for its width, a `SELECT *` inside the item) has its non-null cells withheld while any `MaskPolicy` is registered, and is served as before (`c<i>`) without one (§4.4) | **veto form**: refuse the read (`INVALID_PARAMS`; the code review's L1-F3 and the security reviewer's first fix); expanding each `t.*` through `columns(t)` (misses set operations and derived tables); withholding only behind a "this policy masks rows" probe (the SPI cannot answer it) | since §5.1 every event mask is a `MaskPolicy`, so a refusal "while a mask is registered" would refuse every unaliased expression of every positional source in such a layer; a withheld cell keeps the answer's shape | FB 1 (S160, L1-F3) |
+| D777 | **The withheld marker is `<redacted>`** (`SecretKeys.REDACTED`); the policies are not asked about a withheld cell; a null cell stays null; one info line gives the source and the count (§4.4) | a distinct `<withheld>` marker; a `withheld` key in the answer (a wire change) | the controller already treats `<redacted>` as a masked cell, so a withheld cell fails closed everywhere without a controller change | FB 2 (S160) |
+| D778 | **A naming list is dropped only when names, types or a returned row are wider than it**; shorter rows are padded at the end and keep the labels (§4.4) | treating names or types of another size as contradicting it | the SPI already pads short rows, names and types; only a wider result shows that the list miscounts (amends D682) | FB 3 (S164) |
+| D779 | **The case retry covers the statement's spellings only**: a derived label and each referenced name are also asked in upper and in lower case; provider names and `columns(table)` entries are asked as given (§4.4) | retrying every name; **veto form**: the documentation-only change, an acceptance of the low | drivers fold case while the statement keeps it; a provider spells names as its database reports them | FB 4 (S163) |
+| D780 | **`starTable` returns a quoted part in double quotes**, normalised from backticks or brackets, an inner `"` doubled, and still refuses a quoted part holding a `.`; no public helper added (§4.4) | a value type with a `quoted` flag per part; a public `tableParts` helper | one string keeps the public signature (A75), and the SPI states the folding rule | FB 5 (S162) |
+| D781 | **A read cancelled before its statement runs stops through a `CancellationException` from the statement sink**, which `ReadOnlyJdbc` lets through and `JdbcExecutor` maps to SQL state `57014`; the sink receives null before the statement is closed; `cancelled()` is also asked before the read starts; the cancel takes the statement under a monitor and calls `cancel()` outside it, and the close waits at most 2 s for a cancel in flight (§4.3) | the sink closing the statement; a new sink interface; mapping to an `RpcException TIMEOUT` | an explicit, driver-independent stop with the existing overload's signature; a `TIMEOUT` would look like the provider's own to D784's rule | FB 6 (S161) |
+| D782 | **A `QueryControl` handle's `close()` waits for a running action until it ends or its 2 s since its start run out** (not a fresh 2 s), never on the action's own thread; a closed registration never starts (§4.3) | a fresh 2 s per `close()` | a provider closing several handles never waits more than one action's bound in all | FB 7 (S159) |
+| D783 | **A cancel batch the pool rejected is reported `cancelNotStarted: true`** (with `cancelled: false`, in `cancelPending`'s place) with one warn line; the batch marks itself started before it counts its actions as pending, so the two keys never appear together (§4.3) | the reviewer's string value; retrying the post; **veto form**: a dedicated bounded thread for a rejected batch | "not started when the answer was written" is what the agent knows | FB 8 (L1-F4) |
+| D784 | **`Read` keeps the `TIMEOUT` it threw**: a hand-off `TIMEOUT` is the module's expiry exactly when the read threw none, and a provider's own `TIMEOUT` passes through with its data (§4.3) | the reviewer's "budget expired" time test | the precise form: a read that ends right after the broker's interrupt still gets the module's own answer | FB 9 (L1-F5) |
+| D785 | **The quiescent penalty is keyed by module** (`module:<id>`) for a module's own tasks: only the penalty refusal carries `module`; `lastOverrun` keeps `{primitive: null, budgetMs, ranMs}` for a module's task; the core's own unkeyed route stays unpenalised, and a module's direct `QuiescentPoint.await` is the stated residual (§4.1) | `module` on every refusal of the module route; a `module` key in `lastOverrun` | the smallest additive shape that names the penalised module | FB 10 (L2-F3) |
+| D786 | **A scalar match entry checks that the payload value is a scalar before it builds any text** (§8.9) | – | no text of a map, a list or an array is built under the ring's lock | FB 11 (S158) |
+| D787 | **Paths are followed on the fact's masked view wherever the masked-value rule applies** (a session always; a run under `expectationsOnMaskedValues`): `FactView` (`skillroy-scenario`) is the fact's JSON form through the `SecretMask`, then the key rule on map keys and `SecretPairs` on texts, uncut, applied again after every `[json]`; one rule for every origin of a session, a person's included (§8.3, §8.5, §8.7; P5 §12.2) | (a) a per-element predicate on the raw fact; (b) a view the host supplies (`PromptMask`); **veto form** (c): a person's session keeps the by-value view | (a) also needs a print-side fix and a test before every comparison; (b) the hosts build `PromptMask` without the session's joined secrets and the modules' key patterns; P5 §12.2 already judges a check on the masked value for every origin. The cost: a person's `fact` and `observe` show `<redacted>` under secret-named keys and pairs | FC 1 (S173, S174) |
+| D788 | **A filter whose field holds the marker on any element makes the whole path `SECRET`**, on which no matcher holds (§8.3) | **veto form**: the element does not match; the element is undecided | "does not match" would let a negative count over a list that holds a secret pass; the cost: a filter by `text` over children that include a password field holds a secret (filter by `role` or `name`) | FC 2 (S173) |
+| D789 | **The `events` root refuses its read when any event of the window carries `truncated: true` at its payload's root** ("event N (topic) was cut at publish …"), `ERROR / ENVIRONMENT` as a loss is (§8.6) | **veto form**: only a path or a matcher that reads into a cut payload is undecided, and a filter on `topic` stays exact | restrictive, and consistent with D602; the cost: one long console line or a module's own top-level `truncated` key makes every `events` expectation of the run `ERROR` after its step timeout (widens D602 and D740) | FC 3 (S151) |
+| D790 | **An undecided matcher or path ends the expectation `ERROR / ENVIRONMENT`** ("could not be decided"); the `expect` record keeps `result: failed`; no new record value (§8.4) | a `result: undecided` value | records and observers keep their vocabulary (§8.10) | FC 4 (S149) |
+| D791 | **A single filter that matches more than once is ambiguous at run time, at every plan version**: every matcher fails on it, `exists: false` included (§8.3) | **veto form**: refuse `exists: false` and `not exists: true` on a single filter at compile (version 7) | a committed `caps[id=…]: {exists: false}` keeps compiling, and the wrong pass is gone either way | FC 5 (S154) |
+| D792 | **The session keeps D608's cut where it keeps a fact's value**: a journal `check`'s `actual` and an `observe`'s `value` cut to 200 elements per list (with `actualTruncated` and `valueTruncated`), a captured value at most 65,536 characters of JSON, a quoted matcher at most 300 characters, a `matches` reason's regex at most 200; the caller's `CheckOutcome.actual` and `observe` answer stay whole (§8.7, §8.10) | other numbers; cutting the returned values too | the journal and the records are what is kept and written; the answer is transient and cut by the MCP and session replies' own bounds | FC 6 (S150) |
+| D793 | **One shared text key rule, `SecretPairs`** (`skillroy-protocol`, Java 8), replaces `PromptMask.keyRule` and the agent's console rule: linear, a key quoted up to three levels of escaping, an object or list value to its matching bracket, a double-quoted key's value replaced by a quoted marker, a value that already is the marker kept (P5 §6.2, P4 §4.3) | patching the two rules | one rule hides the same pairs on both sides; the quoted marker keeps a JSON text parseable for `[json]`; idempotence keeps a committed envelope fixture stable | FC 7 (S175) |
+| D794 | **A stop reason names the value's kind only, in every mode**, and a `[json]` error gives its offset only (§8.3, §8.5, §8.7) | the kind only where the masked rule applies | P2 §11.4: a person's `run.jsonl` must not hold a credential bare either | FC 8 (S176) |
+| D795 | **`skillroy_catalogue` writes its bounded sections first and, when the masked answer is over 25,000 characters, withholds verb schemas from the last verb back (then query `args`, then oracle `input`)**, with two fallbacks after that (the matrix and the sources alone, then the pack and a note); the answer is never cut, and §13.2 item 42 is asserted as written (§9.1.4, §13.2 item 42) | **veto form**: an optional `section`/`verb` argument paging the catalogue; reordering only when over the bound | the answer is always valid JSON within the bound; a withheld schema stays readable in `skillroy://schema/scenario` and as a mutating server's tool `inputSchema` (supersedes D759) | FD 1 (L1-F2) |
+| D796 | **`OutputScan`'s boundary rule**: a planted value that is not digits only is found wherever a non-letter, non-digit bounds it on a side where the value begins or ends with a letter or digit, whitespace runs collapsed; a digits-only value keeps the token rule (§5.1) | splitting on more separator characters (which misses a value with a space) | `durationMs=1029` must still not match the sample's four-digit passwords | FD 2 (S152) |
+| D797 | **XML decoding covers the five predefined entities and numeric character references** (§5.1) | the five entities only | a JUnit writer escapes newlines and spaces numerically; decoding can only reveal more | FD 3 (S152) |
+| D798 | **`Scope.EVENTS` reads `run-end` and `warning` records whole, and `expect`, `check` and `observe` records whose path's leading name is `events` or `hooks`** (§5.1) | `run-end`'s message alone | the rest of `run-end` holds no screen text, and the JUnit XML in scope repeats the message | FD 4 (S152) |
+| D799 | **`CodeSources` decodes the outer part before it cuts, and treats `\` as a separator there always** (§6.2) | only when the part starts with `\` after the scheme strip | the simple form closes both shapes and an encoded `%5C`; a POSIX jar whose name holds a backslash is named by the text after it, and a qualifier written for the whole name fails closed | FD 5 (S178) |
+| D800 | **With a non-empty catalogue deny, step 0's `hook.health` must carry `deny` before `hook.install` is sent**; the refusal's record carries the catalogue reference with its version, `deny` and `deniedNow`, as the post-install echo's does (§6.9) | the reference without the version | it is the install path's record shape | FD 6 (L2-F4) |
+| D801 | **Item 27's attempt is classified by the second input's `consumed`**: `QUEUED` means the race happened and requires `SYNC_TIMEOUT` naming its `inputId`; the pre-check's `INPUT_REJECTED` means "not observed"; anything else fails the attempt (§13.2 item 27) | treating other outcomes as "not observed"; **veto form**: a test-only desk option that delays the engine's take of an input (D734's rejected seam) | the check can now fail on the defect it exists for; `CONSUMED` cannot occur | FD 7 (L3-F1) |
+| D802 | **Item 27's attempt waits, bounded, for `input.requested` or `prompt.waiting` after the first call's `seq.before`** before it reads the desk's state (§13.2 item 27) | reading the state at once | a Java 8 target's embedded leg read the desk mid-take; an event wait, not a sleep | FD 8 (L3-F1) |
+| D803 | **`web.dom.click`, `web.dom.fill` and a selector `web.dispatchEvent` on a masked browser are refused** (`INVALID_PARAMS {param: "redact", reason: "masked", browser}`) before the page is evaluated, unless `redact: false`; D637's strip stays as the second line; the MCP plan policy lets a pack verb's own `redact: false` pass, the session facade refuses it, and a person acts through a `call` step (§5.2 (ii), (iv), §11 rule 4) | **veto forms**: (a) the actions allowed and the oracle recorded as S111's residual; (c) a pack verb's own `redact: false` accepted on the session facade's verb route too; (b) one outcome that cannot be told apart (rejected: the page's reaction tells it) | the outcome of a locator action tells whether the locator matched on the hidden page; a behaviour change for a committed scenario that acts by selector on a masked browser (none of the samples does) | FE 1 (S165) |
+| D804 | **`web.dispatchEvent` is refused only with a selector target**; on the window or the document it evaluates no predicate and stays allowed (§5.2) | refusing every dispatch on a masked browser | that would break the web host's recovery under `webhost.mask=front` and gain nothing | FE 2 (S165) |
+| D805 | **The mask flag rides on `SurfaceSource.Surface`** (`masked`, a four-argument constructor; the old one means not masked) **and the Swing module blanks a masked surface's component whole** (rule `browser-mask`), so pixels, marks, text locators and both hit-test forms follow (§5.2; P7 §3.1, §3.7) | the controller consulting `web.browsers` in its grounding and session tools | that would leave a client's `swing_capture`, image evidence and the hit-test's target form uncovered | FE 3 (S166) |
+| D806 | **`UNKNOWN_MASKED` only while masks are registered**: without an event-dispatch thread `SwingSeeds.state` answers it, and a null read counts as masked; the test seam is a constructor argument, no system property (§5.2) | – | nothing changes for a target without masks (completes D692) | FE 4 (S167) |
+| D807 | **An unconfirmed tag counts `TRUE` only while a `BrowserMask` is registered**, and is cleared by the first rebuild in which every registry answered; a registry that keeps failing keeps the tagged browser masked (§5.2 step 2) | – | a tag matters to nothing else; the safe side | FE 5 (S169) |
+| D808 | **A masked browser's tap events carry the tap's own pattern as `name`** (`WebLib.tapPatternOf`, on the Java side), and an event no pattern matches is dropped (§5.2 (i)) | **veto form**: keep the page's event names (S170 accepted with a release note), which keeps a glob-tapped, exact-name-awaited step working there | the page's event names are page data | FE 6 (S170) |
+| D809 | **A browser's mask is judged again on its events**: at most one judgement outstanding, at most once per 2 s, only while events of unmasked browsers flow, the asking event reading the old flag; the selection judges its candidates again before any URL regex or title read (§5.2) | masking a stale-judged browser's events until it is judged; a registry listener in the agent API | no thread, no timer and no wait on the publishing thread; a registration signal is the larger change (gap 155) (narrows D694's window) | FE 7 (S172) |
+| D810 | **The CDP path's frozen-target refusal reads `web.browsers` once (5 s) and keeps `{id, url, title}` only for a target mapped to an unmasked browser** (or unmapped while `masksRegistered` is false), and `{id, url: "", masked: true}` otherwise (§5.2 (iii); P4 §5.3) | ids only unless `masksRegistered` is false (the sceptic's simpler form) | the diagnosis is kept for unmasked pages at one bounded call, on a failing open only | FE 8 (S179) |
 
 ---
 

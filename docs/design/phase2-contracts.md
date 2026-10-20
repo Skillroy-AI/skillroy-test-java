@@ -313,16 +313,14 @@ as built 2026-10-02, the pack loader's test is the public `DomainPacks.reservedI
 (Phase 5, built 2026-10-08; P5 §13.1) `call` joins the reserved verb names: it is a base verb
 (P1 §8.3), and a pack that declares a verb `call` is refused.
 
-*(Phase 8, built 2026-10-19, EX; P8 §8.7, §2.2.)* `captureFacts` joins the reserved verb names: it is a base verb, and a
-pack that declares a verb of that name is refused at compiler construction (a break for a layer that has one, Q45).
-
 *(Phase 7, built 2026-10-10, VC; P7 §8.5.)* The `inference.` prefix is enforced against the agent's matrix too: an agent
 that declares an id with it is refused ERROR / ENVIRONMENT at the merge (`CapabilityMerge`), and a contributed id that two
 contributors answer is refused naming both.
 
-*(Phase 8, built 2026-10-19, ES; P8 §7.3.)* `accept` and `minRung` join the reserved verb names: a step holds one verb
-key plus the reserved modifiers `accept` and `minRung`, and a pack that declares a verb of either name is refused when
-the compiler is constructed.
+*(Phase 8, built 2026-10-19, EX, ES; P8 §8.7, §7.3, §2.2.)* `captureFacts`, `accept` and `minRung` join the reserved
+verb names: `captureFacts` is a base verb, and a step holds one verb key plus the reserved modifiers `accept` and
+`minRung`; a pack that declares a verb of any of the three names is refused when the compiler is constructed (a break
+for a layer that has one, Q45).
 
 *(Phase 8, built 2026-10-19, EP; P8 §9.1.2, §9.1.6.)* A pack's own capability ids (`DomainPack.capabilities()`) are
 `<packId>.<name>`, `name` matching `[a-z0-9]+([.-][a-z0-9]+)*`, at most 128 characters; since the pack id `inference` is
@@ -360,7 +358,11 @@ above (not reserved, not in `resolve`, captured once, by an event or by facts) a
 step, fields}` as an event's capture is; later steps and `verify` read `$slot.field` (a delta: `{size: {gt:
 $before.scans}}`); it appears under `captured` in the run's `bindings.json`, never in a committed bindings file. A
 path that does not resolve fails the step `FAIL / ASSERTION` naming the slot, field and path; under
-`expectationsOnMaskedValues` a captured value the run's mask changes fails it too (D605).
+`expectationsOnMaskedValues` a captured value the run's mask changes fails it too (D605). *(Phase 8 security fixes,
+S150, S173, S177, FC; P8 §8.7.)* Under that option, and always in a session, the paths are followed on the fact's
+masked view, so a path that meets a secret in a filter fails the same way, and a value is judged before a `size` is
+measured; a plain captured value is at most 65,536 characters of JSON ("the value is too large to capture …; capture
+its size or a field").
 
 ---
 

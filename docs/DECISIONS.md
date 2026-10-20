@@ -1,6 +1,6 @@
 # Decisions: base framework
 
-Decisions for the base framework (`skillroy-test-java`), as of 2026-10-19 (B1-B38). The project owner answered B1-B14
+Decisions for the base framework (`skillroy-test-java`), as of 2026-10-20 (B1-B40). The project owner answered B1-B14
 on 2026-10-02; each entry records the answer, what it changed, and what the build has established. B15 and B16 follow
 from those answers. B17 and B18 were taken without the owner, on the evidence of the security review and of the
 end-to-end review, B19 as the answers to the open questions of the Phase 2 contract and B20 as those of the Phase 3
@@ -9,7 +9,7 @@ base stays restrictive by default; a private overlay may override it"), and answ
 B10 and B12. **B21** (the answers to the fifteen questions of the Phase 4 contract) was taken without the owner later
 on 2026-10-06 and **confirmed by the owner on 2026-10-07** without a veto. **B22** (the eleven decisions the Phase 4
 build and its review took on their own, the contract's D59-D69) was taken without the owner on 2026-10-07 and
-**confirmed by the owner the same evening** (`B22 ok`). **B23** (the Phase 5 contract's eighteen answers, `design/phase5-contracts.md` §17, Q11 withdrawn) and **B24** (the eighteen decisions of its build and review, D88-D104 and D110) were taken without the owner on 2026-10-08 and **confirmed by the owner the same day** (`B23 ok`, `B24 ok`). **B25** (the live session's three decisions, D111-D113) was taken without the owner in the afternoon of 2026-10-08 and **confirmed by the owner on 2026-10-09** (`B25 ok`). **B26** (the Phase 6 contract's twenty-two answers, `design/phase6-contracts.md` §17) and **B27** (the 127 decisions of its build, of the code review's fix wave and of the security fix rounds, D160-D286) were taken without the owner on 2026-10-09, the build proceeding on them because the owner asked for progress that day, and **confirmed by the owner on 2026-10-10** (`B26 ok`, `B27 ok`); the owner **signed off B28**, the repeat security review, the same day (`B28 ok`, the eight lows accepted). **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, which produced D287-D358) was taken without the owner on 2026-10-10 (the build proceeded on it, as it did on B26) and was **confirmed by the owner on 2026-10-11** (`B29 ok`, no veto). **B30** (the 128 decisions of the Phase 7 build, of its code review's fix wave, of the race fix and of the security delta review's fix round, D359-D486, `design/phase7-contracts.md` §17: 72 taken by the build on 2026-10-10 and 56 by the fixers on 2026-10-10 and 2026-10-11) was taken without the owner, while the work ran, and **confirmed by the owner on 2026-10-11** too (`B30 ok`, no veto). The owner **signed off B31**, the Phase 7 security delta review (S101-S148), the same day (`B31 ok`, the two lows S142 and S144 accepted as proposed). B32-B37 (2026-10-11 to 2026-10-13) record the follow-ups after Phase 7, the release of 0.1.0 and the commits' email. **B38** (the Phase 8 contract's sixty-four answers, `design/phase8-contracts.md` §18, which produced D501-D642) was taken without the owner on 2026-10-19 so that the build of the second domain's wave 1 can start, as B26 and B29 were; it is **provisional** until the owner answers (`B38 ok`, or vetoes in the forms of its table). B39 is reserved for the Phase 8 build's, code review's and fixes' decisions (from D643), B40 for the Phase 8 security delta review's sign-off (S149 onwards). Every decision stays changeable
+**confirmed by the owner the same evening** (`B22 ok`). **B23** (the Phase 5 contract's eighteen answers, `design/phase5-contracts.md` §17, Q11 withdrawn) and **B24** (the eighteen decisions of its build and review, D88-D104 and D110) were taken without the owner on 2026-10-08 and **confirmed by the owner the same day** (`B23 ok`, `B24 ok`). **B25** (the live session's three decisions, D111-D113) was taken without the owner in the afternoon of 2026-10-08 and **confirmed by the owner on 2026-10-09** (`B25 ok`). **B26** (the Phase 6 contract's twenty-two answers, `design/phase6-contracts.md` §17) and **B27** (the 127 decisions of its build, of the code review's fix wave and of the security fix rounds, D160-D286) were taken without the owner on 2026-10-09, the build proceeding on them because the owner asked for progress that day, and **confirmed by the owner on 2026-10-10** (`B26 ok`, `B27 ok`); the owner **signed off B28**, the repeat security review, the same day (`B28 ok`, the eight lows accepted). **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, which produced D287-D358) was taken without the owner on 2026-10-10 (the build proceeded on it, as it did on B26) and was **confirmed by the owner on 2026-10-11** (`B29 ok`, no veto). **B30** (the 128 decisions of the Phase 7 build, of its code review's fix wave, of the race fix and of the security delta review's fix round, D359-D486, `design/phase7-contracts.md` §17: 72 taken by the build on 2026-10-10 and 56 by the fixers on 2026-10-10 and 2026-10-11) was taken without the owner, while the work ran, and **confirmed by the owner on 2026-10-11** too (`B30 ok`, no veto). The owner **signed off B31**, the Phase 7 security delta review (S101-S148), the same day (`B31 ok`, the two lows S142 and S144 accepted as proposed). B32-B37 (2026-10-11 to 2026-10-13) record the follow-ups after Phase 7, the release of 0.1.0 and the commits' email. **B38** (the Phase 8 contract's sixty-four answers, `design/phase8-contracts.md` §18, which produced D501-D642) was taken without the owner on 2026-10-19 so that the build of the second domain's wave 1 could start, as B26 and B29 were (the build proceeded on it); it is **provisional** until the owner answers (`B38 ok`, or vetoes in the forms of its table). **B39** (the 168 decisions of the Phase 8 build, of its integration and regeneration step R and of the one fix wave that closed its code review and its security delta review, D643-D810, `design/phase8-contracts.md` §17: 125 taken on 2026-10-19 and 43 by the fixers on 2026-10-20) was taken without the owner, while the work ran, and is **provisional** too. **B40**, the sign-off of the Phase 8 security delta review (S149-S180), is **open and the owner's**: the review is run and fixed, one low (S180) is proposed for acceptance with a release note, and the orchestrator does not sign it. Every decision stays changeable
 until the first public release, at a cost that grows with the code written on it. Decisions that concern one tenant
 application live in that tenant's private repo, not here.
 
@@ -71,7 +71,9 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B35 | Gap 104 (D500), 2026-10-12 | as taken | **confirmed by the owner 2026-10-12** | built 2026-10-12, checked by a probe (no full regression, the owner's instruction) | – |
 | B36 | The release of 0.1.0 and the push (the owner's word, the outside reading, the spikes' versions, the next version, publication) | – | **given by the owner 2026-10-12** | 0.1.0 cut on 2026-10-12 (`docs/release-notes/0.1.0.md`) | – |
 | B37 | The commits' email before the first push | – | **given by the owner 2026-10-13** | history rewritten 2026-10-13 (`docs/commit-id-map.md`) | – |
-| B38 | Phase 8 contract answers (64 questions: the input veto's shape, the visible area and the heavyweight source, AWT controls; `APP_QUIESCENT` with budget admission and a penalty, lanes, `QueryControl`, derived column labels, the procedure call retired; the secret-key rule on every event, the `BrowserMask` SPI, selection of a masked browser, the Playwright opt-in; the code-source filter and name rule, the `ClassPattern` grammar, the add-only deny with its echo; the warning channel in the envelope, correlated acknowledgements, the composite rule, call-level ladders; plan version 7 with strict keys, the `events` root refusing on loss, `[json]`, `captureFacts` reserved; pack capabilities in `replay`, `pack` as the explicit `on_prompt` value, the suite cache, configuration as a capability; the protocol's echo rule, the six deferred gaps, the delta review's scope, regeneration once per cause, the `password` argument name, the attach window of gap 139) | the §18 answers | taken 2026-10-19 by the orchestrator, revised the same day after the contract review; **provisional** until the owner answers | the build starts on them (`TODO.md`, "Phase 8") | the owner's `B38 ok` or vetoes in the forms of §18 |
+| B38 | Phase 8 contract answers (64 questions: the input veto's shape, the visible area and the heavyweight source, AWT controls; `APP_QUIESCENT` with budget admission and a penalty, lanes, `QueryControl`, derived column labels, the procedure call retired; the secret-key rule on every event, the `BrowserMask` SPI, selection of a masked browser, the Playwright opt-in; the code-source filter and name rule, the `ClassPattern` grammar, the add-only deny with its echo; the warning channel in the envelope, correlated acknowledgements, the composite rule, call-level ladders; plan version 7 with strict keys, the `events` root refusing on loss, `[json]`, `captureFacts` reserved; pack capabilities in `replay`, `pack` as the explicit `on_prompt` value, the suite cache, configuration as a capability; the protocol's echo rule, the six deferred gaps, the delta review's scope, regeneration once per cause, the `password` argument name, the attach window of gap 139) | the §18 answers | taken 2026-10-19 by the orchestrator, revised the same day after the contract review; **provisional** until the owner answers | built 2026-10-19 on them while they are provisional, in seven worktree packages merged into `main`, the integration and step R; code-reviewed (three lenses), fixed and security-reviewed (delta, B40) 2026-10-19/20 (`TODO.md`, "Phase 8") | the owner's `B38 ok` or vetoes in the forms of §18 |
+| B39 | Phase 8 build, integration, review and security-fix decisions (168: D643-D767 of `design/phase8-contracts.md` §17, 125 taken by seven packages during the build of 2026-10-19, by the integrator and by step R, and D768-D810, 43 taken by the one fix wave that closed the code review and the security delta review (FA, FB, FC, FD, FE), 2026-10-20) | as taken | taken 2026-10-19 and 2026-10-20 by the orchestrator without the owner; **provisional** until the owner answers | built, code-reviewed, fixed and security-reviewed (delta) 2026-10-19/20, merged into `main` with the head `bdafc52` (`TODO.md`, "Phase 8"; the final Linux matrix `[final matrix]`) | the owner's `B39 ok` or `B39 D<n> veto` forms of the B39 table |
+| B40 | The Phase 8 security delta review's sign-off (S149-S180: 32 confirmed findings, 3 high, 8 medium, 21 low; everything of medium or above fixed and 20 lows fixed, S157 by the documentation pass; S180 proposed for acceptance with a release note, its fix gap 151; the "not verified" list; no outside reader yet, not a gate) | the orchestrator recommends yes once the final matrix is green and the owner has read S180's release note | **open, the owner's** (the orchestrator does not sign, P6 §12.6) | records written 2026-10-20 (`TODO.md`, "Phase 8 security delta review"); `SECURITY.md` carries it as open | the owner's `B40 ok`, or `B40 S180 fix` or `B40 outside reader first` |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1771,7 +1773,7 @@ says. **Confirmed by the owner on 2026-10-12** ("I approve B35"), no veto.
 
 | D | Question | Default taken | Veto form |
 |---|---|---|---|
-| D500 | How does the agent keep a person's middle click from blocking an off-screen Chromium page (gap 104: the middle `mouseup`'s default, Linux's paste of the X11 PRIMARY selection)? | Before a sequence that releases the middle button, a one-shot capture listener on the main frame's window cancels that one `mouseup`'s default (best effort within the call's bound; removed after it or after 5 s); the page's handlers still run; no paste of the PRIMARY selection through the agent, as S110 already rules for a model or a client | `B35 D500 veto`: refuse a middle click on an off-screen page instead, or leave the paste and document the hang |
+| D500 | How does the agent keep a person's middle click from blocking an off-screen Chromium page (gap 104: the middle `mouseup`'s default, Linux's paste of the X11 PRIMARY selection)? | Before a sequence that releases the middle button, a one-shot capture listener on the main frame's window cancels that one `mouseup`'s default (best effort within the call's bound; removed after it or after 5 s); the page's handlers still run; no paste of the PRIMARY selection through the agent, as S110 already rules for a model or a client *(narrowed by the Phase 8 security fix S171, FE, 2026-10-20: best effort, a page that interferes with the listener keeps the paste; the listener now leaves on a trusted event only and bounds itself, P7 §4.3)* | `B35 D500 veto`: refuse a middle click on an off-screen page instead, or leave the paste and document the hang |
 
 ## B36 The release of 0.1.0 (2026-10-12)
 
@@ -1887,17 +1889,350 @@ integration guide, `SECURITY.md` and `README.md` (written in when the build star
 2026-10-19, not yet built; P8 §n)"); `threat-model.md` (extended now: the status line, §3, §5, §6 rows, §7, §8 and a
 summary §9); the amendments file's index (A67-A99, by the build). Two behaviour changes apply to every target or pack
 by default because they are protections (P8 §5.1 event masking, §5.2 the view-less browser); the rest are listed in P8
-§11. **State of the build.** Specified; the build starts on the provisional answers in seven worktree packages (EA, ET,
-EW, EH, ES, EX, EP; `phase8/contract-notes.md`). **Blocks.** Nothing; a veto before the package that builds the item
-lands is cheap, after it costs the rework §17's row names. The eight owner's-knowledge items change no mechanism if
+§11. **State of the build.** Specified and reviewed on 2026-10-19; the build proceeded on the provisional answers in
+seven worktree packages (EA, ET, EW, EH, ES, EX, EP; `phase8/contract-notes.md`), was merged into `main` the same day in
+the order EW, EA, ET, EH, ES, EX, EP (the last three by the integrator EI, with two integration fixes) and regenerated
+once by step R (`f67402c`); the code review, the fix wave and the security delta review (B40) ran on 2026-10-19/20, and
+the decisions of the build, the integration, step R and the fix wave are B39 below (168, D643-D810; `TODO.md`, "Phase
+8"). **Blocks.** Nothing; a veto before the package that builds the item lands is cheap, after it costs the rework
+§17's row names. The eight owner's-knowledge items change no mechanism if
 answered the other way but Q16 (admitting `CALL` opens a package with a security pass) and Q45 (an unreserved
 `captureFacts` leaves a layer's verb of that name winning).
+
+## B39 Phase 8 build, integration, review and security-fix decisions (2026-10-19/20; provisional)
+
+**From:** the decisions taken while building Phase 8 on 2026-10-19 without the owner, by seven packages in worktrees (EA
+Swing input; ET threads, lanes and the data channel; EW privacy and the web side; EH hooks, code sources and the class
+deny-list; ES semantic input; EX expectations, the `events` root and captured facts; EP pack capabilities, prompt values
+and pre-flight), four of them with an early commit before their body (EX, EP, ET, EW), recorded in their reports as a tag
+and a number and numbered by the orchestrator at the documentation pass of 2026-10-20 as D643-D760 in
+`design/phase8-contracts.md` §17 (each with the alternatives rejected and the reason), in the order the commits were
+built: EX D643-D646, EP D647-D650, ET D651-D656, EW D657-D662 (the early commits), EA D663-D674, ET D675-D688, EW
+D689-D700, EH D701-D717, ES D718-D738, EX D739-D748, EP D749-D760 (the bodies; 118 decisions, each package's numbers
+from 1 without a gap, a body continuing its early commit's); the five choices the integrator EI recorded without a number
+(D761-D765) and the two of the regeneration step R (D766, D767), numbered by the orchestrator from the integrator's report
+and P8 §12.5's "As built" note (its reading, not the reports' numbering); and the decisions taken afterwards, on
+2026-10-20 and again without the owner, by the five fixers of the one fix wave that closed both the code review and the
+security delta review (FA the agent's Swing side; FB the agent core and the data channel; FC expectations, facts,
+sessions and the model-facing masks; FD the controller, the CLI, the hooks installer, `OutputScan` and code sources; FE
+the web side, with the Swing capture and hit-test hunks S166 needs), recorded as D768-D810 in the same place and numbered
+in the order of the tags, FA D768-D775, FB D776-D786, FC D787-D794, FD D795-D802, FE D803-D810 (43 decisions, each
+tag's ids from 1 without a gap), which is also the order their branches merged into `main`. **Provisional**: taken
+without the owner, the work having proceeded on them as it did on B26, B27, B29 and B30, until the owner answers
+(`B39 ok`, or a veto in the form of a row below).
+**Question.** One hundred and sixty-eight points the build, the integration, step R and the fix wave could have decided
+either way (125 + 43). None changes a decision of B1-B37 or an answer of B38; in a few places the build or a fixer
+departs from the contract's own sentence, and the contract carries an "As built" or "Fix wave" note there (see "What it
+changes"). The veto forms of D769, D771, D775, D776, D779, D783, D787, D788, D789, D791, D795, D801, D803 and D808 are
+the ones the fixers' reports name for the owner; the others restate the alternative §17 rejected.
+
+| D | Question | Answer | Veto form offered |
+|---|---|---|---|
+| D643 | What does `PayloadMatch.matches` do with an invalid entry? | It never holds: a list or map value other than a valid `{has: scalar}` never holds, a scalar is anything but a map, a collection or an array, and `problem` quotes at most 100 ASCII characters | `B39 D643 veto`: keep the whole-value text comparison for an invalid entry, or throw |
+| D644 | How do plan version 7's gates say what they found? | They name it, in Phase 7's style: "a list filter", "a dotted filter field", `[json]`, the first of `anyOf` and `containsWhere` | `B39 D644 veto`: one combined message for the three path items |
+| D645 | What does the plan reader say where P8 §8.7 is silent? | "captureFacts needs 'facts'"; a `facts` member below version 7 is refused; a check on a `captureFacts` step reads "captureFacts has no calls"; a `sync.await` call's object `match` is checked at every version | `B39 D645 veto`: drop a `facts` member below version 7 silently |
+| D646 | When does the `facts` reader and writer land? | In EX's skeleton commit, with the stored-row `containsWhere` refusal (a build order, not a contract change) | `B39 D646 veto`: in EX's body, as planned |
+| D647 | When does `AgentClient.agentSession()` answer the session? | Only once a ping verified it | `B39 D647 veto`: the raw field, the endpoint's unverified id |
+| D648 | What did a pack that declared a capability get before EP's body landed? | The evaluation threw `UnsupportedOperationException`; a pack that declared none was served | `B39 D648 veto`: a silent no-op, or an `Abort` |
+| D649 | What does `SuiteCache` do where the contract left it open? | `Key` refuses an unknown kind and a null pack id, id or agent session; `put` refuses a null answer; at the bound a known key may be replaced and a new one is dropped; its lock is held only while an answer is put | `B39 D649 veto`: another rule at the bound, named by the owner |
+| D650 | How did the early commit's stubs name `PackCapability`? | Fully qualified | `B39 D650 veto`: imports |
+| D651 | What shape does `SqlTokens` take? | A token stream the guard and `SelectLabels` share, proven by the unchanged `StatementGuardTest` and a differential run of the old and the new guard over 4.5 million statements | `B39 D651 veto`: a callback visitor |
+| D652 | How does `SelectLabels` combine the dialect readings? | Only readings without an unterminated construct or unbalanced brackets count; they must split the list alike and agree on each entry, else no label; every doubt answers null | `B39 D652 veto`: one standard reading |
+| D653 | What does `QuiescentPoint` fix where the contract was silent? | Public bounds (a 120,000 ms timeout cap, a 50 ms default budget), one task at a time per point, an exactly-once decision by one compare-and-set, the monitor never held while a task runs | `B39 D653 veto`: another bound or concurrency rule, named by the owner |
+| D654 | Where are a lane's bounds checked, and may a call name a lane? | In `Lane` (`isValidName`; the builder refuses a bad name at once); `ThreadBroker.call(LANE, …)` is refused | `B39 D654 veto`: serve `call(LANE)` on a default lane |
+| D655 | Are `QueryControl`'s bounds public? | Yes: `MAX_ACTIONS` 4 and `ACTION_TIMEOUT_MS` 2000 | `B39 D655 veto`: private numbers |
+| D656 | What did the broker do with the two new policies before ET's body landed? | `post` refused both (final), `run` answered `CAPABILITY_UNAVAILABLE` | `B39 D656 veto`: the silent worker branch until the body |
+| D657 | Does `OutputScan` keep the old method name? | Yes: `leaks(String, Set)` beside `leaksIn(String, Set)`, the same method | `B39 D657 veto`: rename the one caller's form to `leaksIn`, or drop `leaksIn` |
+| D658 | What does `Scope.EVENTS` read? | Records by their `type` field, and a session's `journal.jsonl` beside `run.jsonl`; a line that does not parse is read whole (widened by D798) | `B39 D658 veto`: `run.jsonl` only |
+| D659 | When does the event pass's 10,000-scalar bound apply? | Only while a `MaskPolicy` is registered | `B39 D659 veto`: cut at 10,000 scalars always |
+| D660 | What is logged and stored when a mask policy fails? | Its exception's class only; a throw or an unstorable return makes that scalar `<redacted>`; a `null` return ends the chain and is kept | `B39 D660 veto`: log the message, or store what the policy returned |
+| D661 | Which fixture proves event masking end to end? | `CoreTestModule` behind `coretest.eventMask=on\|throw`, with `EventMaskingTest` | `B39 D661 veto`: a new discovered test module |
+| D662 | How does `OutputScan` read a file? | UTF-8 with replacement; a PNG recognised by its name or its signature | `B39 D662 veto`: throw on a malformed byte |
+| D663 | Which ENTER asks the root pane's default button? | ENTER with any modifier, and `swing.type {enter}` in both modes (widened again by D769) | `B39 D663 veto`: the contract's rule, without CTRL, ALT or META |
+| D664 | What does a default-button refusal carry? | Rule 5's keys (`ref` the target, `vetoed` the refusing component) and `defaultButton` | `B39 D664 veto`: `vetoed` = the button |
+| D665 | What happens to a component more than 64 levels below its window? | It is refused, and the readers flag it `vetoed` | `B39 D665 veto`: ask 64 levels and allow the rest |
+| D666 | When is the hit-test's `vetoed` true? | When the target or the deepest component is vetoed | `B39 D666 veto`: the target only |
+| D667 | What is an AWT control's routed `source`? | The control itself (a heavyweight leaf); the `Panel` only for a lightweight inside it | `B39 D667 veto`: the scanner panel for all three (§13.2 item 7's text) |
+| D668 | How does the tools leg act into the tools window? | With `force: true` on the routed and Robot calls (`force` skips covering and modal only, never the veto, asserted both ways) | `B39 D668 veto`: activate the tools window first, or move it off the desk frame |
+| D669 | What does §13.2 item 9 assert? | That the message names `INPUT_REJECTED` and the veto's text, and that `data.reason` is `vetoed` | `B39 D669 veto`: add "vetoed" to the agent's message |
+| D670 | Where does the routed pointer's per-event veto run? | Outside the call's state lock, in two phases; the exit event is asked too | `B39 D670 veto`: ask under the lock |
+| D671 | What do `vetoWithheld` and its warning count? | Calls, once per call | `B39 D671 veto`: tasks |
+| D672 | Which component does `collapsedBy` name, and what is a collapsed dismiss button? | An ancestor's culprit when the parent is collapsed, else the component when it has no size, else the parent; a collapsed dismiss button is `NOT_FOUND`, as §3.3's table says | `B39 D672 veto`: the nearest empty ancestor always, and window coordinates |
+| D673 | What does `lending.tools` accept? | `true` or `false` only (anything else stops the desk); the tools window lays out with explicit bounds | `B39 D673 veto`: a lenient parse, and layout managers |
+| D674 | Where is `AgentModule.info()` shown? | By `ModuleLoader.Record.toJson`, for an installed module only, read without the module lock; the tests in new files | `B39 D674 veto`: hunks in shared test files |
+| D675 | What is a lane? | A `ThreadPoolExecutor` whose core size is the bound, its core threads timing out after 30 s; the newest 64 retired names remembered | `B39 D675 veto`: `DaemonThreads.boundedPool`, or a custom executor |
+| D676 | Where does the quiescent machinery live? | In `CoreThreadBroker`; a broker field marks the running quiescent task's thread | `B39 D676 veto`: a `ThreadLocal` on the application's thread, or `isForbidden` alone |
+| D677 | Who closes quiescent points? | The core for the first provider's point, and each module before its `uninstall` and after a failed install | `B39 D677 veto`: the core's close only |
+| D678 | How is the cancel batch run? | Posted to `WORKER` | `B39 D678 veto`: `call(WORKER, batch, t)` |
+| D679 | Which thread converts a read's rows? | The read task's (the lane's or the nested worker's); the masks run on the dispatching worker | `B39 D679 veto`: convert on the dispatching worker |
+| D680 | How long does the answer wait for a read being cancelled? | `min(200 ms, the dispatcher's remaining time - 50 ms)`, at least 1 ms | `B39 D680 veto`: the whole 250 ms reserve |
+| D681 | When is `cancelled` true? | When a provider action returned without throwing, or the JDBC action found an open statement and `cancel()` returned | `B39 D681 veto`: whenever a cancellation was asked |
+| D682 | When is a naming candidate not used? | When its size differs from a non-zero names or rows width, or from the final width (amended by D778) | `B39 D682 veto`: use it padded or cut |
+| D683 | How is the desk's listener list guarded? | By the list's monitor, no callback under it | `B39 D683 veto`: a `CopyOnWriteArrayList` |
+| D684 | When does `lending-report` name its lane? | Only when `declareLane` succeeded; otherwise its reads run on a worker (logged) | `B39 D684 veto`: fail every read `unknown lane` |
+| D685 | How does §13.2 item 12's JDBC half run? | With 1000 ms instead of 1500, the runaway statement a seven-way cross join | `B39 D685 veto`: round the query timeout's seconds up |
+| D686 | How does `EngineViewAndReportTest` queue the admission case? | At an idle point with less than 105 ms before the lock | `B39 D686 veto`: a fixed time window |
+| D687 | Does `agent.capabilities {reprobe: true}` clear the quiescent penalties on a target that is not ready? | Yes; the probes still run only when it is | `B39 D687 veto`: clear on a ready reprobe only |
+| D688 | Which check does the MCP server's start make first? | It refuses an allow-list that names procedures before it checks for `data.query` | `B39 D688 veto`: after the presence check |
+| D689 | Where do steps 1-4 of P8 §5.2 live? | In one class, `BrowserMasks`; a throwing mask or registry and an unreadable vendor object count `TRUE`; a failing mask is logged by its class only | `B39 D689 veto`: the logic in `BrowserIndex`, copied into `WebPrimitives` and `Selection` |
+| D690 | What is the per-call masked test? | Nothing registered, no; `TRUE`, yes; no component, yes unless `FALSE`; else the call's `CaptureMask` read, else the entry's flag; each judgement refreshes the flag | `B39 D690 veto`: §5.2's formula as written (which dropped "`TRUE` masks whatever the view") |
+| D691 | How does a selection judge a masked entry? | View-less entries and `TRUE`s afresh, the flag for the others; a masked entry's title is never read | `B39 D691 veto`: the rebuild's flag only |
+| D692 | What does a mask read answer without an event-dispatch thread? | Every component masked; a throwing registry counts as masks registered (completed by D806) | `B39 D692 veto`: unmasked |
+| D693 | Do `web.pointer`, `web.dom.click` and `web.dom.fill` declare `redact`? | Yes, in their descriptors | `B39 D693 veto`: an undeclared argument the dispatcher passes anyway |
+| D694 | How does the CDP path treat a `by: {url\|title}` selection while masks are registered? | It hands it to the agent after one fresh `web.browsers` read; the path's own events read its cached agent list (narrowed by D809) | `B39 D694 veto`: an agent read on the poller every tick, or a read per event |
+| D695 | Where is `ConnectSupport` detected? | On the thread that first needs it (the path's `open`), memoised once per JVM | `B39 D695 veto`: on the first attach's Playwright thread (§5.4's sentence) |
+| D696 | Does `CdpAttach.connect` check the overrides itself? | Yes: it refuses, `PROTOCOL`, a line without `noDefaults` whose options do not allow them | `B39 D696 veto`: the path's check alone |
+| D697 | What do `connectOptions.noDefaults` and `isLocal` record? | The option's value where the line has it; `defaultOverridesAccepted` is true exactly when the line lacks `noDefaults` | `B39 D697 veto`: another record shape, named by the owner |
+| D698 | What does §13.2 item 17's tag-back launch assert? | `detached` masked (any `BrowserMask` puts the view-less rule in force) | `B39 D698 veto`: the item's "is not masked" |
+| D699 | Where does the gap 95 (e) check go? | `@Order(18)`, still the launch's last act | `B39 D699 veto`: the new items after it |
+| D700 | How is §13.1 row 18 proved for the hooks and Byteman encoders? | By the column rule over their real payloads, and the core's `EventBusTest` with those shapes | `B39 D700 veto`: a test dependency of both modules on `agent-core`, with a public seam |
+| D701 | What is the catalogue's `ClassDeny`? | The hooks engine itself, told apart by `instanceof HookEngine` | `B39 D701 veto`: a separate class identified by name, or a reason prefix |
+| D702 | In which order are the deny sources asked? | Option, catalogue, other modules, whatever the registration order | `B39 D702 veto`: every registered `ClassDeny` in registration order |
+| D703 | What does `rule.list.deny` hold? | `{catalogue?, option, modules}`, never `from` | `B39 D703 veto`: widen the SPI to carry `from`, or reflect into the engine |
+| D704 | Which entries does `HookCatalogue.Builder.build()` bake? | Only those not taken from the base | `B39 D704 veto`: bake every entry with a null qualifier |
+| D705 | May an overlay's plain `packages` name drop a base qualifier? | No; only its map form replaces one | `B39 D705 veto`: the plain form resets the qualifier |
+| D706 | What shape is `denyNotDelivered`? | An object `{patterns, agentOption}` | `B39 D706 veto`: a list beside a sibling `agentOption` |
+| D707 | Which fixture does `ProbeItemsTest`'s two-jar case use? | `TwoJars`, its own | `B39 D707 veto`: `Returns`, the contract's text |
+| D708 | Which public members does the build add beyond P8 §6.3's list? | `HookTarget.MAX_CODE_SOURCE_LENGTH`, `codeSourceViolation`, `withCodeSource`; `HookProbe.MAX_CODE_SOURCES`; `HookEntry.withTarget` | `B39 D708 veto`: private checks duplicated on both sides |
+| D709 | How is a code-source regex budgeted? | One `BoundedRegex.BUDGET_MS` per spec per call, shared by its copies through a deadline | `B39 D709 veto`: a budget per copy |
+| D710 | In which order does a refusal name code sources? | Distinct and sorted | `B39 D710 veto`: the copies' order |
+| D711 | When is `agentOption` read? | When any `rule.*` id is in the matrix, whatever its state; a failed read is `unknown` | `B39 D711 veto`: only when `rule.engine` is `OK` |
+| D712 | What happens to a `VirtualMachineError` from a `ClassDeny`? | It is rethrown | `B39 D712 veto`: count it as a refusal |
+| D713 | How does `hooks.deny` count and bound its patterns? | Equal patterns kept once; `<i>` counts the non-empty items from 0; more than 64 is refused with the count | `B39 D713 veto`: another form, named by the owner |
+| D714 | Does `rule.check` type-check a denied rule class? | No: nothing of a denied class is read | `B39 D714 veto`: type-check anyway |
+| D715 | What does `skillroy hooks status` print? | The class table only when `hook.health` carries `classes`; "no hook entry" for a deny-only catalogue; the deny line names `from` before the patterns | `B39 D715 veto`: another format, named by the owner |
+| D716 | Which hooks does `hook.health.classes[].hooks` name? | The installed and the residue hooks whose classes include the entry | `B39 D716 veto`: installed hooks only |
+| D717 | Which pattern does the pathological-qualifier test use? | `(.*a){20}` | `B39 D717 veto`: `(a\|aa)+`, which the JDK 25 regex engine memoises |
+| D718 | What does `CallWarning` fix where the contract was silent? | Data that cannot be represented becomes `{truncated: true}`; a malformed message or data is `INVALID_WARNING`; a `TOO_MANY_WARNINGS` folds idempotently | `B39 D718 veto`: throw on data that cannot be represented, or count a folded element as one |
+| D719 | What is a malformed `inputId`, and what does the sample report? | Null; the sample refuses a caller's malformed `inputId` (`INVALID_PARAMS`), reports caveats only for an input consumed within the call, and answers `ANSWERED_NESTED` when the prompt changed | `B39 D719 veto`: return any string, and caveats for queued inputs |
+| D720 | What happens to a late `warn`? | It is dropped and logged once per call at INFO, code and primitive only | `B39 D720 veto`: a FINE level in the agent log |
+| D721 | What does `RungResult.of` return? | A mutable map; one `Rung.check` shared by `PlannedCall` and `Plan.Call` | `B39 D721 veto`: an immutable builder |
+| D722 | What does the secret-echo check compare? | The text of every scalar leaf, numbers included, with every leaf of a structured secret; the detail key `parameter` | `B39 D722 veto`: strings only, and the key `secretParam` |
+| D723 | Where is a forwarded `minRung` read? | At the call's top level or in `args.minRung` | `B39 D723 veto`: the top level only |
+| D724 | How are listed `seq`s outside the call's window recorded? | As one `prompt {step, primitive, ignoredSeqs}` record | `B39 D724 veto`: a key on every per-event record |
+| D725 | Which verbs refuse the modifiers `accept` and `minRung`? | Every verb that compiles to no call; pre-accepted codes are checked at compile | `B39 D725 veto`: only the four verbs named |
+| D726 | Where do a cleanup call's warnings and rungs go? | Records only (`cleanup: true`); `warnings` carried only when non-empty in the run-end record, the journal's step and the MCP reply | `B39 D726 veto`: always present |
+| D727 | How does telemetry carry a warning? | A `warning` event with `skillroy.warning.code` and `skillroy.accepted`, kept by `minimal` | `B39 D727 veto`: a new span, or new rung attributes |
+| D728 | Does `run --json` always carry `warnings`? | Yes, an empty list too | `B39 D728 veto`: only when non-empty |
+| D729 | Does `ScannerDevice` get an `Invocation`? | No: no warnings, a fixed 5 s wait, late acknowledgements without a correlation id | `B39 D729 veto`: extend `DeviceAdapter.act` with an invocation |
+| D730 | What does a composite's wait that ends answer? | The agent's `TIMEOUT` | `B39 D730 veto`: `INPUT_REJECTED` |
+| D731 | How does a `SYNC_TIMEOUT` name the match, and what does a full pending table do? | As JSON; the oldest entry is evicted and its waiter released as not taken | `B39 D731 veto`: the contract's `{inputId=…}` form, and keep the waiter |
+| D732 | What does `EngineEvents.awaitChange` wait on? | A request's or a prompt's sequence number | `B39 D732 veto`: the prompt's text |
+| D733 | How do the new scenarios end? | On `key: CANCEL` or a sign-on, relying on the verbs' cleanup sign-off | `B39 D733 veto`: an explicit final `signOff` |
+| D734 | How is §13.2 item 27's late acknowledgement tested end to end? | Up to 10 bounded attempts with a timing line; the deterministic proofs are unit tests (made able to fail by D801 and D802) | `B39 D734 veto`: a test seam that delays the desk's engine |
+| D735 | Which directories does `PlansUpToDateTest.committedScenarios()` walk? | `scenarios/` and `scenarios/scanner/` | `B39 D735 veto`: a separate list for `scanner/` |
+| D736 | Do test fakes still echo a secret in a result? | No; the echo stays in an event | `B39 D736 veto`: keep the echo (the check then fails those tests) |
+| D737 | Does `Phase5CompileTest` pin `accept` and `minRung` in `RESERVED_VERBS`? | Yes | – (the pin is a list of the reserved names) |
+| D738 | Where does P8 §16.1's P6 mark sit? | In P6 §7.3, `rule.check`'s section | `B39 D738 veto`: P6 §4.5 (which is "Error codes") |
+| D739 | When does `loan-counts-and-events` capture its counts? | After the first scan, on the open loan, asserting a size and a value delta | `B39 D739 veto`: the contract's capture right after `signOn` (false on a shared desk), a second capture slot, the `events` root only, or a desk reset |
+| D740 | How does the `events` root check its pages? | Each page whole (contiguous `seq`, an empty page past the cursor, a missing list); a read failure is retried until the step timeout, then `ERROR / ENVIRONMENT` (widened by D789) | `B39 D740 veto`: a terminal failure without retry |
+| D741 | How are captured facts shared between a run and a session? | One package-private `FactCapturing` | `B39 D741 veto`: two private copies |
+| D742 | Where is the `actual` cut applied? | `RunLog.cutActual`, on `expect` records and an expectation failure's detail (extended to the session by D792) | `B39 D742 veto`: another site, named by the owner |
+| D743 | Where is a `sync.await` match checked at compile? | In `PlanCompiler.toCall` for every call; a `{has: $x}` that resolves to a list is refused by the agent | `B39 D743 veto`: in `AwaitRules.resolve` |
+| D744 | Where are EX's tests placed? | The `ScenarioSchemaTest` part of §13.1 row 38 in `Phase8CompileTest`; methods of their own in shared files | `B39 D744 veto`: in `ScenarioSchemaTest` |
+| D745 | How does `LoanCountsHeadlessTest` run its plans? | Without their launch property, on the headless desk | `B39 D745 veto`: `jvm.properties` on the shared `HeadlessDesk` |
+| D746 | Does `thePlansUseEventDrivenSyncOnly` admit a `mark` step? | Yes (sync `NONE`, `trace.mark`) | `B39 D746 veto`: refuse it (the `[json]` probe then needs another source) |
+| D747 | Which grammar details did the build settle? | `[ json ]` is the segment; an empty part of a filter field is a parse error; only a map element can match a filter | `B39 D747 veto`: another form, named by the owner |
+| D748 | Which messages did the build write where P8 §8.7 and §8.9 are silent? | The compiler's `captureFacts` texts and the agent's "invalid match: <problem>" | `B39 D748 veto`: other wording, named by the owner |
+| D749 | How does the plan reader read `fail` and `pack`? | Ignoring case and blanks, as the loader does | `B39 D749 veto`: exact lower case only |
+| D750 | Where does a capability's error go? | `PackCapabilities.Entry.error`, a seventh record component, the six-argument constructor kept | `B39 D750 veto`: a side map in `Result` |
+| D751 | Is a capability's error masked before or after it is cut? | Before (an `evaluate` overload taking the host's `SecretMask`) | `B39 D751 veto`: cut in `PackCapabilities` and mask when the record is written |
+| D752 | What does a `scope()` that answers null or throws count as? | `SCENARIO`; a capability whose `id()` throws refuses the host | `B39 D752 veto`: refuse the host for both |
+| D753 | How is a cached pre-flight failure reported, and a `preflight()` that throws? | `cached: true` with a suffix; "its pre-flight checks cannot be read" on every host | `B39 D753 veto`: "internal error" |
+| D754 | When does `caps` evaluate a pack's capabilities? | Only with `--pack` given | `B39 D754 veto`: also when `--inference` alone finds one pack |
+| D755 | Whose suite cache does the MCP server use? | The session options' when the caller gave one, else its own | `B39 D755 veto`: always its own |
+| D756 | How are `HeadlessDesk`'s sessions named? | `headless-desk-<n>` from a JVM counter | `B39 D756 veto`: random ids |
+| D757 | What does `ReResolver.preflight` do with an interrupted check? | It rethrows `InterruptedException` | `B39 D757 veto`: fail the scenarios `PREFLIGHT` |
+| D758 | Do the sample's delegating test packs forward `capabilities()`? | Yes | – (without the forward, §13.2 item 37's pre-flight case stops at `requires`) |
+| D759 | How did §13.2 item 42 read the matrix? | Through the `caps` root (superseded by D795) | `B39 D759 veto`: raise the MCP answer bound, or page the catalogue |
+| D760 | How does `ScenarioSchemaCommittedTest` check JSON-Schema keywords? | As keys | `B39 D760 veto`: reword the capability's description |
+| D761 | How does `LendingModule.install` keep both packages' probes? | One probe choice that knows both (`EngineViewProbe` and `InputProbe`) | – (either side's choice alone drops a probe) |
+| D762 | Where does `@Order(20) JavaAgentSmallRing` go? | At the end of `LendingEndToEndIT` | `B39 D762 veto`: after the Robot leg, where the merge put it |
+| D763 | Does `PlanCompiler.step()`'s rebuild keep a step's `facts`? | Yes, with a test (`underAStrictUiACaptureFactsStepKeepsItsFacts`) | – (a defect the merge made) |
+| D764 | How does `ExpectationsTest`'s `containsWhere` case build its matcher? | As an ordered mapping, as a scenario's YAML gives it | `B39 D764 veto`: loosen the assertion |
+| D765 | How were two tags' passages in one earlier document merged? | Kept side by side at integration, merged into one text by the documentation pass | `B39 D765 veto`: merge them at integration |
+| D766 | Does scenario D gain scenario A's `requires` entry? | Yes, `lending.returns.ceiling` (amending D620); D's live recordings stay | `B39 D766 veto`: leave D without it (`PlansUpToDateTest`'s pin of D to A then changes) |
+| D767 | In which order did step R run? | 1, 2, 3, 5 (native), 4, 5 (image), 6 | – (a record of the run: step 4's unit tests need step 5's recordings) |
+| D768 | How does the veto walk from a popup? | From a `JPopupMenu` with an invoker to the invoker, and from a `Window.Type.POPUP` window with an owner to the owner; one successor for every walk; the 64 bound across the hops | `B39 D768 veto`: walk both the popup's parents and its invoker (a tree, not a chain) |
+| D769 | Which default buttons does ENTER ask? | The default button of every `JRootPane` on the walk from the target to its window, nearest first; a `'\n'` in `DISPATCH` text is an ENTER; a root pane off the walk and outside a `JInternalFrame` is a residual (gap 154) | `B39 D769 veto`: walk the window for every `JRootPane` whose top ancestor is the window |
+| D770 | When does the routed pointer ask the veto again? | At every release of a press of the call: the target and the deepest component at the release's point, in the call's window and every covering window ranked above it or of type `POPUP`; a full covering list or an unreadable point refuses | `B39 D770 veto`: the reviewer's mirror of `MenuSelectionManager`'s search |
+| D771 | Does the Robot route ask a drag's release again? | Yes, after the press is observed and the queue has passed twice; a refusal or a failed read releases at the press point; the read is not atomic with the native release (gap 153) | `B39 D771 veto a`: also refuse a Robot `DRAG` while a veto is registered when the press target is a menu element, has a popup menu or the button is `RIGHT`; `B39 D771 veto b`: drop the re-check and state the whole Robot drag as a residual |
+| D772 | Whose veto does the Robot route ask at its point? | The component of every covering window that holds the point (and a drag's end), `force` or not; a full covering list refuses while a veto is registered; a vetoed covering component answers `vetoed`, not `covered` | `B39 D772 veto`: the exempt owners only |
+| D773 | How many `Withheld` does a `COMPONENT` call have? | One: the re-activations and the final click count once together; the second focus read is asked too | `B39 D773 veto`: one per task |
+| D774 | What do `Redaction.failed` and `SwingSpis.failed` log? | The exception's class only, as `InputVetoes` now does | `B39 D774 veto`: leave the two Phase 7 lines |
+| D775 | Where are the fix wave's veto proofs? | Agent-level display tests in frames of their own (`PopupVetoDisplayTest`) | `B39 D775 veto`: a menu in the sample's tools window and an `InputSafetyChecks` item, in a later step R |
+| D776 | What happens to a positional source's unnamed column? | It is asked under the names its item reads; a column no name can be given has its non-null cells withheld while any `MaskPolicy` is registered, and is served as before without one | `B39 D776 veto`: refuse the read (`INVALID_PARAMS`) |
+| D777 | What is the withheld marker? | `<redacted>`; a null cell stays null; one info line with the source and the count | `B39 D777 veto`: a distinct `<withheld>` marker, or a `withheld` key in the answer (a wire change) |
+| D778 | When is a naming list dropped? | Only when names, types or a returned row are wider than it; shorter rows are padded | `B39 D778 veto`: names or types of any other size contradict it |
+| D779 | Which spellings does the case retry cover? | The statement's: a derived label and each referenced name are also asked in upper and lower case | `B39 D779 veto`: the documentation-only change, an acceptance of S163 |
+| D780 | How does `starTable` return a quoted part? | In double quotes, normalised from backticks or brackets; a quoted part holding a `.` is still refused | `B39 D780 veto`: a value type with a `quoted` flag, or a public `tableParts` helper |
+| D781 | How does a read cancelled before its statement runs stop? | Through a `CancellationException` from the statement sink (SQL state `57014`); the sink receives null before the close; the close waits at most 2 s for a cancel in flight | `B39 D781 veto`: the sink closes the statement, a new sink interface, or an `RpcException` `TIMEOUT` |
+| D782 | How long does a `QueryControl` handle's `close()` wait for a running action? | Until it ends or its 2 s since its start run out; a closed registration never starts | `B39 D782 veto`: a fresh 2 s per `close()` |
+| D783 | How is a cancel batch the pool rejected reported? | `cancelNotStarted: true` with one warn line | `B39 D783 veto`: run a rejected batch on a dedicated bounded thread |
+| D784 | Which `TIMEOUT` does a read that ends on the broker's interrupt get? | The module's own: `Read` keeps the `TIMEOUT` it threw | `B39 D784 veto`: the reviewer's "budget expired" time test |
+| D785 | How is the quiescent penalty keyed? | By module (`module:<id>`) for a module's own tasks; only the penalty refusal carries `module`; a module's direct `QuiescentPoint.await` is the stated residual | `B39 D785 veto`: `module` on every refusal of the module route, or in `lastOverrun` |
+| D786 | Does a scalar match entry build the text of a non-scalar payload value? | No: it checks that the value is a scalar first | – (the sceptic's fix as written) |
+| D787 | On what are paths followed where the masked-value rule applies? | On the fact's masked view (`FactView`: the `SecretMask`, the key rule on map keys, `SecretPairs` on texts, uncut, again after every `[json]`); one rule for every origin of a session, a person's included | `B39 D787 veto`: a person's session keeps the by-value view |
+| D788 | What does a filter over a field that holds the marker answer? | The whole path is `SECRET`, on which no matcher holds | `B39 D788 veto`: the element does not match, or is undecided |
+| D789 | What does the `events` root do with an event cut at publish? | It refuses the read, `ERROR / ENVIRONMENT`, as for a loss | `B39 D789 veto`: only a path or a matcher that reads into a cut payload is undecided, and a filter on `topic` stays exact |
+| D790 | How does an undecided matcher or path end? | `ERROR / ENVIRONMENT` ("could not be decided"); the `expect` record keeps `result: failed` | `B39 D790 veto`: a `result: undecided` value |
+| D791 | What does a single filter that matches more than once answer? | It is ambiguous at run time, at every plan version: every matcher fails on it, `exists: false` included | `B39 D791 veto`: refuse `exists: false` and `not exists: true` on a single filter at compile (version 7) |
+| D792 | What does a session keep of a fact's value? | D608's cut: journal lists cut at 200 with a flag; a captured value at most 65,536 characters of JSON; a quoted matcher at most 300; the caller's answer whole | `B39 D792 veto`: other numbers, or cut the returned values too |
+| D793 | Which rule hides secret-keyed pairs in a text? | One shared rule, `SecretPairs`, for the model-facing mask and the agent's console | `B39 D793 veto`: patch the two rules apart |
+| D794 | What does a path's stop reason name? | The value's kind only, in every mode; a `[json]` error gives its offset only | `B39 D794 veto`: the kind only where the masked-value rule applies |
+| D795 | How does `skillroy_catalogue` stay within its answer bound? | Its bounded sections first; over 25,000 masked characters it withholds verb schemas from the last verb back (then query `args`, then oracle `input`), never cutting the answer (supersedes D759) | `B39 D795 veto`: an optional `section`/`verb` argument that pages the catalogue |
+| D796 | Where does `OutputScan` find a planted value? | A value that is not digits only wherever a non-letter, non-digit bounds it, white space collapsed; a digits-only value keeps the token rule | `B39 D796 veto`: split on more separator characters (which misses a value with a space) |
+| D797 | Which XML escapes does `OutputScan` decode? | The five predefined entities and numeric character references | `B39 D797 veto`: the five entities only |
+| D798 | Which records does `Scope.EVENTS` add? | `run-end` and `warning` whole; `expect`, `check` and `observe` whose path starts at `events` or `hooks` | `B39 D798 veto`: `run-end`'s message alone |
+| D799 | How does `CodeSources` cut a location's outer part? | It decodes first and then cuts, `\` a separator always | `B39 D799 veto`: `\` a separator only when the part starts with it |
+| D800 | When is the catalogue deny's echo asked? | Also before `hook.install`: with a non-empty catalogue deny, step 0's `hook.health` must carry `deny`; the refusal's record carries the catalogue reference with its version | `B39 D800 veto`: the reference without its version |
+| D801 | How is item 27's attempt classified? | By the second input's `consumed`: `QUEUED` requires a `SYNC_TIMEOUT` naming its `inputId`; `INPUT_REJECTED` is "not observed"; anything else fails | `B39 D801 veto`: a test-only desk option that delays the engine's take of an input, set on one leg (D734's rejected seam) |
+| D802 | What does item 27's attempt wait for before it reads the desk? | `input.requested` or `prompt.waiting` after the first call's `seq.before`, bounded | `B39 D802 veto`: read the state at once |
+| D803 | May a locator action act on a masked browser? | No: `web.dom.click`, `web.dom.fill` and a selector `web.dispatchEvent` are refused before the page is evaluated unless `redact: false`; D637's strip stays as the second line | `B39 D803 veto a`: the actions allowed and the oracle recorded as S111's residual; `B39 D803 veto c`: a pack verb's own `redact: false` accepted on the session facade's verb route too |
+| D804 | Is `web.dispatchEvent` refused on the window or the document of a masked browser? | No, only with a selector target | `B39 D804 veto`: refuse every dispatch on a masked browser |
+| D805 | How does a `BrowserMask` reach the Swing capture and hit-test? | The flag rides on `SurfaceSource.Surface` (`masked`, a four-argument constructor), and the Swing module blanks a masked surface's component whole | `B39 D805 veto`: the controller consults `web.browsers` in its grounding and session tools |
+| D806 | What does a per-call mask read answer without an event-dispatch thread? | `UNKNOWN_MASKED` while masks are registered; a null read counts as masked | `B39 D806 veto`: another rule, named by the owner |
+| D807 | How long does a tag the registry no longer gives count? | As `TRUE` while a `BrowserMask` is registered, until a rebuild in which every registry answered | `B39 D807 veto`: another rule, named by the owner |
+| D808 | What name does a masked browser's tap event carry? | The tap's own pattern; an event no pattern matches is dropped | `B39 D808 veto`: keep the page's event names (S170 accepted with a release note) |
+| D809 | When is a browser's mask judged again? | On its events: at most one judgement outstanding, at most once per 2 s, while events of unmasked browsers flow; a selection judges its candidates again before a URL regex or a title read | `B39 D809 veto`: mask a stale-judged browser's events until it is judged, or a registry listener in the agent API |
+| D810 | What does the CDP path's frozen-target refusal name? | `{id, url, title}` only for a target mapped to an unmasked browser (one 5 s `web.browsers` read), `{id, url: "", masked: true}` otherwise | `B39 D810 veto`: ids only unless `masksRegistered` is false |
+
+**What it changes.** Each is built and tested (`TODO.md`, "Phase 8"), and the contract carries an "As built (Phase 8,
+<TAG>)" note at every section a build decision touches; every `D-<TAG>-<n>` of the contract and of two code comments
+now cites the number. The build's decisions that differ from the contract's own sentence are D663 (ENTER with any
+modifier asks the default button, widening D502), D672 (a collapsed dismiss button is `NOT_FOUND`, as §3.3's table
+says), D685 (§13.2 item 12 runs at 1000 ms), D690 (§5.2's per-call formula corrected, so that a `BrowserMask` `TRUE`
+masks whatever the view), D695 (§5.4's thread), D698 (§13.2 item 17's tag-back launch is masked), D702 and D706 (passages
+where §6 said two things), D739 (§12.4's capture point, the one that is true on a shared desk), D750, D751, D753, D759
+and D760 (§9.7's deviations) and D766 (scenario D's `requires`, amending D620). D761-D765 record the integration (D763
+fixes a defect the merge made, D764 a test that depended on a map's order), D767 the order step R ran in.
+**Behaviour changes the owner should know**, from the build: (a) ENTER with CTRL, ALT or META at a component whose
+default button is vetoed is refused (D663); (b) a component more than 64 levels below its window is refused by the veto
+check, which cannot ask every ancestor (D665); (c) while a mask is registered, a browser whose component cannot be read
+on an event-dispatch thread is answered masked (D692, completed by D806); (d) a number in a result that equals a secret
+parameter fails the step as a string does (D722); (e) the committed `loan-counts-and-events` captures its counts after
+the first scan (D739).
+
+The fixers' decisions are marked in the contract where they differ from or add to a sentence ("Fix wave (Phase 8
+review, <TAG>, …)", "(Phase 8 security fix, S<nnn>, <TAG>)"). D768 widens D501 (a popup's chain runs through its
+opener), D769 widens D502 and D663 (every root pane on the walk), D770 and D771 widen D505 (a press's release asked
+again on the routed and the Robot route), D772 widens D502 (the Robot route asks every covering window), D776-D780 amend
+D531 and D532 (unnamed columns masked by the names their items read or withheld, the width, the case, a quoted star
+table), D781 and D782 amend D530 and D529, D783 amends D638, D785 amends D521, D786 amends D606, D787-D790 amend D599,
+D601, D602 and D605 (paths followed on the masked view, three outcomes, a cut event fails the `events` read), D791
+amends D597, D792 widens D608, D795 supersedes D759, D796-D798 amend D544, D799 amends D556, D800 amends D565, D801 and
+D802 amend D734, D803 amends D637 and D808 amends D549. **Behaviour changes the owner should know**, from the fix wave
+and the security fixes (P8 §11's behaviour changes 8 and 13): (f) `DISPATCH` text holding a `'\n'` is refused while a
+default button on the target's walk is vetoed (SET is the way around); a popup's items are flagged and refused under a
+vetoed opener, window or combo; a routed release over a vetoed component is refused `VETOED`; on the Robot route a
+covered point whose covering window's component is vetoed answers `vetoed` (was `covered`), with or without `force`,
+and a refused drag releases at its press point (D768-D772); (g) on a positional source with any `MaskPolicy`
+registered, the cells of a column no name can be given are `<redacted>`; a provider's `columns(table)` receives a
+quoted part in double quotes; `ReadOnlyJdbc`'s statement sink receives null before the statement is closed and may stop
+the call; a `QueryControl` handle's `close()` may wait up to 2 s; `data.query`'s `TIMEOUT` may carry
+`cancelNotStarted: true`; a module's own quiescent task that overruns twice its budget penalises that module
+(D776-D785); (h) a scalar `sync.await` or `waitFor` match never equals a map, a list or an array (D786); (i) a regex or a
+`[json]` that a bound stops ends its expectation `ERROR` under any negation, an event cut at publish fails the `events`
+root's read, and a single filter that matches twice holds no `exists` form (D789-D791); (j) a session's checks and a
+model's or a client's run follow paths on the fact's masked view, so a person's `fact` and `observe` in a session show
+`<redacted>` under secret-named keys and pairs, and a reason names a value's kind, never the value, in every mode (D787,
+D788, D794); (k) a session's journal cuts lists at 200 elements and a captured value is at most 64 KiB of JSON (D792);
+(l) the text key rule hides escaped JSON and object or list values, and the five session stand-in recordings were
+regenerated key-free for it (`bdafc52`), so any later change of that rule regenerates them again (D793); (m)
+`skillroy_catalogue` writes its sections in a new order and withholds verb schemas rather than cutting its answer
+(D795), `OutputScan` finds a planted word wherever a non-letter bounds it and its `EVENTS` scope reads more records
+(D796-D798), and a code-source name ends at a `\` too (D799); (n) a locator action on a masked browser is refused unless
+`redact: false` (D803), a masked browser's tap events carry the tap's pattern as `name` (D808), a masked browser's view
+is grey in every Swing capture (D805), and the CDP path's frozen-target refusal names a masked page by its id only
+(D810). **State of the build.** Built, reviewed, fixed and security-reviewed (delta) 2026-10-19/20, merged into `main`
+with the head `bdafc52`: the native reactor there is green (5,861 tests, 0 failures, 0 errors, 704 skipped, surefire and
+failsafe together), the fixers' image runs on both Java lines are recorded in their reports and in `TODO.md`, and the
+Linux matrix of the final tree is `[final matrix]`. **Blocks.** Nothing; a veto costs the rework the row names, and
+`design/phase8-contracts.md` §17 gives the alternative with its reason. Seven of the numbers (D761-D767) are the
+orchestrator's reading of a report and a note that minted no id.
+
+## B40 The Phase 8 security delta review's sign-off (2026-10-20; open, the owner's)
+
+**From:** the delta review that B13 and the release checklist's item 2 ask of a phase that opens a new boundary, specified in
+`design/phase8-contracts.md` §15 (D632; the sign-off rule is P6 §12.6: the owner writes it, the orchestrator does not) and run
+on 2026-10-20 over everything changed since `223c5fb`, the tree B31 covered: the B32-B35 follow-ups and Phase 8. Its records
+are in the session notes, outside the repository: `notes/2026-10-19/phase8/security/` (`record.json` in the 2026-10-02 shape,
+with the dispositions as built, `dispositions.md`, `numbering.md` and the eight lenses' reports with their sceptics'
+verdicts) and the five fix reports in `notes/2026-10-19/phase8/review/`; `TODO.md` summarises them under "Phase 8
+security delta review".
+
+- **The review:** eight lenses (L1 controller correctness and bounds, L2 host safety, L3 the data channels, L4 the web
+  boundary, L5 the model boundary, L6 the model as an actor, L7 Windows and file-system trust, L8 evidence at rest), one
+  reviewer and one sceptic each, all on `f67402c` (the tree after step R); L4's reviewer and sceptic and L5's sceptic were
+  run again after their first runs stopped mid-file, writing mechanisms and never a recovered value. 42 findings raised
+  (28 by the reviewers, 14 by the sceptics), none refuted; 6 duplicates merged and 2 of the L5 sceptic's folded into the
+  finding they extend; 3 recorded and not counted (L5-S4 and L7-S2 operator-only, L8-F6 token-holder only and fixed
+  anyway): **31 standing, S149-S179: 0 critical, 3 high, 8 medium, 20 low, all counted (S173, S174 and S176 latent)**.
+  The fix wave opened one more, **S180** (low, latent): **S149-S180: 3 high, 8 medium, 21 low**. 9 were raised by the
+  sceptics (S151, S153, S154, S158, S163, S164, S172, S175, S176); the sceptics re-rated L6-F1 (medium to high, one
+  finding with L5-F1 as S173) and L8-F2 (low to medium, one finding with L1-F2 as S150) and restated the reach of S156,
+  S160, S166, S178 and S179. Per lens: L1 6, L2 4, L3 6, L4 8, L5 3, L6 2, L7 1, L8 1. The code review (three lenses, 16
+  distinct findings: 1 high, 6 medium, 9 low) ran before it, and one fix wave closed both.
+- **The three high findings:** S149, an undecidable regex or `[json]` (its budget spent, its text over the bound, a
+  `$slot` pattern that does not compile) counted as "no match", so a negation passed while the forbidden event was in
+  the window: a wrong `PASS` from the target's own content, no token needed; S173, path filters, regexes and indexes ran
+  on the unmasked fact, an oracle with which a model or an MCP client could rebuild a secret the mask hides; S174,
+  `[json]` parsed a text without the key rule, so `…[json].password` read the value. S173 and S174 are latent: no
+  committed target publishes such a value (the sample's events carry none).
+- **Dispositions:** every finding of medium or above is **fixed**, and so are 20 of the 21 lows: 30 in code (contract
+  first, a test that fails on `f67402c`, marked in the contract with the review id) by five fixers with the primary
+  assignment FA 2, FB 7, FC 10, FD 2 and FE 9 findings, merged into `main` as FA `fa1512d`, FB `e8a6156`, FC `1a8db14`,
+  FD `7d30dbd` and FE `d4daa0f`, the session recordings regenerated after S175 in `bdafc52`; their 43 decisions are
+  D768-D810 (B39), which also closed the 16 findings of the code review. S157 (`SECURITY.md` lacked P8 §11's sentences
+  and §16.1's "Run outputs" change) was the documentation pass's and is closed by it on 2026-10-20. No fixer found a
+  finding wrong or already fixed. Nothing of medium or above is accepted or deferred.
+- **Proposed for the owner's acceptance (P6 §12.5: a documentation-only change is an acceptance), with its release note
+  (also in `SECURITY.md` "Known limitations", marked provisional until this sign-off):** S180, below; its sound fix is
+  recorded as gap 151.
+- **Not verified** (also in `README.md`, `SECURITY.md` and `design/threat-model.md` §8): the Windows and macOS peers'
+  reaction to routed Java mouse events on AWT controls; a veto in the second domain's own application (the lending veto
+  stands in); a hook-entered idle callback driving a `QuiescentPoint`; `Statement.cancel()` on drivers other than HSQLDB;
+  a provider blocked in uninterruptible application code (fakes only); a Playwright line other than 1.63.0 (the gate is
+  proved through a seam); JxBrowser's view-less browsers; a `SecurityManager` target and a custom-protocol code-source URL
+  from a real application server; a Byteman trigger on a denied subtype loaded after the submit; the second domain's own
+  composites and ladders; more than 10,000 events in one run; from the fix wave, the Robot route's release question
+  against a real `java.awt.Robot`, a Windows code-source location (S178's shapes proven with URLs built on macOS and
+  Linux) and §13.2 item 27's late-acknowledgement race end to end; and the other items of `threat-model.md` §8. The
+  lenses themselves ran with no display and no image run (L4's and L8's page probes ran in a headless Chromium only).
+- **Two notes for the owner, not findings.** (1) Six fix-wave decisions change what a person sees or may do and carry a
+  veto form of their own in B39: D787 (a person's session shows `<redacted>` under secret-named keys), D789 (one event
+  cut at publish makes every `events` expectation of the run `ERROR`), D776 (a positional source's unnamed column is
+  withheld, not refused), D803 (a locator action on a masked browser is a person's, `redact: false`), D808 (a masked
+  browser's tap events are named by the tap's pattern) and D771 (the Robot drag's release re-check, not a static
+  refusal). (2) Four residuals that the fixes left are recorded as gaps rather than findings, each low: a masked combo's
+  or window's popups drawn as windows of their own are not masked (152), the Robot route's release read is not atomic
+  with the native release (153), a root pane off ENTER's walk is not asked (154), and a browser that becomes masked while
+  open sends page data for up to about 2 s after its next event (155); `SECURITY.md` states each.
+- **Outside reader:** none has read the record yet (B26 Q12: recommended, recorded, not a gate).
+- **Matrix:** the final Linux matrix on `bdafc52` is `[final matrix]`; an arm64 round on `f67402c`, before the fixes, was
+  green on all three legs at the first attempt. Nothing in Phase 8 needs a model key, so there is no live acceptance.
+
+**Question.** Does the owner sign the delta review off, with S180 accepted? The orchestrator recommends yes, once the
+final matrix is green and the owner has read S180's release note. The signature is the owner's; this entry is a draft
+until it is given.
+
+| Item | Low finding proposed for acceptance, with its release note (also in `SECURITY.md` "Known limitations") | Veto form offered |
+|---|---|---|
+| S180 (FC's open item; the L5 and L6 sceptics' note) | A client's raw `sync.await` (a base read every MCP server offers), or a pack verb whose argument flows into a `match`, compares an event's raw payload on the agent by equality: where a module publishes a short secret unmasked, a client can confirm guesses at it, one call per guess. Refusing a literal the mask changes would itself be the oracle. Mask such a payload with a `MaskPolicy` or under a secret-looking key. Latent: no committed target publishes a secret unmasked; the fix, rewriting such an entry (or the marker) into one that never matches at the session's raw-call and verb-argument boundary before the call is sent, is gap 151 | `B40 S180 fix` (gap 151 built before the sign-off) |
+
+Other veto form: `B40 outside reader first` would make an outside human reader of the record a gate of the sign-off.
+**What it changes.** With `B40 ok` the "Reviews" paragraph of `SECURITY.md` carries the signature and drops
+"provisional" from S180's release note, `docs/release-checklist.md` item 2 records it, and in `TODO.md` the Phase 8 item
+for the owner's sign-off is ticked and the Exit criterion "the security delta review is signed off" is marked met. S180's
+release note joins the release notes (checklist item 11), eleven with B28's eight and B31's two. **State of the build.**
+Everything is built and merged into `main` (head `bdafc52`; nothing pushed). **Blocks.** Nothing for the build; the next
+release waits for the signature and for the owner's word to push.
 
 ---
 
 ## Questions for the owner
 
-**Open as of 2026-10-19: B38** (the Phase 8 contract's sixty-four provisional answers, sixty-four rows above, eight of them resting on the owner's knowledge: Q9, Q16, Q23, Q31, Q41, Q45, Q53 and Q56). The build proceeds on the provisional answers; one message answers it (`B38 ok`, or `B38 Q<n> veto …` in the forms of the table).
+**Three open as of 2026-10-20: B38, B39 and B40.** **B38** is the Phase 8 contract's sixty-four answers (`design/phase8-contracts.md` §18, decisions D501-D642), taken without the owner on 2026-10-19 and **provisional**; the build proceeded on them, as it did on B26 and B29. Eight of the points rest on the owner's knowledge: Q9 (whether the second domain vetoes by identity or by state), Q16 (whether any outside pack declares a procedure), Q23 (whether a layer reads a pre-loaded view-less page), Q31 (the sample's hook qualifier and deny target), Q41 (the second domain's ladder and composite shapes), Q45 (reserving the verb name `captureFacts`), Q53 (scenario A's `requires` entry and the suite-scoped database check) and Q56 (configuration as a capability). The answer form is `B38 ok` to confirm all sixty-four, or a veto in the form the B38 table gives (for example `B38 Q3 veto cheap`, `B38 Q16 veto`, `B38 Q43 veto`); any question not mentioned keeps its answer. **B39** is the 168 decisions the Phase 8 build, its integration, step R and the fix wave took (`design/phase8-contracts.md` §17, D643-D810), taken without the owner on 2026-10-19 and 2026-10-20 and **provisional**; none rests on knowledge only the owner has, but D787 (a person's session shows `<redacted>` under secret-named keys), D789 (one event cut at publish makes every `events` expectation of the run `ERROR`), D776 (a positional source's unnamed column withheld rather than refused), D803 (a locator action on a masked browser refused unless a person passes `redact: false`), D808 (a masked browser's tap events named by the tap's pattern), D771 (the Robot drag's release asked again rather than refused outright) and D795 (the catalogue withholding schemas rather than paging) are the ones worth a look, and D761-D767 are the orchestrator's numbering of a report and a note that minted no id. The answer form is `B39 ok`, or `B39 D<n> veto` in the form the B39 table gives (for example `B39 D787 veto`, `B39 D771 veto a`, `B39 D803 veto c`); any decision not mentioned keeps its answer. **B40** is the sign-off of the Phase 8 security delta review (S149-S180: 3 high, 8 medium, 21 low; everything of medium or above and 20 lows fixed): the orchestrator recommends yes once the final Linux matrix is green and the owner has read the release note of S180 (a client's raw `sync.await` confirming guesses at a short secret a module published unmasked; its fix is gap 151); the answer form is `B40 ok`, or `B40 S180 fix` or `B40 outside reader first`; it is the owner's to give, and the orchestrator does not sign it. Whether S166's additive `SurfaceSource.Surface.masked` field takes an A-number (Phase 6's practice, A100) or stays a security-fix mark in P1 §4 without one (Phase 7's, as written) rides along; the mark stands unless the owner asks for the number.
 
 **None open as of 2026-10-13.** The owner had the commits' email changed to the GitHub noreply address before the first
 push (**B37**). Before it, the owner gave the word to release 0.1.0 and push, with four answers on the way (**B36**).

@@ -127,7 +127,7 @@ final class SwingSeeds implements SeedWalk {
     /**
      * {@inheritDoc} Phase 8 security fix S167 (FE): a state that cannot be read (not a component, or no event-dispatch
      * thread to read it on) is {@link ComponentState#UNKNOWN_MASKED} while a mask is registered, as {@link #masked}
-     * answers every component masked then (D-EW-10), so that a per-call judgement never lowers a browser's flag on a
+     * answers every component masked then (D692), so that a per-call judgement never lowers a browser's flag on a
      * read that was not made.
      */
     @Override

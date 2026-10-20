@@ -56,7 +56,11 @@ Read these before you run the agent on a shared host.
   one of its files (security pass 2, P2-L8-F3, P2-L8-S1). That a private umask is the advice and not the default is
   accepted by the owner (B28, 2026-10-10). On Windows the output directory's access list is judged too: a directory that
   lets another user write to it, or to the files created in it (a folder under `C:\` inherits Modify for Authenticated
-  Users), is refused with the `icacls` remedy (Phase 7 security fix, S141; not verified on a Windows host).
+  Users), is refused with the `icacls` remedy (Phase 7 security fix, S141; not verified on a Windows host). Since Phase 8
+  the event payloads in them are masked at publish, by key and by the pack's `MaskPolicy`s, and a browser without a view
+  is masked while any mask is registered, released only by a `BrowserMask` (Phase 8, built 2026-10-19; P8 §5.1, §5.2,
+  and the events bullet below); a session's journal cuts a fact's lists at 200 elements, and a captured value is at most
+  64 KiB of JSON (Phase 8 security fix, S150).
 - **Settings files must be your own.** `telemetry.yaml` and `inference.yaml` beside the credentials file (or in the
   bindings environment directory) are read only when no other user could have written them: a file others (or a
   shared group) may write to, or another user's, stops the command with a settings error naming it; on a Linux host
@@ -100,6 +104,13 @@ Read these before you run the agent on a shared host.
   page shows personal data masks the whole browser component (with a `CaptureMask`) while it does, and a masked browser is
   masked on every route: its page reaches no model and no client as pixels, text or tree (`web_bitmap`, `web_dom_text`,
   `web_aria_snapshot` and `web_hit_test` are refused, the snapshot shows `[web <ref> masked]`; Phase 7 security fix, S111).
+  Since Phase 8 a browser the agent has no component for is masked while any `CaptureMask` or `BrowserMask` is
+  registered, and a `BrowserMask` answering TRUE masks a browser with a view too: its view is grey in every capture and
+  its hit-test reports it masked (P8 §5.2; Phase 8 security fix, S166). A masked browser's events withhold page data,
+  `by: {url|title}` never matches it, and the actions that stay allowed on it answer without page data; the actions that
+  evaluate a caller's locator in the page (`web.dom.click`, `web.dom.fill`, a selector `web.dispatchEvent`) are refused
+  unless a person passes `redact: false` (S165). `web.evaluate` and `web.waitFlag` on a masked browser remain S111's
+  residual: they are never offered to a model or a client, and read-only mode refuses them.
 - **With vision on, pixels leave for the model provider** (P7 §11, rule 2). With `--vision` and the inference settings'
   `images: true`, redacted captures of the target's own windows go to the provider with every vision call; `images: false`
   (the default) or `--vision off` keeps every pixel at home. A capture of the glass (`mode: ROBOT`) never goes to a model or
@@ -155,6 +166,68 @@ Read these before you run the agent on a shared host.
   user read access by default. On a shared Windows host give `--out` and the working copy a directory under your profile, or
   remove inheritance from the directory you choose (`icacls <dir> /inheritance:r /grant:r "%USERNAME%":(OI)(CI)F`). Not
   verified on a Windows host.
+- **The input veto does not follow key bindings** (Phase 8, built 2026-10-19, fixed 2026-10-20; P8 §11 (a)). A layer's
+  `InputVeto` is asked on every input route that resolves a target, for every origin, `force` included; ENTER's default
+  buttons (every root pane on the walk up to the window, a `'\n'` in `DISPATCH` text included) and a popup's opener are
+  asked too (Phase 8 fix wave, FA). It does not follow Swing's key bindings, mnemonics and accelerators: veto the window
+  or the bound control; a menu item's own veto does not cover the keyboard of an open menu, so veto the window. A veto on
+  a window or panel does not cover `web.*` input into a browser inside it (gap 126), and a layer that must keep page input
+  out vetoes nothing more for that. A failed layer module served under `allowFailedModules=true` serves without its veto.
+  On the Robot route a drag's release is asked again just before it happens, but a popup or a drop zone the application
+  shows after that question is not seen (gap 153); a `JRootPane` embedded off the key target's walk and outside a
+  `JInternalFrame` has its default button pressed by ENTER without being asked (gap 154). The mask's walk does not follow
+  popups as the veto's now does: a masked combo's or window's popups drawn as windows of their own are not masked (gap
+  152).
+- **A quiescent task holds the application's thread until it returns** (P8 §11 (b)). A module's task runs on the
+  application's own thread only at the idle point the provider drives, admitted by its declared budget and never
+  pre-empted: one that overruns holds the thread until it returns (an overrun of twice the budget penalises the primitive,
+  or the module, until `reprobe`). A provider read that ignores cancellation keeps its lane or its source busy until it
+  ends. A positional source's unnamed columns are masked under the names their items read, or withheld as `<redacted>`
+  while any mask is registered (Phase 8 security fix, S160, FB); a rename (`password AS p`) defeats a name-keyed mask on
+  any source, positional or not: a mask keyed by name sees the label the statement gives.
+- **Events are masked at publish, by key and by the pack's policies** (P8 §11 (c), §5.1). Every event payload passes the
+  registered `MaskPolicy`s (under `event:<topic>`) and the secret-key rule before it is stored, so a secret-looking map key
+  is `<redacted>` whether or not a policy is registered; on attach, the events of the module-install window are masked by
+  key only (gap 139). The CDP path's own events never pass the agent's ring (gap 138). A browser without a view is masked
+  while any mask is registered and released only by a `BrowserMask`. A browser that becomes masked while it is open (its
+  view moved into a masked container, a mask registered later) sends page data in its events for up to about 2 s after
+  its next event (Phase 8 security fix, S172, FE; gap 155): a `CaptureMask` should answer by a stable container. The
+  listener that keeps a person's middle click from pasting the X11 PRIMARY selection into a page is best effort: a page
+  that interferes with it keeps the paste (S171).
+- **A Byteman deny cannot see a subtype loaded later, and a deny only tightens** (P8 §11 (d)). A class the pack's
+  catalogue, the operator's `hooks.deny` or a module denies is never read, probed, instrumented or handed to Byteman, but
+  a denied subtype loaded after a `^` or `INTERFACE` Byteman submit receives Byteman's trigger (gap 140), and a deny list
+  only tightens for the life of an agent instance: a restart loosens it.
+- **The secret-echo check is a consistency control** (P8 §11 (e)). A step whose result echoes a secret parameter's value
+  fails, but a secret shorter than `masking.minLengthInText` is compared by equality only; a composite that answers a
+  question it does not own cannot be detected by the base; `taken` records application data, under the run's mask.
+- **The `events` root sees the run's window only while the ring holds it** (P8 §11 (f)). A target that publishes more
+  than `eventRing` events in a run makes such expectations `ERROR`, by design, and so does an event its module or the
+  ring cut at publish (`truncated: true`, a long console line included; Phase 8 security fix, S151, FC); a regex or a
+  `[json]` text that a bound stops makes its expectation `ERROR`, never a pass (S149). Publish small, structured payloads.
+- **Pack code at run start has no host timeout** (P8 §11 (g)). A pack capability's evaluation and a pre-flight check run
+  pack code on the controller, reading through the guarded read-only data channel; the channel's per-query bound is
+  their bound.
+- **The CDP path's gate for an older Playwright is proved through a seam** (P8 §11 (h), §5.3). Below Playwright 1.60 the
+  CDP path is not used unless the operator sets `skillroy.cdp.allowDefaultOverrides` (never a scenario's, a pack's or a
+  model's choice: the overrides change the application's own browser context); only 1.63.0 was run.
+- **A client's raw `sync.await` can confirm a guess at a short unmasked secret** (S180; provisional until the owner's
+  sign-off, B40; P8 §11 (i)). A client's raw `sync.await` (a base read every MCP server offers), or a pack verb whose
+  argument flows into a `match`, compares an event's raw payload on the agent by equality: where a module publishes a short
+  secret unmasked, a client can confirm guesses at it, one call per guess. Mask such a payload with a `MaskPolicy` or
+  publish it under a secret-looking key. The fix, rewriting such a match where a session sends the call, is gap 151.
+- **What Phase 8 changes by default** (P8 §11's behaviour changes, where the full list is). Two protections apply to
+  every target and pack because that is their point: event payloads are masked at publish, and a browser without a view
+  is masked while any mask is registered (above). Also: every `CALL`/`EXEC` is refused by the statement guard; the CDP
+  path is unused below Playwright 1.60 without the operator's property; a regex or a `[json]` that a bound stops, an event
+  cut at publish and a lost event window end an expectation `ERROR`, and a single filter that matches twice holds no
+  `exists` form; a session's checks and a model's or a client's run follow fact paths on the masked view, so a person's
+  `fact` and `observe` in a session show `<redacted>` under secret-named keys and pairs, and a reason names a value's
+  kind, never the value; `DISPATCH` text holding a `'\n'` is refused while a default button on the target's walk is
+  vetoed, a popup's items are refused under a vetoed opener, window or combo, a routed release over a vetoed component
+  is refused, and on the Robot route a covered point whose covering window's component is vetoed answers `vetoed`, with
+  or without `force`; on a masked browser a locator action is refused unless a person passes `redact: false`, the tap
+  events carry the tap's pattern as their name, and the CDP path's frozen-target refusal names the page by its id only.
 - **Not verified on Windows.** No Windows host has run this code: the access-control branches that make the token,
   credential and discovery files owner-only, the `.bat` launcher, the planner's `cmd.exe /c` form, `JAVAAGENT` as the
   logged-on user, the input rungs and the Robot tier (UIPI, session 0, the popup trigger on the release, a minimised frame's parking position and
@@ -173,7 +246,15 @@ Read these before you run the agent on a shared host.
   `web.pointer` has cancelled since 2026-10-12, gap 104, so no middle click through the agent pastes that selection
   into a page's main frame), a second OS user for the writers' link rule,
   an APFS case-insensitive volume, a real
-  multi-screen desktop and HiDPI (the glass bound at scale 3 through a seam only). The full list is §8 of the threat model.
+  multi-screen desktop and HiDPI (the glass bound at scale 3 through a seam only). Phase 8 adds (P8 §13.3): the Windows
+  and macOS peers' reaction to routed Java mouse events on AWT controls; a veto in a layer's own application (the
+  sample's veto stands in); a hook-entered idle callback driving a quiescent point; `Statement.cancel()` on drivers
+  other than HSQLDB; a provider blocked in uninterruptible application code (fakes only); a Playwright line other than
+  1.63.0; JxBrowser's view-less browsers; a `SecurityManager` target and a custom-protocol code-source URL from a real
+  application server; a Byteman trigger on a denied subtype loaded after the submit; more than 10,000 events in one
+  run; and, from the fix wave, the Robot route's release question against a real `java.awt.Robot`, a Windows
+  code-source location, and the late-acknowledgement race of P8 §13.2 item 27 end to end. The full list is §8 of the
+  threat model.
 
 ## Reviews
 
@@ -189,4 +270,13 @@ signed record (`docs/design/phase7-contracts.md` §15; eight lenses with a scept
 accepted by the owner with the release notes above. The owner signed the delta review off on 2026-10-11 (B31 in
 `docs/DECISIONS.md`), so Phase 7's boundary is reviewed, fixed and signed off; the limitations above are the build's own
 statement of what masking and the Robot tier cannot do. The clipboard route (S110) was found by this review in code that
-predates Phase 7 (the planner's mutating server) and is fixed for every route.
+predates Phase 7 (the planner's mutating server) and is fixed for every route. Phase 8 (the input veto, threads, lanes
+and cancellable provider reads, event masking and the view-less browser, hook ownership by code source and the class
+deny-list, semantic input, the `events` root and captured facts, and pack capabilities; built 2026-10-19) opened new
+surfaces on every lens and was code-reviewed and security-reviewed on 2026-10-19/20: a delta review over everything
+changed since the record B31 signed (`docs/design/phase8-contracts.md` §15; eight lenses with a sceptic each; findings
+S149-S180: 32 confirmed, 3 high, 8 medium, 21 low). Every finding of medium or above and 20 of the 21 lows are fixed,
+S157 (these Phase 8 sentences were missing) by the documentation pass; the other, S180, is proposed for the owner's
+acceptance with the release note above, marked provisional. **The owner's sign-off of the delta review (B40 in
+`docs/DECISIONS.md`) is open**: until it is given, Phase 8's boundary is reviewed and fixed, not signed off, and the
+limitations above are the build's own statement of what the veto, the masks and the new readers cannot do.

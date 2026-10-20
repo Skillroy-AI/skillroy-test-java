@@ -1912,26 +1912,27 @@ credential character by character). A plan run judges its expectations (`expect`
 checks (row count, columns, aggregates) by the same rule when its `RunOptions` say
 `withExpectationsOnMaskedValues(true)`, so that a run's PASS or FAIL answers no question about a secret either; the
 default is false (a scenario a person committed is evaluated on the values as read), and the hosts that run a plan a
-model or a client wrote (the MCP server's `skillroy_scenario_run`, `author --run`) set it. *(Phase 8 security fixes,
-S173, S174, S153, FC; P8 §8.3, §8.5.)* Where this rule applies (a session's `check`, `expect` step, `observe`, `fact`
-and `captureFacts`; a run under `withExpectationsOnMaskedValues(true)`) a path is resolved **on the fact as the mask
-leaves it**: the fact's JSON form through the session's or the run's `SecretMask` and then the model-facing key rule
-(a secret-named map key's value and a secret-keyed pair inside a text become `<redacted>`), uncut, and every value
-`[json]` parses goes through it again, so that no filter, regex, index, `[json]` or `size` ever reads a value the mask
-changes: a filter whose field holds `<redacted>` on any element compares nothing ("the value holds a secret"), and a
-value that holds `<redacted>` anywhere is a secret (the marker counts as one). The answer, the reason and the time of a
-check are then the same for a right guess at a secret and a wrong one. A session's check normalises its matcher before
-it substitutes `$slot` values, as the compiler and a run do, so a captured map shaped like a matcher stays a value.
-*(Phase 8, built 2026-10-19, EX; P8 §8.7, D605.)* The rule extends to captured facts: under `withExpectationsOnMaskedValues(true)` a value a
-`captureFacts` step captures that the run's mask changes fails the step `FAIL / ASSERTION` ("captureFacts slot.field:
-the value holds a secret …"), so that a captured secret never becomes a matcher operand or a call argument; a session's
-`captureFacts` runs under the session's mask always. `readOnly` refuses any
+model or a client wrote (the MCP server's `skillroy_scenario_run`, `author --run`) set it. `readOnly` refuses any
 mutating or destructive call before it is sent (`READ_ONLY` in the outcome, nothing journaled as executed). A
 destructive call needs `confirm: true` in its arguments, which only an `Origin` of kind `PERSON` may carry: the
 session strips `confirm` from a `MODEL` origin's call and the call then fails with `CONFIRM_REQUIRED` as the agent
 answers it (design §3.4). Every outcome's `detail` and `lastResult` pass the session's
 `SecretMask` (credentials, fixture secrets joined into the bindings). A session's calls carry a `correlationId`
 `<sessionId>/<stepId>`.
+
+*(Phase 8, built 2026-10-19, EX, with the Phase 8 security fixes S173, S174, S153, FC; P8 §8.3, §8.5, §8.7, D605.)* The
+rule extends to captured facts: under `withExpectationsOnMaskedValues(true)` a value a `captureFacts` step captures
+that the run's mask changes fails the step `FAIL / ASSERTION` ("captureFacts slot.field: the value holds a secret …"),
+so that a captured secret never becomes a matcher operand or a call argument; a session's `captureFacts` runs under the
+session's mask always. Wherever the rule applies (a session's `check`, `expect` step, `observe`, `fact` and
+`captureFacts`; a run under `withExpectationsOnMaskedValues(true)`) a path is resolved **on the fact as the mask leaves
+it**: the fact's JSON form through the session's or the run's `SecretMask` and then the model-facing key rule (a
+secret-named map key's value and a secret-keyed pair inside a text become `<redacted>`), uncut, and every value
+`[json]` parses goes through it again, so that no filter, regex, index, `[json]` or `size` ever reads a value the mask
+changes: a filter whose field holds `<redacted>` on any element compares nothing ("the value holds a secret"), and a
+value that holds `<redacted>` anywhere is a secret (the marker counts as one). The answer, the reason and the time of a
+check are then the same for a right guess at a secret and a wrong one. A session's check normalises its matcher before
+it substitutes `$slot` values, as the compiler and a run do, so a captured map shaped like a matcher stays a value.
 
 (Phase 6, built 2026-10-09, TL; P6 §10.2.) `SessionOptions` gains the component `observer` (default `NONE`,
 `withObserver`; the ten-argument constructor stays): the session wraps it, reports its start (`sessionStarted`,

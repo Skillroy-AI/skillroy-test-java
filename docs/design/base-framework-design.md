@@ -290,15 +290,18 @@ The executor must also know which ready topics are application prompts, so that 
 
 Each call in a plan carries a `sync` level chosen by the pack verb that emitted it: `NONE` (return when the call returns), `ACK` (await the ack topic), `READY` (ack, then the first ready topic), `SETTLE` (then `swing.settle`) or `EVENT` (await the event the call itself names, with a payload match). `EVENT` exists because an application's acknowledgement can mean only "consumed", not "accepted", and some primitives publish no acknowledgement at all. Every wait starts from the call's `seq.before`. Phase 1.x lets the base UI verbs `click`, `type` and `press` name such an event themselves (`await:`), followed by a settle (A32, built 2026-10-02).
 
-(Phase 8, built 2026-10-19, ES; P8 §7.1, §7.4.) **Acknowledgements are correlated by input** when the pack says so
-(`SyncPolicy.ackByInputId`, which the sample sets): the module mints an `inputId` per input, returns it and puts it in
-the acknowledgement's payload, publishing an acknowledgement that comes after the call from the application's own
-callback; `ACK` and `READY` then wait for the ack topic with `match: {inputId}`, so an earlier input's late
-acknowledgement never completes a later call's wait. **The step protocol carries warnings**: a call that did what it
-was asked with a caveat (the input queued, its value coerced or dropped, another question answered by it, a pack's own
-code) says so in its result's envelope, and the step accepts the code (`accept: [CODE]`) or fails.
-
-**(Phase 8, built 2026-10-19, EX; P8 §8.6, §8.9.)** A payload match entry is a scalar (equal by text) or `{has: scalar}` (a list member equal by text), one Java 8 rule (`PayloadMatch`) shared by the agent and every controller-side wait. The agent's events are also a fact: the base root `events` is the bus's window since the run's start mark, so a count, a delta or "this never happened" (`{size: 0}`) is an expectation, and a window the ring no longer holds whole is a refusal, never a wrong pass.
+(Phase 8, built 2026-10-19, ES, EX; P8 §7.1, §7.4, §8.6, §8.9.) **Acknowledgements are correlated by input** when the
+pack says so (`SyncPolicy.ackByInputId`, which the sample sets): the module mints an `inputId` per input, returns it
+and puts it in the acknowledgement's payload, publishing an acknowledgement that comes after the call from the
+application's own callback; `ACK` and `READY` then wait for the ack topic with `match: {inputId}`, so an earlier
+input's late acknowledgement never completes a later call's wait. A payload match entry is a scalar (equal by text) or
+`{has: scalar}` (a list member equal by text), one Java 8 rule (`PayloadMatch`) shared by the agent and every
+controller-side wait. **The step protocol carries warnings**: a call that did what it was asked with a caveat (the
+input queued, its value coerced or dropped, another question answered by it, a pack's own code) says so in its
+result's envelope, and the step accepts the code (`accept: [CODE]`) or fails. **The agent's events are also a fact**:
+the base root `events` is the bus's window since the run's start mark, so a count, a delta or "this never happened"
+(`{size: 0}`) is an expectation, and a window the ring no longer holds whole, or one with an event cut at publish
+(Phase 8 security fix, S151, FC), is a refusal, never a wrong pass.
 
 ### 2.6 Extension SPI and hook policy
 
@@ -333,7 +336,7 @@ Modules are discovered by `ServiceLoader` from a module jar in a child-first loa
 | `MaskPolicy` | masks personal data before anything can reach a prompt | built for rows; the component level is the separate `CaptureMask` (Phase 7, D296); also for every event payload at publish, `event:<topic>` (Phase 8, built 2026-10-19, EW) |
 | `RegionResolver` | for a custom-painted component: a point to a stable region id and back, so that a recorded step can address a region instead of a pixel | built (Phase 7, 2026-10-10, VS; P7 §3.7; the sample's number pad) |
 | `CaptureMask` | which components show a secret: a capture blanks them grey and every reader of the tree withholds their text (one rule for pixels and text) | built (Phase 7, 2026-10-10, VS; P7 §3.6) |
-| `SurfaceSource` | areas of the tree that are not Swing-painted, as another module knows them (the web module's browser index), for a capture's `surfaces` and the hit-test's `surface` | built (Phase 7, 2026-10-10, VS; P7 §3.7) |
+| `SurfaceSource` | areas of the tree that are not Swing-painted, as another module knows them (the web module's browser index), for a capture's `surfaces` and the hit-test's `surface`; a surface carries its module's mask flag, so that the Swing module blanks a masked browser's view whole in every capture and the hit-test reports it masked (Phase 8 security fix, S166, FE) | built (Phase 7, 2026-10-10, VS; P7 §3.7) |
 | `LocatorResolver.describe` | the strategy values that name a component in the resolver's vocabulary, so that the hit-test proposes the domain locator first | built (Phase 7, 2026-10-10, VS; P7 §3.7) |
 | `InputVeto` | the components the agent must never deliver input to (a control whose action ends the JVM or cannot be undone in a test): asked with the route on every input route that resolves a target, for the component and its ancestors up to the window, inside the read and again inside every posted task and per routed pointer event; fails closed; never skipped by `force`; readers flag `vetoed` and the recorder never offers such a component | built (Phase 8, 2026-10-19, EA; `phase8-contracts.md` §3.2; the sample's `LendingInputVeto`) |
 
@@ -410,7 +413,7 @@ locator with an optional region, row and image guard, `expectImage` to one redac
 baseline of the target's render key); `region` is a sibling argument of `by` on `pointer` and `expectImage`, a region id
 resolved by the agent, while `by`'s grammar is unchanged.
 
-**(Phase 8, built 2026-10-19, EX; P8 §8.)** Expectations count, compare and capture: a list filter `[*field=value]` (dotted filter fields) counted with `size`, the base verb `captureFacts` (a slot from facts, read once where the step stands) and a delta against it (`{size: {gt: $before.n}}`), `anyOf` and `containsWhere`, a `[json]` segment, the `events` root; negation is a count, not a wait. Plan version 7, with strict step and call keys.
+**(Phase 8, built 2026-10-19, EX; P8 §8.)** Expectations count, compare and capture: a list filter `[*field=value]` (dotted filter fields) counted with `size`, the base verb `captureFacts` (a slot from facts, read once where the step stands) and a delta against it (`{size: {gt: $before.n}}`), `anyOf` and `containsWhere`, a `[json]` segment, the `events` root; negation is a count, not a wait. Plan version 7, with strict step and call keys. *(Phase 8 security fixes, S149, S173, FC: an expectation a bound keeps from deciding, a regex or a `[json]` text it stops, ends `ERROR` and never passes under a negation; and wherever a model's or a client's check is judged on masked values, its path is followed on the fact as the mask leaves it.)*
 
 A fluent Java DSL is the secondary surface and produces the same plan (not built in Phase 1). Gherkin is deferred: it pays only when non-developers author scenarios (ai-inference §F20).
 
@@ -528,7 +531,7 @@ interface DomainPack {
   List<PreflightCheck> preflight();   void recover(AgentConnection agent);                                        // Phase 1
   ResolutionCatalogue resolution();   EnvFingerprinter fingerprinter();                                         // Phase 2 (built)
   List<StoredTable> storedTables();   List<RowMask> rowMasks();                                                  // Phase 2 (built)
-  List<PackCapability> capabilities();                                                     // Phase 8 (built, P8 §9.1)
+  List<PackCapability> capabilities();   Set<String> warningCodes();                       // Phase 8 (built, P8 §9.1, §7.3)
   McpToolPack mcpTools();                                                                                        // later
 }
 ```
@@ -547,8 +550,10 @@ A **tenant pack** is a `DomainPack` overlay for one deployment variant of the sa
 
 **Closed in Phase 2 (built 2026-10-02).** Rows read over the controller-side JDBC channel (§3.9) never pass through the agent-side `MaskPolicy`, so the pack supplies the same rule as `DomainPack.rowMasks()`: the JDBC channel applies it to every value it returns, and the binder to every row sample of a provenance; `skillroy-inference` is to apply it too before any row can reach a prompt (Phase 5). The full list of open SPI and DSL gaps is in `../TODO.md`.
 
-(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.4.) `DomainPack` gains `Set<String> warningCodes()` (default empty): the
-pack's own warning codes `<packId>.<NAME>`, which a step may accept; `SyncPolicy` gains `ackByInputId` (above, §2.5).
+(Phase 8, built 2026-10-19, EP, ES; P8 §9.1, §7.3, §7.4.) `DomainPack` gains `capabilities()` (default empty: the
+environment facts the pack evaluates at run start, source `pack:<packId>`, which `requires:` and guards read like any
+capability) and `warningCodes()` (default empty: the pack's own warning codes `<packId>.<NAME>`, which a step may
+accept), both forwarded by `DelegatingDomainPack`; `SyncPolicy` gains `ackByInputId` (above, §2.5).
 
 ### 3.7 Swing driving
 
@@ -579,14 +584,19 @@ What BS4 measured on an Xvfb without a WM, identically on Java 8 and Java 21: a 
 
 Defaults: `SEMANTIC` for data entry; `ACTION` for `swing.click`; `COMPONENT` with window activation where the scenario asks for it through `ui`; `ROBOT` only on request.
 
-**Input vetoes (Phase 8, built 2026-10-19, EA; `phase8-contracts.md` §3.1, §3.2).** A domain module registers an
-`InputVeto` for every control whose action ends the JVM or cannot be undone in a test. Every input route that resolves
-a target asks it, in this order of checks: clickable (not showing, collapsed, disabled: `INVALID_PARAMS`), then the
-veto (`INPUT_REJECTED vetoed`, never skipped by `force`), then the modal state; the default targets of `swing.type`
-and `swing.key` and ENTER's default button are asked too; every posted task asks again before it acts; the routed
-pointer asks per event. A veto on a panel or a window covers everything inside it. Not followed: key bindings,
-mnemonics and accelerators (veto the window, or the bound control), and `web.*` input into a browser inside a vetoed
-window (gap 126).
+**Input vetoes (Phase 8, built 2026-10-19, EA, and the fix wave of the Phase 8 review, FA; `phase8-contracts.md` §3.1,
+§3.2).** A domain module registers an `InputVeto` for every control whose action ends the JVM or cannot be undone in a
+test. Every input route that resolves a target asks it, in this order of checks: clickable (not showing, collapsed,
+disabled: `INVALID_PARAMS`), then the veto (`INPUT_REJECTED vetoed`, never skipped by `force`), then the modal state;
+the default targets of `swing.type` and `swing.key` are asked too, and so is the default button of every root pane on
+the walk to the window whenever a key is an ENTER (`enter`, `swing.key ENTER` with any modifier, a `'\n'` in `DISPATCH`
+text); every posted task asks again before it acts; the routed pointer asks per event and again at a press's release,
+and the Robot route asks every window that covers the point and, at a drag's end, again just before it releases. A veto
+on a panel or a window covers everything inside it, a popup's items included (a popup's chain runs through the
+component that opened it). Not followed: key bindings, mnemonics and accelerators and the keyboard of an open menu
+(veto the window, or the bound control), a root pane placed off the walk and outside a `JInternalFrame` (gap 154), what
+the application shows between the Robot route's last question and its release (gap 153), and `web.*` input into a
+browser inside a vetoed window (gap 126).
 
 **Keys.** `swing.key`, and `swing.type` in `DISPATCH` mode, send non-posted `Component.dispatchEvent(KeyEvent)` triples (pressed, typed, released) on the EDT. A key event *posted* to the event queue is retargeted by DKFM to the current focus owner and silently dropped when there is none; a non-posted event keeps its target (swing §F2). This is Jemmy's queue-dispatch model (swing §F3), and it is why OS-level key injection is unreliable against an unfocused Swing window.
 
@@ -1057,6 +1067,7 @@ Status on 2026-10-07: BS7 done; BS8 run and passed with conditions (2026-10-06; 
 | **5. AI layer** (contract `phase5-contracts.md`; built, reviewed and fixed 2026-10-08; its answers B23 and the decisions B24 confirmed by the owner the same day; closed live the same afternoon: the three exit criteria met, `TODO.md` "Phase 5, the live items") | L | the `InferenceGateway` SPI with typed content parts and its Claude implementation, tier (b) SQL with SqlGuard, approve UX, nightly batch re-resolve pull request, `skillroy-mcp`, planner through `claude -p`, triage, budget meters; for the interactive profile (B15): the executor's single-call entry, the journal and its export, the session service | a new sample scenario authored from a one-paragraph brief is reviewed, committed and replays green in CI; nightly cost stays under budget with cache hits above 80%; an interactive session on the sample is exported from its journal as a scenario that replays with zero model calls |
 | **6. Hooks, Byteman, Windows, OTel, hardening** (BS3 and BS14 passed with conditions 2026-10-09; contract `phase6-contracts.md` specified 2026-10-09 and built the same day in six packages, then reviewed and fixed, the repeat security review's two passes run and fixed; B26 and B27 confirmed and B28 signed off by the owner 2026-10-10) | L, ongoing | hooks module (probes, health, post-detach verification) in `optional/` of the agent home on a shaded Byte Buddy (HK, built); Byteman in process with no listener, optional and never bundled (BW, built behind BS14, B8); the Windows path (BW), built where a Linux image can test it and not verified on a Windows host; OTel export from the controller, off by default (TL, built, B11); a tenant-pack overlay on a second variant of the sample lending desk, its branch edition (CP, built, §3.6); a JDK 25 target through `JAVAAGENT` (CP, built). Security: the findings of the 2026-10-02 review are closed (H1-H3); the repeat review's two passes (S35-S62 and S63-S100: 66 findings, two high, 18 medium, 46 low) are run and everything of medium or above is fixed, the eight lows put to the owner are accepted, and the owner signed the review off on 2026-10-10 (B28) | a hook is installed and removed on the sample lending desk with byte-identical restore (met on a Java 8 and a Java 25 target in the arm64 image, 2026-10-09); the sample scenarios pass unchanged with hooks enabled and disabled, and on a JDK 25 target loaded through `JAVAAGENT` (met in the same legs, scenario E being the designed exception: `PASS` with hooks, `DEGRADED` without); on JDK 25 `JAVAAGENT` loads with no JEP 451 warning and the capability matrix equals the JDK 8 one (met, checks 1b and 1c); on Windows the agent loads through `JAVAAGENT` as the logged-on user, with `SEMANTIC`, `ACTION`, `COMPONENT`, `DISPATCH` and `PAINT` verified and `ROBOT` excluded (waits for the Windows host, split off in the contract's §14); the repeated security review is signed off (met 2026-10-10: the owner's signature, B28). The Linux matrix of the final tree is recorded in `../TODO.md` |
 | **7. Vision bolt-on and interactive sessions** (B16; after Phase 5, because it needs the inference gateway; BS9-BS12 run 2026-10-10; contract `phase7-contracts.md` specified and reviewed 2026-10-10 on B29, provisional while the build ran on it; built the same day in four packages; code-reviewed and fixed the same day, then security-reviewed (delta, S101-S148) and fixed 2026-10-10/11; the decisions of the build, the fix wave and the security fixes, D359-D486, being B30; B29 and B30 confirmed by the owner and the delta review's sign-off B31 given, 2026-10-11) | L | BS9-BS12 first. Agent: `swing.hitTest`, `swing.pointer`, the extended `swing.capture`, their `web.*` counterparts. Controller: `skillroy-vision` with the V1-V3 loop inside interactive sessions, the recorder, `RegionResolver` support, pixel-anchored replay with an image guard, `expectImage`, the capability `inference.vision` (§3.10) | a vision-driven session on the sample is recorded into ordinary steps that replay with zero model calls; a plan compiled with `inference: run` is reported as skipped in `replay`; a guarded visual expectation yields `DEGRADED` in `replay`; V3 runs only with its explicit opt-in (the scripted forms met in the packages' runs in the arm64 image on a Java 8 and a Java 25 target, 2026-10-10; the live run of `phase7-contracts.md` §13.3 ran three times, the last on the final code, 7 of 7, USD 0.148; the matrix of the final tree is green on `223c5fb` on every leg that ran (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs green on `832fcb2` later on 2026-10-11; `../TODO.md`); the security delta review is signed off (met 2026-10-11: the owner's signature, B31) |
+| **8. The second domain's wave 1** (gaps raised while a second domain pack and its agent module were built against `v0.1.0` outside this repository, rows 9-13, 18-22, 24, 28, 29 and 105-125 of `../TODO.md`; contract `phase8-contracts.md` specified and reviewed 2026-10-19 on B38, provisional while the build ran on it; built the same day in four early commits and seven packages, integrated, regenerated once (step R); code-reviewed, security-reviewed (delta since `223c5fb`, S149-S180) and fixed 2026-10-19/20; the decisions of the build and the fixes, D643-D810, being B39; B38, B39 and the delta review's sign-off B40 open for the owner) | L | Agent: the `InputVeto` SPI on every input route, the effective visible area, routed input into heavyweight containers, AWT `Button`/`Checkbox` on the click ladder; `APP_QUIESCENT` with `QuiescentPoint`, named lanes and `ThreadPolicy.LANE`, `QueryControl` and cancellation, derived column labels and `columns(table)`, the procedure call retired; every `MaskPolicy` on event payloads at publish, the view-less browser masked and `BrowserMask`; hook code sources and the class deny-list. Controller: the warning channel and `accept`, acknowledgement by `inputId`, composite primitives, rung ladders and `minRung`; plan version 7 with list filters, `[json]`, `captureFacts`, `anyOf`/`containsWhere`, the `events` root and `{has}`; pack capabilities honoured in `replay`, `on_prompt` values, suite-scoped pre-flight, configuration as a capability; the Playwright line gated | every taken gap's need answered on the sample lending desk in the Linux image on a Java 8 and a Java 25 target, with restrictive defaults and nothing changed for a target or pack that uses none of it but the two stated privacy protections (`phase8-contracts.md` §14; the matrix of the final tree in `../TODO.md`); the security delta review signed off (B40, the owner's) |
 
 Note for Phase 4: with JCEF in the public image, verification of the in-process path no longer depends on a commercial licence. What remains unverifiable in the open is the `jxbrowser` adapter against the real library; the contract kit exists so that a repository holding a licence can run it (§3.8).
 

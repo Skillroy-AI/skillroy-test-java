@@ -322,7 +322,7 @@ intact; from 1025 the load is refused with an `IOException` on the attaching sid
 | `discoveryDir` | `${java.io.tmpdir}/skillroy-<user>` | where discovery and token files are written; a per-user directory, see §2.5. **S8/S19 (1.x, built 2026-10-02):** when the option is absent and the default is occupied by another user, the fall-back `<user.home>/.skillroy/run` is used (§2.5); a directory named explicitly is never substituted |
 | `readyTimeoutMs` | `120000` | how long to wait for `ReadinessSource`s before reporting `target.ready` UNAVAILABLE (the agent keeps polling, §5); at most one day |
 | `eventRing` | `10000` | event ring-buffer size; at most 1000000. **(Phase 8, built 2026-10-19, EX; P8 §8.6.)** The base fact root `events` reads the ring for the run's window, so its window is bounded by the ring: when the ring has evicted any event since the run's start the root's read fails (ERROR / ENVIRONMENT naming this option) rather than answering fewer events |
-| `eventRingChars` | `67108864` | **(Phase 8, built 2026-10-19, EW; P8 §5.1.)** Unchanged; the character bound runs after the ring's mask pass (A78), so a stored event always honours it and a policy always sees whole values. **(Phase 6 security fix S43, A45, built 2026-10-09, SR.)** the ring is bounded by the total characters of its events' payloads as well as by `eventRing` (64 Mi characters by default; 1 Mi to 1 Gi): the oldest events leave first, and an event whose own payload exceeds the bound is published with `truncated: true` and each of its strings cut to 1/64 of the bound (or, when still over, with the payload `{truncated: true}` alone). A payload's size is the sum of its keys' and strings' characters and 8 for every other value |
+| `eventRingChars` | `67108864` | **(Phase 8, built 2026-10-19, EW; P8 §5.1.)** Unchanged; the character bound runs after the ring's mask pass (A78), so a stored event always honours it and a policy always sees whole values; *(Phase 8 security fix, S151, FC; P8 §8.6)* an event of a run's window that this bound (or its module) cut at publish (`truncated: true`) makes the `events` fact root's read fail, naming this option, as `eventRing`'s eviction does. **(Phase 6 security fix S43, A45, built 2026-10-09, SR.)** the ring is bounded by the total characters of its events' payloads as well as by `eventRing` (64 Mi characters by default; 1 Mi to 1 Gi): the oldest events leave first, and an event whose own payload exceeds the bound is published with `truncated: true` and each of its strings cut to 1/64 of the bound (or, when still over, with the payload `{truncated: true}` alone). A payload's size is the sum of its keys' and strings' characters and 8 for every other value |
 | `httpThreads` | `32` | the most threads the control server's pool may have (2 to 1024), see §5. **H1 (1.x, built 2026-10-02):** with one thread per connection it is also the most connections that can be open; the `WORKER` and `CALLER` pools are sized from it (S30, §5) |
 | `httpIdleTimeoutMs` | `120000` | **H1 (1.x, built 2026-10-02).** How long an authenticated kept-alive connection may wait idle for its next request head before the agent closes it (§5 "Control server"). Validated at start to 100 to 3600000 ms (one hour at most, because an idle connection holds one of the `httpThreads` threads; `AgentRuntime`, confirmed against the code 2026-10-02). The default is deliberately longer than the controller's HTTP client keep-alive (30 s), so that the client, not the agent, retires an idle connection and a request never meets a connection the agent has just closed |
 | `redact` | – | a regular expression (case-insensitive) naming further secret keys, see "Secret redaction" in §5; validated and read at start |
@@ -1025,6 +1025,10 @@ public interface CaptureMask {
 public interface SurfaceSource {
     List<Surface> surfaces();
     final class Surface { public final java.awt.Component component; public final String kind; public final String browserRef; }
+    // (Phase 8 security fix, S166, FE; P8 §5.2, D805) a Surface also carries `public final boolean masked` (a fourth
+    // constructor argument; the old constructor means not masked), filled by the web module from its browser index: the
+    // Swing module blanks a masked surface's component whole in every capture (rule `browser-mask`) and reports it
+    // masked in both hit-test forms
 }
 
 /** The ACTION rung for custom widgets: trigger the widget's semantic action without focus or mouse events. EDT.
@@ -1498,7 +1502,9 @@ a call that timed out was abandoned while its thread went on, so a primitive tha
   fall-back); a budget above the point's allowance: `CAPABILITY_UNAVAILABLE {reason: "quiescent budget exceeds the
   allowance", budgetMs, allowanceMs}`; a primitive penalised for an overrun of more than twice its budget:
   `CAPABILITY_UNAVAILABLE {reason: "quiescent task overran its budget", budgetMs, ranMs}` until `agent.capabilities
-  {reprobe: true}`; then the S30 gate. It runs at the first provider's point (`QuiescentPoint.await`); a task still
+  {reprobe: true}` (*Fix wave (Phase 8 review, FB), L2-F3, P8 §4.1, D785:* a module's own task, through its context's
+  `callQuiescent` or `call(APP_QUIESCENT)`, that overran penalises that module, `module:<id>` in `penalised`, refused
+  with `module` in the data and "module <id>: quiescent task overran its budget"); then the S30 gate. It runs at the first provider's point (`QuiescentPoint.await`); a task still
   running at the deadline is the dispatcher's `TIMEOUT` and the S30 gate applies; the application thread is never
   interrupted. A `LANE` primitive runs on its spec's lane (`callOnLane`); an undeclared or retired lane is
   `CAPABILITY_UNAVAILABLE {reason: "unknown lane" | "lane closed", lane}`. `agent.info.threads` gains `quiescent`
@@ -1628,7 +1634,7 @@ without the key behaves exactly as in Phase 1.
 
 | Primitive | Params | Result `value` |
 |---|---|---|
-| `agent.info` | – | `{protocol, agentVersion, pid, startTimeMs, loadMode, instrumentation:bool, readOnly, ready, javaVersion, modules:[{id, version, state: INSTALLED\|FAILED\|UNINSTALLED, message?, readyMessage?}], options:{…token and nonce removed, secret values redacted…}, threads:{workers:{active,max}, callers:{active,max}, abandoned:{<primitive>: n}}}`. **(1.x, built 2026-10-02)** S30: `threads` is new. S14: `modules` also lists modules that could not be loaded. **A78 (Phase 8, built 2026-10-19, EW; P8 §5.1, D543):** `events: {maskPolicies, maskFailures, overBudget, slowPasses, maxPassMs}`, after `threads`: the `MaskPolicy`s registered now, and since start the policy failures, the payloads cut at the 10,000-scalar budget, the passes over 50 ms on the publishing thread and the longest pass **(Phase 8, built 2026-10-19, EA; P8 §3.2 rule 4, A68)** a module record carries `info` (its `AgentModule.info()`) when that is non-empty, after `readyMessage`; the Swing module's is `{vetoWithheld: n}`, the calls whose posted input task an `InputVeto` withheld; `skillroy info` prints it after the state |
+| `agent.info` | – | `{protocol, agentVersion, pid, startTimeMs, loadMode, instrumentation:bool, readOnly, ready, javaVersion, modules:[{id, version, state: INSTALLED\|FAILED\|UNINSTALLED, message?, readyMessage?}], options:{…token and nonce removed, secret values redacted…}, threads:{workers:{active,max}, callers:{active,max}, abandoned:{<primitive>: n}}}`. **(1.x, built 2026-10-02)** S30: `threads` is new. S14: `modules` also lists modules that could not be loaded. **A72, A73, A78, A68 (Phase 8, built 2026-10-19, ET, EW, EA; P8 §4.1, §4.2, §5.1, §3.2 rule 4):** `threads` gains `quiescent` and `lanes` (§5, the dispatch gates); `events: {maskPolicies, maskFailures, overBudget, slowPasses, maxPassMs}` follows `threads` (D543): the `MaskPolicy`s registered now, and since start the policy failures, the payloads cut at the 10,000-scalar budget, the passes over 50 ms on the publishing thread and the longest pass; a module record carries `info` (its `AgentModule.info()`) when that is non-empty, after `readyMessage`: the Swing module's is `{vetoWithheld: n}`, the calls whose posted input task an `InputVeto` withheld, and `skillroy info` prints it after the state |
 | `agent.capabilities` | `reprobe?:bool` | `{capabilities:{id:{state,reason,strategy}}}`; spec timeout 60000 |
 | `agent.log` | `n?:int (100, at most 2000)` | `{lines:[…]}` |
 | `agent.disable` (destructive) | – | `{stopping:true}`; after replying: uninstall modules in reverse order, publish `agent.stopping`, stop the server, delete discovery files, clear the discovery system properties and restore the ones an operator had set (**S9, 1.x, built 2026-10-02**, §2.5). No thread of the core or of the generic modules remains (a domain module may keep one bounded daemon thread to finish removing a listener, §9.2; (Phase 4, built 2026-10-07; P4 §2.4: the web module's tap poller ends at uninstall, and a built-in web adapter's threads end for good at `detach()`, so that a late callback of the technology starts none)); a later attach starts a fresh agent with a new nonce and a new session id (**H2, 1.x, built 2026-10-02**) |
@@ -1942,7 +1948,13 @@ true), stillRunning, enforcesTimeout}`. So the dispatcher never abandons a `data
 earlier read of the same source still runs after its call ended, a new read of that source answers `BUSY {reason:
 "an earlier read of the source still runs", source, runningForMs}` until it ends (logged "the read of source s ended
 after n ms"); with a lane the lane's own `BUSY` applies. `uninstall` cancels the reads still running the same way
-first. `lane()` and `enforcesTimeout()` are asked once per call; a throw counts as the default.
+first. `lane()` and `enforcesTimeout()` are asked once per call; a throw counts as the default. *(Fix wave (Phase 8
+review, FB), L1-F4, L1-F5, and the Phase 8 security fixes S159, S161, FB; P8 §4.3, D781-D784.)* A cancel batch the
+worker pool rejected is reported `cancelNotStarted: true` (with `cancelled: false`, in `cancelPending`'s place); a read
+that ends right after the broker's interrupt still gets the module's own `TIMEOUT`, and a provider's own `TIMEOUT`
+passes through with its data; an action whose handle the provider closed never starts, and `close()` waits up to 2 s
+for one that runs; the JDBC form hands the sink null before the statement is closed, and a read cancelled before its
+statement runs stops before anything is bound (SQL state `57014`).
 
 **Statement guard, as built** (stricter than first specified; a safety net, not the security boundary: the
 boundary is the data source the provider hands out). A small tokenizer, never a pattern over the raw text, requires:
@@ -1980,21 +1992,20 @@ timestamps and `java.time` values -> ISO-8601 strings; text, character large obj
 `toString()` are capped at 10000 characters; binary values become `base64:<first 1024 bytes>`; a cut value ends
 with a `...[truncated: N chars|bytes]` marker. Then each `MaskPolicy` is applied; a `MaskPolicy` that throws fails the whole call with
 `INTERNAL_ERROR` and the value appears neither in the error nor in the log. Columns a source cannot name are
-reported as `c1..cn`. **(A75; Phase 8, built 2026-10-19, ET; P8 §4.4: this sentence is replaced for the provider form
-by the naming and width rule)** a column the provider leaves unnamed takes the label its top-level select item gives
-(`SelectLabels.of`: the alias, or a bare column's name, quotes removed), else, for `SELECT * FROM <table> …`
-(`SelectLabels.starTable`) with no provider name, the provider's `columns(table)` entry (asked at most once per call,
-on the read's lane or worker task; null, a list with an unnamed entry or a throw count as none), else `c<i>`; the
-provider's own names always win; the width is the largest of the names, the types and every row the provider
-returned (kept or not), and, when it returned no row, the select list's or the `columns(table)` list's size, so a
-positional zero-row result has its columns and `maxRows: 0` returns them for this form too; a list whose size differs
-from a width taken from names or rows is not used (one `data:` log line with both counts). The masks see the final
-names. The JDBC form keeps the driver's labels. **(Phase 8 security fixes S160, S162, S163, S164, FB; P8 §4.4's fix
-wave.)** A list is not used only when the names, the types or a row are wider than it (a shorter row keeps the labels);
-the masks are also asked under a derived label's upper- and lower-case forms and, for an unnamed item of a readable
-list,
-under the names it references; while a `MaskPolicy` is registered the non-null cells of a column no name can be given
-are withheld as `<redacted>`; `starTable` keeps a quoted part's quotes (in double quotes). Errors: an unknown source is
+reported as `c1..cn`. **(A75; Phase 8, built 2026-10-19, ET, with the Phase 8 security fixes S160, S162, S163, S164,
+FB; P8 §4.4: this sentence is replaced for the provider form by the naming and width rule)** a column the provider
+leaves unnamed takes the label its top-level select item gives (`SelectLabels.of`: the alias, or a bare column's name,
+quotes removed), else, for `SELECT * FROM <table> …` (`SelectLabels.starTable`, which gives a quoted part in double
+quotes) with no provider name, the provider's `columns(table)` entry (asked at most once per call, on the read's lane
+or worker task; null, a list with an unnamed entry or a throw count as none), else `c<i>`; the provider's own names
+always win; the width is the largest of the names, the types and every row the provider returned (kept or not), and,
+when it returned no row, the select list's or the `columns(table)` list's size, so a positional zero-row result has its
+columns and `maxRows: 0` returns them for this form too; a list is not used only when the names, the types or a row
+are wider than it (one `data:` log line with both counts; a shorter row is padded at the end and keeps the labels). The
+masks see the final names, and are also asked under a derived label's upper- and lower-case forms and, for an unnamed
+item of a readable list, under the names the item reads (`SelectLabels.references`); while a `MaskPolicy` is
+registered the non-null cells of a column no name can be given are withheld as `<redacted>`. The JDBC form keeps the
+driver's labels. Errors: an unknown source is
 `NOT_FOUND` with `data {source, known}`; an SQL error is
 `INTERNAL_ERROR` with `data {source, sqlState, errorCode, exception}` and, under the rule below, either `message` or
 `messageWithheld: true`. The `params` list itself is never logged or returned.
@@ -2486,17 +2497,15 @@ acknowledgement at all: such a verb uses `EVENT` with the pack's ready topics in
 *(Phase 7, built 2026-10-10, VC; P7 §8.2.)* `plan.json` is version 6 (`images`, a `swing.pointer` call's `guard`, the
 `visual` and `image` checks, `inference: run`); the reader accepts 1 to 6.
 
-**A91 (Phase 8, built 2026-10-19, EX; P8 §8.2.)** `plan.json` is version 7, written always; the reader accepts 1 to 7
-("expected 1, 2, 3, 4, 5, 6 or 7"), reads a version 6 plan as 7, and names each Phase 8 item it refuses below 7 ("needs
-a version 7 plan": a list filter, a dotted filter field or `[json]` in a path, `anyOf` or `containsWhere` in a
-matcher, `{has}` in an await's or a `sync.await` call's `match`, a step's `facts`, a call's `accept`, `rungs` or
-`minRung`). From version 7 on a step object holds exactly `id, verb, source, calls, expect` and optionally `facts`, and
-a call object exactly `primitive, args, sync, timeoutMs, await, handlesPrompt, capture, guard` and the §7 keys
-`accept, rungs, minRung`: any other key is refused ("step sN: unknown key 'x'"), where every earlier reader dropped it.
-
-(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.6, A87; the version is §8's, EX.) A call gains `accept` (the codes it
-accepts, sorted), `rungs` (`[{name, capability}]`, best first, 2 to 8 distinct names) and `minRung` (one of them),
-each written only when present and refused below plan version 7 ("call P: 'accept' needs a version 7 plan").
+**A91, A87 (Phase 8, built 2026-10-19, EX, ES; P8 §8.2, §7.3, §7.6.)** `plan.json` is version 7, written always; the
+reader accepts 1 to 7 ("expected 1, 2, 3, 4, 5, 6 or 7"), reads a version 6 plan as 7, and names each Phase 8 item it
+refuses below 7 ("needs a version 7 plan": a list filter, a dotted filter field or `[json]` in a path, `anyOf` or
+`containsWhere` in a matcher, `{has}` in an await's or a `sync.await` call's `match`, a step's `facts`, a call's
+`accept`, `rungs` or `minRung`, as in "call P: 'accept' needs a version 7 plan"). From version 7 on a step object holds
+exactly `id, verb, source, calls, expect` and optionally `facts`, and a call object exactly `primitive, args, sync,
+timeoutMs, await, handlesPrompt, capture, guard` and optionally §7's `accept` (the codes the call accepts, sorted),
+`rungs` (`[{name, capability}]`, best first, 2 to 8 distinct names) and `minRung` (one of them), each written only when
+present: any other key is refused ("step sN: unknown key 'x'"), where every earlier reader dropped it.
 
 ### 8.3 Domain pack SPI (package `ai.skillroy.testjava.scenario.pack`, discovered by `ServiceLoader<DomainPack>`)
 
@@ -2681,17 +2690,18 @@ describes the run's steps only (a session counts from its own start mark). `METH
 
 *(Phase 7, built 2026-10-10, VC; P7 §8.1, §12.3.)* The base verbs are eighteen: `aiAct`, `aiExpect`, `pointer` and
 `expectImage` join them and stay reserved for a pack; `UI_VERBS` gains `pointer` (`fired: false` fails the step, A29).
+`DomainPack.screenLegend()` (default null) is the pack's legend of its icon-only controls for a model that looks at the
+screen; `DelegatingDomainPack` forwards it.
 
 **A92 (Phase 8, built 2026-10-19, EX; P8 §8.6, §8.7.)** The base verbs are nineteen with `captureFacts` (reserved). An
 eighth base root `events`, after `hooks`: a list, oldest first, of `{seq, ts, topic, source, correlationId, payload}`
 for every event of the agent's bus after the run's start mark (a session's: its own), read with `evt.query {since,
 limit: 1000}` (no topics), at most ten pages; the read fails, rather than under-counts, when the ring evicted any event
-of the window or the tenth page is full. Filter it with the list form (`events[*topic=input.acked]`); a pack root named
-`events` hides it.
-`DomainPack.screenLegend()` (default null) is the pack's legend of its icon-only controls for a model that looks at the
-screen; `DelegatingDomainPack` forwards it.
+of the window or the tenth page is full (and, *Phase 8 security fix, S151, FC*, when an event of the window was cut at
+publish, `truncated: true`). Filter it with the list form (`events[*topic=input.acked]`); a pack root named `events`
+hides it.
 
-(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.4, §7.6, A87.) `SyncPolicy` gains a sixth component `ackByInputId` (the
+**A87 (Phase 8, built 2026-10-19, ES; P8 §7.3, §7.4, §7.6.)** `SyncPolicy` gains a sixth component `ackByInputId` (the
 five-argument constructor keeps false; `withAckByInputId`): when true, `ACK` and `READY` are **correlated**: the
 executor reads the call's result `inputId` and waits for the ack topic with `match: {inputId: <it>}` (READY's ready
 wait stays "since `seq.before`"); a result without one is ERROR / ENVIRONMENT "the pack's acknowledgements are
@@ -2700,7 +2710,7 @@ correlated by inputId; P returned none", nothing awaited. `PlannedCall` gains `a
 documents as harmless), `record Rung(name, capability)` is new, `CompileContext.minRung()` gives a verb the step's own
 modifier, and `DomainPack.warningCodes()` (default empty, forwarded by `DelegatingDomainPack`) declares the pack's
 codes `<packId>.<NAME>`, checked when the compiler is constructed. `accept` and `minRung` join the reserved verb
-names (`RESERVED_VERBS`).
+names, so `RESERVED_VERBS` holds eight with A92's `captureFacts`.
 
 ### 8.4 Expectations
 
@@ -3019,7 +3029,8 @@ undeclared or below `minRung`, or a forwarded `minRung` without its echo, is FAI
 `fidelity` record, de-duplicated with the primitive's own `DEGRADED`); the fidelity note; the base verbs' checks; the
 sync (correlated under `ackByInputId`); the capture; the prompt check, in which a prompt event whose `seq` a composite
 lists inside the call's window is expected with `answeredBy` and a listed `seq` outside it is reported as
-`ignoredSeqs`. **At run start**, after `requires`, every call with `minRung` must reach a rung from the first to
+`ignoredSeqs`. **At run start**, after `requires` (so that it sees the pack's capabilities, A96 below), every call with
+`minRung` must reach a rung from the first to
 `minRung` with no capability or an `OK` one, else ERROR / PRECONDITION_FAILED naming the step, the rung and the
 capability's reason, before bind and any side effect, with one `rungs` record per such call. The JUnit XML's
 `<system-out>` lists `warning <line>` beside the `degraded` lines; `run-end` carries `warnings` when there are some.
@@ -3158,7 +3169,11 @@ A deliberately awkward little desk application. It knows nothing about the frame
   `closeMenu` with "Close the desk" (the root pane's default button) and an `IconKey("CLOSE")`, "Print test slip", a
   text field `toolsNote`, a frame set with a zero-width pane, a scroll pane whose "Reprint slip" lies scrolled out, an
   AWT `Panel` "Scanner" (an AWT `Button`, an AWT `Checkbox` and a `JButton`) and "Open deposit box"; every control only
-  counts (`DeskTools.Counters`); `LendingApp.tools()` returns it or null. The main frame is unchanged.
+  counts (`DeskTools.Counters`); `LendingApp.tools()` returns it or null. The main frame is unchanged. **(Phase 8, built
+  2026-10-19, ES; P8 §12.1)** `lending.scannerDriver=true|false` (default `false`, read as strictly as
+  `lending.tools`) plants the desk's scanner driver (`ScannerDriver`: frames of STX, 1 to 64 printable ASCII characters
+  and CR, each fed to the engine as a scanned code; `LendingApp.scannerDriver()`), through which the agent module's
+  `scanner` device acts on its `PHYSICAL` rung (§9.2).
 - **Engine thread** named `LendingEngine` (non-daemon: it is the application's own thread): a state machine that
   blocks in `Inbox.take()`. States (`LendingState`):
   `SIGNED_OFF` (awaits staff code) -> `PASSWORD` -> `IDLE` -> `LOAN` (items entered) -> `DEPOSIT` -> back to `IDLE`;
@@ -3326,25 +3341,26 @@ Registers: `ReadinessSource` (`lending.engine`), `ThreadPolicyProvider` (one dae
 `CaptureMask` (`LendingCaptureMask`: the entry field while it is masked, and the number pad while the entry field is
 masked, D358) and `LendingWidgets.describe` (`{action: <actionId>}` for an `IconKey`, `{name: <label>}` for a
 prompt's button): thirteen SPI registrations. `LendingModule.VERSION` is `0.2.0` ("change it whenever the module's
-primitives or SPIs change"). **(Phase 8, built 2026-10-19, EA; P8 §12.2)** The fourteenth SPI type is
-an `InputVeto` (`LendingInputVeto`: the "Desk tools" window's panel `closeMenu`, by name, on every route and `ANY`,
-"closes the desk (the application would end)"), and the `lending` section of `app.state` gains `tools` (the window's
-counters) only when that window exists; the version is written in step R. **(Phase 8, built 2026-10-19, ET; P8 §12.2)** A second `DataSourceProvider`
-`lending-report` (`LendingRowsSource`: the desk's report reader, which answers by position; the five-argument
-`query()` with the `ReadHandle`'s `cancel` registered with the `QueryControl`, no column names, `enforcesTimeout()`
-true, `columns(table)` from `LendingDb.columnsOf`) on the lane `lending.reads` (1 thread, a queue of 2) the module
-declares in `install` and retires in `uninstall`: fourteen SPI registrations (sixteen across fourteen types when
-every Phase 8 package has landed); `PasswordMask` covers both source ids. The worker offers one `QuiescentPoint(50,
-4)`, which the engine listener drives from `idle` (inert after detach) and which `uninstall` closes before the worker
-stops; the primitive `lending.engine.view` (`APP_QUIESCENT`, budget 20 ms, timeout 5000, read-only; capability of the
-same name, OK while the desk runs and the point is offered) answers the `IdleView` read on the engine thread. The
-version becomes `0.3.0` in step R. How the desk is
+primitives or SPIs change"). **(Phase 8, built 2026-10-19, EA, ET, EW, EH, ES; P8 §12.2.)** `LendingModule.VERSION`
+is `0.3.0` (written in step R), and the module makes sixteen SPI registrations across fourteen types: also an
+`InputVeto` (`LendingInputVeto`: the "Desk tools" window's panel `closeMenu`, by name, on every route and `ANY`, "closes
+the desk (the application would end)"; EA), a second `DataSourceProvider` `lending-report` (`LendingRowsSource`: the
+desk's report reader, which answers by position; the five-argument `query()` with the `ReadHandle`'s `cancel`
+registered with the `QueryControl`, no column names, `enforcesTimeout()` true, `columns(table)` from
+`LendingDb.columnsOf`), on the lane `lending.reads` (1 thread, a queue of 2) the module declares in `install` and
+retires in `uninstall` (ET), and a second `DeviceAdapter`, the `scanner` (ES, below). `PasswordMask` covers both source
+ids (ET) and, as a second rule, answers `<personal>` for the column `name` of the module's event `staff.signedOn {code,
+name}` (EW). The worker offers one `QuiescentPoint(50, 4)`, which the engine listener drives from `idle` (inert after
+detach) and which `uninstall` closes before the worker stops; the primitive `lending.engine.view` (`APP_QUIESCENT`,
+budget 20 ms, timeout 5000, read-only; capability of the same name, OK while the desk runs and the point is offered)
+answers the `IdleView` read on the engine thread (ET). The `lending` section of `app.state` gains `tools` (the tools
+window's counters) only when that window exists (EA). With the agent option `lending.hooks.deny` (comma-separated
+class patterns) the module also registers `LendingClassDeny`, a domain module's `ClassDeny` answering `the lending
+module denies <pattern>` (an invalid value fails the install naming the key; seventeen registrations across fifteen
+types then); no launch sets it (EH; D573). How the desk is
 found: in EMBEDDED mode the `LendingApp` the host passed to `EmbeddedAgent.start`; in the other modes
 `LendingApp.instance()`, looked at only once a thread named `LendingEngine` exists, so that no application class is
-loaded before the application's own `main`. **(Phase 8, built 2026-10-19, EH; P8 §6.5, §12.2, D573)** With the agent
-option `lending.hooks.deny` (comma-separated class patterns) the module also registers `LendingClassDeny`, a domain
-module's `ClassDeny` answering `the lending module denies <pattern>` (an invalid value fails the install naming the
-key); no launch sets it, and without it nothing more is registered.
+loaded before the application's own `main`.
 
 **When the engine listener is attached, and readiness.** The application allows a listener to be added or removed
 only while its engine waits for input. The readiness source attaches the listener at the first poll that finds the
@@ -3385,9 +3401,14 @@ All but `lending.input` have a timeout of 5000.
 
 Events (source `lending`): `state.changed {from,to}`, `input.requested {state,prompt,validInputs}`,
 `input.acked {source}`, `prompt.waiting {id,text,buttons}`, `prompt.answered {id,choice}`,
-`loan.posted {loanId,total}`, `slip.printed {loanId}`. `input.acked` is published by `lending.input` itself, on the
-calling thread, so it exists only for inputs that come through `lending.input`; an input typed or clicked in the
-window has none, which is why UI steps wait for `input.requested`. A rejected input raises the `INPUT_REJECTED`
+`loan.posted {loanId,total}`, `slip.printed {loanId}`; (Phase 8, built 2026-10-19, EW; P8 §5.1, §12.2) `staff.signedOn
+{code, name}`, after `state.changed` when the state changes to `IDLE` from `PASSWORD` or `SIGNED_OFF` with a staff
+member signed on, its `name` masked at publish by `PasswordMask`. `input.acked` is published by `lending.input` itself
+(on the calling thread, or, *Phase 8, built 2026-10-19, ES, A89*, from the engine thread when the engine takes a queued
+input later, below), so it exists only for inputs that come through `lending.input`; an input typed or clicked in the
+window has none, which is why UI steps wait for `input.requested`. (Phase 8, ET, ES) The primitives
+`lending.engine.view`, `lending.signOn` and `lending.scanChecked` bring capabilities of their names, and
+`lending.scanner.physical` is the scanner device's (A89, below). A rejected input raises the `INPUT_REJECTED`
 error and publishes no event (§3, A33).
 Capabilities: one per primitive name, plus `lending.sql` and `lending.loan.authorisations` (OK; it exists so that
 guarded expectations have something real to point at); all are probed against the running desk. `app.state` section
@@ -3424,7 +3445,7 @@ composites `lending.signOn {staff, password?}` (branches `auto`, `password`, `pa
 `refused`), each with the capability of its name; the device `scanner` (action `scan {barcode, minRung?, inputId?}`,
 ladder `[PHYSICAL, SEMANTIC]`, `PHYSICAL` through the desk's scanner driver of `-Dlending.scannerDriver=true`) with
 the capability `lending.scanner.physical` (`OK` with the driver, else `UNAVAILABLE("scanner driver not enabled: launch
-the desk with -Dlending.scannerDriver=true")`). The module's version is written in step R.
+the desk with -Dlending.scannerDriver=true")`).
 
 ### 9.3 Domain pack and scenarios
 
@@ -3435,13 +3456,14 @@ check `lending.database` (`data.query` on source `lending` answers and finds sta
 `PreflightContext.data()`, so over JDBC where the environment serves `lending` that way); facts `loan` (->
 `lending.loan`), `state` (-> `lending.state`), `slip` (-> `lending.slip` with the last 10, oldest first, so that
 `slip.last` is the newest), `prompt` (-> `lending.prompt`). **A99 (Phase 8, built 2026-10-19, EP; P8 §9, §12.3; the
-version literal `0.7.0` is written in step R):** the pack capability `lending.returns.ceiling` ("the desk has a system
+pack's version is `0.7.0`, written in step R):** the pack capability `lending.returns.ceiling` ("the desk has a system
 maximum return configured", scope `SCENARIO`, source `pack:lending`, never in a capability golden): the `desk_setting`
 row named by the setting `lending.maxReturnSetting` (`max_return`; the branch overlay's `return_ceiling`), read through
 the run's data channel, `OK` when one row holds a decimal, else `UNAVAILABLE("no system maximum return configured
 (desk_setting <name>)")`, a failed read `UNAVAILABLE("the lending database could not be read (<kind>): <message>")`;
 the pre-flight check `lending.database` is `SUITE`-scoped; scenario A (`return-over-limit-needs-supervisor`) gains
-`lending.returns.ceiling` at the end of its `requires:`. Verbs:
+`lending.returns.ceiling` at the end of its `requires:`, and so, as built in step R, does scenario D
+(`supervisor-return-llm-sql`, D766). Verbs:
 
 | Verb | Compiles to |
 |---|---|
@@ -3501,8 +3523,10 @@ READY, with `signOn`'s cleanup), `scanChecked: {item|barcode, inducted}` (`lendi
 `deviceScan: {item|barcode}` (`device.act {id: scanner, action: scan, args: {barcode, minRung?}}` with the ladder
 `[PHYSICAL (lending.scanner.physical), SEMANTIC]`, READY; the step's `minRung`, or PHYSICAL under `strict`, forwarded).
 "Use an assistant without `auto_sign_on`" still holds for `signOn`; `signOnAny` takes either. The Phase 8 scenarios
-`semantic-input-warnings`, `sign-on-any`, `scan-checked`, `device-scan` and `scanner/device-scan-physical` and four
-negatives show the conventions (P8 §12.4).
+(P8 §12.4; ES, EX, EA): `semantic-input-warnings`, `sign-on-any`, `scan-checked`, `device-scan` and
+`scanner/device-scan-physical` with four negatives show the semantic-input conventions (ES); `loan-counts-and-events`
+with the negative `count-delta-fails` the counts, a captured fact and the `events` root (EX); the negative
+`vetoed-click` the input veto (EA): seventeen committed scenarios and seventeen negatives in all.
 
 ---
 

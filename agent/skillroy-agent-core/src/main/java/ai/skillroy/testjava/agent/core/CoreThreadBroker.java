@@ -488,7 +488,7 @@ final class CoreThreadBroker implements ThreadBroker {
                 // phase8-contracts.md 4.1: call(APP_QUIESCENT, task, t) is callQuiescent(task, 50, t).
                 return quiescent(null, task, QuiescentPoint.DEFAULT_BUDGET_MS, timeoutMs);
             case LANE:
-                // phase8-contracts.md 4.2, D-ET-4: a policy without a lane name; callOnLane names one.
+                // phase8-contracts.md 4.2, D654: a policy without a lane name; callOnLane names one.
                 throw laneUnnamed();
             default:
                 throw new IllegalArgumentException("unknown thread policy " + policy);

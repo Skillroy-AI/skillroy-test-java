@@ -663,26 +663,25 @@ is ready (a property read of an element that does not exist yet) therefore waits
 2026-10-07 the CDP path ended the wait at the first poll that threw, with `SCRIPT_ERROR`, and the agent polled on
 through a compile error until its time was up.)
 
-**A79 (Phase 8, built 2026-10-19, EW; P8 §5.2, D545, D548, D550, D637).** A masked browser (a `CaptureMask` names its
-component, a `BrowserMask` names it, or it has no view while a mask is registered and no `BrowserMask` releases it) is
-masked on every route: `web.browsers` lists it `masked: true` with `url: ""`, no `title` and its frames' names and
-URLs blank, and the answer gains `masksRegistered: true|false` (what the walk answered for the call); the four reads
-`web.bitmap`, `web.dom.text`, `web.ariaSnapshot` and `web.hitTest` answer `INVALID_PARAMS {param: "redact", reason:
-"masked", browser}` before the page is evaluated unless `redact: false` (a view-less JCEF browser's `web.bitmap` is
-refused as masked before the adapter's `CAPABILITY_UNAVAILABLE`); `by: {url}` and `by: {title}` never match it (its
-title is not read) and the selection error data's summaries say `url: ""`, no `title`, `masked: true`, while `by:
-{tag}`, `by: {nativeId}` and `browser: <ref>` still select it; and the actions that stay allowed on it answer without
-page data: `web.pointer` carries no `hit` (the page is not hit-tested), `web.dom.click`'s `clicked`, `web.dom.fill`'s
-`filled` and an `AMBIGUOUS` answer's `candidates` keep `role` and `tag` only (`name`, `id` and `type` dropped, `count`
-kept). The three actions declare `redact` (a person's argument, `CallPolicy.MASKED_WEB_READS`): `false` keeps today's
-answers. `web.evaluate` and `web.waitFlag` stay S111's recorded residual. (Phase 8 security fixes, FE; P8 §5.2.)
-`web.dom.click`, `web.dom.fill` and `web.dispatchEvent` with a selector `target` are refused on a masked browser
-`INVALID_PARAMS {param: "redact", reason: "masked", browser}` before the page evaluates the locator, unless `redact:
-false` (`web.dispatchEvent` declares `redact` and joins `MASKED_WEB_READS`), since whether a locator matched would
-reveal the page (S165); a masked browser's `web.tap` and `web.ready {signal: TAP}` carry the tap's own pattern as `name`
-(S170); a tag lasts while a seed gives it (S169); every per-call judgement judges the view the adapter reports in the
-call (S168) and counts a state it could not read as masked (S167); a `by: {url|title}` selection judges its
-candidates afresh (S172).
+**A79 (Phase 8, built 2026-10-19, EW, with the Phase 8 security fixes S165, S167-S169, S172, FE; P8 §5.2, D545, D548,
+D550, D637, D803).** A masked browser (a `CaptureMask` names its component, a `BrowserMask` names it, or it has no view
+while a mask is registered and no `BrowserMask` releases it) is masked on every route: `web.browsers` lists it `masked:
+true` with `url: ""`, no `title` and its frames' names and URLs blank, and the answer gains `masksRegistered: true|false`
+(what the walk answered for the call); the four reads `web.bitmap`, `web.dom.text`, `web.ariaSnapshot` and
+`web.hitTest` answer `INVALID_PARAMS {param: "redact", reason: "masked", browser}` before the page is evaluated unless
+`redact: false` (a view-less JCEF browser's `web.bitmap` is refused as masked before the adapter's
+`CAPABILITY_UNAVAILABLE`); `by: {url}` and `by: {title}` never match it (its title is not read; a selection judges its
+candidates afresh before any URL regex or title read, S172) and the selection error data's summaries say `url: ""`, no
+`title`, `masked: true`, while `by: {tag}`, `by: {nativeId}` and `browser: <ref>` still select it (a tag lasts while a
+seed gives it, S169). `web.dom.click`, `web.dom.fill` and `web.dispatchEvent` with a selector `target` are refused
+the same way before the page evaluates the locator, unless `redact: false`, since whether a locator matched would
+reveal the page (S165); `web.pointer` at a point and a `web.dispatchEvent` on the window or the document stay allowed,
+and `web.pointer` carries no `hit` (the page is not hit-tested). An action that ran while its browser was judged masked
+answers without page data: `web.dom.click`'s `clicked`, `web.dom.fill`'s `filled` and an `AMBIGUOUS` answer's
+`candidates` keep `role` and `tag` only (`name`, `id` and `type` dropped, `count` kept). The four actions declare
+`redact` (a person's argument, `CallPolicy.MASKED_WEB_READS`): `false` keeps today's answers. Every per-call judgement
+judges the view the adapter reports in the call (S168) and counts a state it could not read as masked (S167).
+`web.evaluate` and `web.waitFlag` stay S111's recorded residual.
 
 ### 4.3 Events
 
@@ -778,8 +777,13 @@ the kit's item 14 (§10.1), which runs against real JCEF in the image. D266, D26
 entry's flag (a volatile read, no EDT read on the adapter's thread or the tap poller): `web.load {browser, url: "",
 frameKey?, kind, masked: true}` (no `error`), `web.ready {browser, url: "", signal, name?, masked: true}`, `web.console
 {browser, level, text: "", masked: true}` (no `source`, `line` or `truncated`), `web.tap {browser, name, masked: true}`
-(no `detail` or `truncated`); `web.closed` and `web.browsers.changed` are unchanged. A step that waits on `web.ready
-{signal: LOAD}` or `web.tap {name}` of a masked browser still completes. Every payload then passes the ring's mask pass
+(no `detail` or `truncated`); `web.closed` and `web.browsers.changed` are unchanged. *(Phase 8 security fixes, S170,
+S172, FE.)* On a masked browser `web.tap`'s and `web.ready {signal: TAP}`'s `name` is the tap's own pattern (the exact
+pattern equal to the event's type, else the first `*` pattern matching it whole), and an event no pattern matches is
+not published; while events of unmasked browsers flow, the module judges every browser's flag again on a worker, at
+most once per 2 s (the asking event reads the old flag), so a browser that becomes masked while it is open sends page
+data for up to about 2 s after its next event (P8 gap 155). A step that waits on `web.ready {signal: LOAD}` of a masked
+browser, or on `web.tap` by the pattern its tap names, still completes. Every payload then passes the ring's mask pass
 (P1 §5, A78).
 
 ### 4.4 Capabilities
