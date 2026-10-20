@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
 
 /**
@@ -123,14 +124,19 @@ public final class ReadOnlyJdbc {
     /**
      * {@link #executeLenient(Connection, String, List, int, int, Consumer)} with a statement sink (phase8-contracts.md
      * 4.3, D530): {@code statementSink} receives the prepared statement right after {@code prepareStatement}, before
-     * anything is bound or run, and {@code null} once the statement is closed, so that a caller on another thread can
-     * {@code cancel()} the statement only while it is open (never a later statement of a pooled connection). A
-     * statement cancelled while it runs ends {@code executeQuery} with the driver's {@code SQLException}, and the
-     * connection is restored as on every other path. The sink runs on the calling thread; what it throws is reported to
-     * {@code warn} by class name and does not change the outcome.
+     * anything is bound or run, and {@code null} before the statement and its result set are closed (Phase 8 security
+     * fix, S161, FB: the sink may hold the hand-over until a {@code cancel()} it let run has returned), so that a
+     * caller on another thread can {@code cancel()} the statement only while it is open (never a later statement of a
+     * pooled connection). A statement cancelled while it runs ends {@code executeQuery} with the driver's
+     * {@code SQLException}, and the connection is restored as on every other path. A sink that throws
+     * {@link CancellationException} when handed the open statement (its caller has given up) stops the call before
+     * anything is bound or run: the sink receives null, the statement is closed, the connection restored, and the
+     * {@code CancellationException} propagates. The sink runs on the calling thread; anything else it throws is
+     * reported to {@code warn} by class name and does not change the outcome.
      *
      * @param statementSink receives the open statement, then null; may be null (no sink)
      * @throws IllegalArgumentException if {@code maxRows} is negative or {@code params} is null
+     * @throws CancellationException when the sink refused the open statement; nothing was bound or run
      */
     public static Rows executeLenient(Connection c, String sql, List<Object> params, int maxRows,
                                       int timeoutSeconds, Consumer<String> warn, Consumer<Statement> statementSink)
@@ -173,11 +179,11 @@ public final class ReadOnlyJdbc {
                 resultSet = statement.executeQuery();
                 return read(resultSet, maxRows);
             } finally {
-                closeQuietly(resultSet, "result set", out);
-                closeQuietly(statement, "statement", out);
                 if (statement != null) {
                     hand(statementSink, null, out);
                 }
+                closeQuietly(resultSet, "result set", out);
+                closeQuietly(statement, "statement", out);
             }
         } finally {
             restore(c, restoreAutoCommit, restoreWritable, out);
@@ -275,13 +281,21 @@ public final class ReadOnlyJdbc {
         }
     }
 
-    /** Hands the statement (or null) to the sink, if any; a failing sink is reported, never thrown. */
+    /**
+     * Hands the statement (or null) to the sink, if any; a failing sink is reported, never thrown, except a
+     * {@link CancellationException} for an open statement, which stops the call (S161).
+     */
     private static void hand(Consumer<Statement> sink, Statement statement, Consumer<String> warn) {
         if (sink == null) {
             return;
         }
         try {
             sink.accept(statement);
+        } catch (CancellationException e) {
+            if (statement != null) {
+                throw e;
+            }
+            warn(warn, "the statement sink failed: " + e.getClass().getName());
         } catch (RuntimeException e) {
             warn(warn, "the statement sink failed: " + e.getClass().getName());
         }

@@ -1989,7 +1989,13 @@ provider's own names always win; the width is the largest of the names, the type
 returned (kept or not), and, when it returned no row, the select list's or the `columns(table)` list's size, so a
 positional zero-row result has its columns and `maxRows: 0` returns them for this form too; a list whose size differs
 from a width taken from names or rows is not used (one `data:` log line with both counts). The masks see the final
-names. The JDBC form keeps the driver's labels. Errors: an unknown source is `NOT_FOUND` with `data {source, known}`; an SQL error is
+names. The JDBC form keeps the driver's labels. **(Phase 8 security fixes S160, S162, S163, S164, FB; P8 §4.4's fix
+wave.)** A list is not used only when the names, the types or a row are wider than it (a shorter row keeps the labels);
+the masks are also asked under a derived label's upper- and lower-case forms and, for an unnamed item of a readable
+list,
+under the names it references; while a `MaskPolicy` is registered the non-null cells of a column no name can be given
+are withheld as `<redacted>`; `starTable` keeps a quoted part's quotes (in double quotes). Errors: an unknown source is
+`NOT_FOUND` with `data {source, known}`; an SQL error is
 `INTERNAL_ERROR` with `data {source, sqlState, errorCode, exception}` and, under the rule below, either `message` or
 `messageWithheld: true`. The `params` list itself is never logged or returned.
 

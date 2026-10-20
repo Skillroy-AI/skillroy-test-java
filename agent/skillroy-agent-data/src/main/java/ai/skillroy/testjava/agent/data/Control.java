@@ -41,7 +41,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  * abandoned there and logged by its class name, as is one that throws). An action registered after cancellation runs
  * at once on the registering thread.
  *
- * <p>Thread-safe; the action list is guarded by this object's monitor, which is never held while an action runs.
+ * <p>Closing a handle unregisters its action (Phase 8 security fix, S159, FB): once {@code close()} has returned the
+ * action never starts, also when the batch had already taken it; an action already running when {@code close()} is
+ * called is waited for until it ends or its {@link QueryControl#ACTION_TIMEOUT_MS} since its start run out (never on
+ * the thread running it, so an action may close its own handle). A batch that a full worker pool rejected never
+ * starts (L1-F4): {@link #batchNotStarted()} says so, and {@link #actionsPending()} counts only actions of a batch that
+ * started.
+ *
+ * <p>Thread-safe; the action list is guarded by this object's monitor and each registration's state by its own, and
+ * neither is held while an action runs.
  */
 final class Control implements QueryControl {
 
@@ -63,10 +71,13 @@ final class Control implements QueryControl {
     private int registered;
     /** Set once an action returned without throwing (and, for an {@link Action}, said it cancelled). */
     private final AtomicBoolean cancelledByAction = new AtomicBoolean();
-    /** Actions started and not yet ended. */
+    /** Actions of a started batch not yet ended (or skipped, closed meanwhile). */
     private final AtomicInteger running = new AtomicInteger();
     /** Counted down when the batch of actions has ended (at once when there was none). */
     private final CountDownLatch batchDone = new CountDownLatch(1);
+    /** Set when a batch with at least one action was posted, and when that batch started on its worker. */
+    private volatile boolean batchPosted;
+    private volatile boolean batchStarted;
 
     /** @param deadlineNanos {@code System.nanoTime()} at which the read's time is spent */
     Control(long deadlineNanos, AgentLog log) {
@@ -145,16 +156,25 @@ final class Control implements QueryControl {
             batchDone.countDown();
             return;
         }
-        running.addAndGet(batch.size());
+        batchPosted = true;
         threads.post(ThreadPolicy.WORKER, new Runnable() {
             @Override
             public void run() {
+                // Started before pending, so that an answer never reads both (L1-F4).
+                batchStarted = true;
+                running.addAndGet(batch.size());
                 try {
                     for (final Registration registration : batch) {
+                        if (!registration.begin()) {
+                            // Closed since the batch took it: it never starts (S159).
+                            running.decrementAndGet();
+                            continue;
+                        }
                         try {
                             Boolean done = threads.call(ThreadPolicy.WORKER, new Callable<Boolean>() {
                                 @Override
                                 public Boolean call() throws Exception {
+                                    registration.runsOn(Thread.currentThread());
                                     return Boolean.valueOf(registration.action.cancel());
                                 }
                             }, ACTION_TIMEOUT_MS);
@@ -173,6 +193,7 @@ final class Control implements QueryControl {
                             log.warn("data: the cancel action " + registration.action.describe() + " failed: "
                                     + t.getClass().getName());
                         } finally {
+                            registration.end();
                             running.decrementAndGet();
                         }
                     }
@@ -205,23 +226,82 @@ final class Control implements QueryControl {
         return cancelledByAction.get();
     }
 
-    /** True while an action of the batch is still running. */
+    /** True while an action of a started batch is still running (or about to). */
     boolean actionsPending() {
         return running.get() > 0;
     }
 
-    /** One registered action; closing it unregisters the action (a no-op once the batch took it). */
+    /**
+     * True when a batch with actions was posted and had not started when asked: the worker pool rejected it (it has
+     * no queue, so an accepted batch starts at once) or, rarely, its thread had not yet run it (L1-F4).
+     */
+    boolean batchNotStarted() {
+        return batchPosted && !batchStarted;
+    }
+
+    /**
+     * One registered action. Closing it unregisters the action: once {@link #close()} returns the action never
+     * starts; a run already started is waited for, at most until its {@link QueryControl#ACTION_TIMEOUT_MS} since its
+     * start run out, except on the thread running it (S159).
+     */
     private final class Registration implements AutoCloseable {
         final Action action;
+        /** Guarded by this registration's monitor. */
+        private boolean closed;
+        private boolean running;
+        private Thread runner;
+        private long abandonedAtNanos;
 
         Registration(Action action) {
             this.action = action;
+        }
+
+        /** The batch is about to run the action: false when it was closed (it must not start). */
+        synchronized boolean begin() {
+            if (closed) {
+                return false;
+            }
+            running = true;
+            abandonedAtNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ACTION_TIMEOUT_MS);
+            return true;
+        }
+
+        /** The thread the action runs on (a close from it does not wait). */
+        synchronized void runsOn(Thread thread) {
+            runner = thread;
+        }
+
+        /** The run ended, or the batch abandoned it. */
+        synchronized void end() {
+            running = false;
+            runner = null;
+            notifyAll();
         }
 
         @Override
         public void close() {
             synchronized (Control.this) {
                 actions.remove(this);
+            }
+            boolean interrupted = false;
+            synchronized (this) {
+                closed = true;
+                Thread current = Thread.currentThread();
+                while (running && runner != current) {
+                    long left = abandonedAtNanos - System.nanoTime();
+                    if (left <= 0L) {
+                        break;
+                    }
+                    try {
+                        TimeUnit.NANOSECONDS.timedWait(this, left);
+                    } catch (InterruptedException e) {
+                        // The provider's read thread is often interrupted by then; the wait stays bounded.
+                        interrupted = true;
+                    }
+                }
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt();
             }
         }
     }

@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
@@ -292,27 +293,40 @@ public final class LendingDb implements AutoCloseable {
     /**
      * The column names of {@code table} in their declared order, from {@code INFORMATION_SCHEMA.COLUMNS} by
      * {@code ORDINAL_POSITION} (phase8-contracts.md 12.1), or null for a table the database does not have. The name
-     * is compared as HSQLDB folds unquoted names (without regard to case); a {@code schema.table} name names its
-     * schema, a bare name the schema {@code PUBLIC}.
+     * comes as the statement spells it (Phase 8 security fix, S162): its parts joined with {@code .}, an unquoted part
+     * compared as HSQLDB folds unquoted names (upper case), a part in double quotes (an inner {@code "} doubled)
+     * compared exactly; {@code schema.table} names its schema, a bare name the schema {@code PUBLIC}, and a
+     * three-part name its catalog too.
      */
     public List<String> columnsOf(String table) throws SQLException {
         if (table == null || table.trim().isEmpty()) {
             return null;
         }
-        String schema = "PUBLIC";
-        String name = table.trim();
-        int dot = name.lastIndexOf('.');
-        if (dot > 0) {
-            schema = name.substring(0, dot);
-            name = name.substring(dot + 1);
+        List<String> parts = new ArrayList<String>();
+        for (String part : table.trim().split("\\.", -1)) {
+            String name = identifier(part);
+            if (name == null) {
+                return null;
+            }
+            parts.add(name);
         }
+        if (parts.size() > 3) {
+            return null;
+        }
+        String name = parts.get(parts.size() - 1);
+        String schema = parts.size() >= 2 ? parts.get(parts.size() - 2) : "PUBLIC";
+        String catalog = parts.size() == 3 ? parts.get(0) : null;
         List<String> columns = new ArrayList<String>();
         try (Connection c = openReadOnlyConnection();
              PreparedStatement ps = c.prepareStatement("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS"
-                 + " WHERE UPPER(TABLE_SCHEMA) = UPPER(?) AND UPPER(TABLE_NAME) = UPPER(?)"
+                 + " WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?"
+                 + (catalog == null ? "" : " AND TABLE_CATALOG = ?")
                  + " ORDER BY ORDINAL_POSITION")) {
             ps.setString(1, schema);
             ps.setString(2, name);
+            if (catalog != null) {
+                ps.setString(3, catalog);
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     columns.add(rs.getString(1));
@@ -320,6 +334,18 @@ public final class LendingDb implements AutoCloseable {
             }
         }
         return columns.isEmpty() ? null : columns;
+    }
+
+    /** The name an identifier part stands for: a quoted part exactly, an unquoted one upper-cased; null if malformed. */
+    private static String identifier(String part) {
+        if (part.length() >= 2 && part.charAt(0) == '"' && part.charAt(part.length() - 1) == '"') {
+            String inner = part.substring(1, part.length() - 1).replace("\"\"", "\"");
+            return inner.isEmpty() ? null : inner;
+        }
+        if (part.isEmpty() || part.indexOf('"') >= 0) {
+            return null;
+        }
+        return part.toUpperCase(Locale.ROOT);
     }
 
     /**

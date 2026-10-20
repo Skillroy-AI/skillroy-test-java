@@ -95,7 +95,17 @@ final class CoreThreadBroker implements ThreadBroker {
     private final Lanes lanes;
     /** The application thread running a core-wrapped quiescent task right now, or null (D520). */
     private volatile Thread quiescentRunner;
-    /** Primitives penalised for a quiescent overrun of more than twice their budget: {budgetMs, ranMs}; guarded. */
+    /**
+     * The key prefix of a module's own quiescent tasks ({@code callQuiescent} and {@code call(APP_QUIESCENT, …)}
+     * through its context's broker) in {@link #penalties} and {@code agent.info.threads.quiescent.penalised} (Phase 8
+     * review fix L2-F3, FB).
+     */
+    static final String MODULE_KEY = "module:";
+
+    /**
+     * Primitives, and modules ({@value #MODULE_KEY}{@code <id>}), penalised for a quiescent overrun of more than twice
+     * their budget: {budgetMs, ranMs}; guarded.
+     */
     private final Map<String, long[]> penalties = new TreeMap<String, long[]>();
     /** Primitives whose overrun was logged, and providers whose quiescentPoint() threw; guarded by penalties. */
     private final Set<String> overrunLogged = new HashSet<String>();
@@ -117,6 +127,15 @@ final class CoreThreadBroker implements ThreadBroker {
 
     @Override
     public <T> T call(ThreadPolicy policy, Callable<T> task, long timeoutMs) throws Exception {
+        return call(null, policy, task, timeoutMs);
+    }
+
+    /**
+     * {@link #call(ThreadPolicy, Callable, long)} for a module's context ({@code module} its id, or null for the
+     * core's own calls): {@code call(APP_QUIESCENT, …)} is then {@link #callQuiescent(String, Callable, long, long)}
+     * with the default budget, penalised per module (L2-F3).
+     */
+    <T> T call(String module, ThreadPolicy policy, Callable<T> task, long timeoutMs) throws Exception {
         if (policy == null || task == null) {
             throw new IllegalArgumentException("policy and task must not be null");
         }
@@ -124,7 +143,12 @@ final class CoreThreadBroker implements ThreadBroker {
             throw new IllegalArgumentException("timeoutMs must be positive: " + timeoutMs);
         }
         refuseForbiddenCaller();
-        return run(policy, new Guarded<T>(task, CallScope.current(), this), timeoutMs, null);
+        Guarded<T> guarded = new Guarded<T>(task, CallScope.current(), this);
+        if (policy == ThreadPolicy.APP_QUIESCENT) {
+            // phase8-contracts.md 4.1: call(APP_QUIESCENT, task, t) is callQuiescent(task, 50, t).
+            return quiescent(module, guarded, QuiescentPoint.DEFAULT_BUDGET_MS, timeoutMs);
+        }
+        return run(policy, guarded, timeoutMs, null);
     }
 
     /**
@@ -143,6 +167,16 @@ final class CoreThreadBroker implements ThreadBroker {
 
     @Override
     public <T> T callQuiescent(Callable<T> task, long budgetMs, long timeoutMs) throws Exception {
+        return callQuiescent(null, task, budgetMs, timeoutMs);
+    }
+
+    /**
+     * {@link #callQuiescent(Callable, long, long)} for a module's context: {@code module} (its id) keys the overrun
+     * penalty and its log line ({@value #MODULE_KEY}{@code <id>}), so that a module whose task overran twice its
+     * budget is refused until {@code agent.capabilities {reprobe: true}} and another module is not (L2-F3); null for
+     * the core's own calls, which carry no penalty.
+     */
+    <T> T callQuiescent(String module, Callable<T> task, long budgetMs, long timeoutMs) throws Exception {
         if (task == null) {
             throw new IllegalArgumentException("task must not be null");
         }
@@ -150,11 +184,16 @@ final class CoreThreadBroker implements ThreadBroker {
             throw new IllegalArgumentException("timeoutMs must be positive: " + timeoutMs);
         }
         refuseForbiddenCaller();
-        RpcException refused = quiescentGate(null, budgetMs);
+        return quiescent(module, new Guarded<T>(task, CallScope.current(), this), budgetMs, timeoutMs);
+    }
+
+    /** The gates, then the run, of a module's (or the core's) own quiescent task. */
+    private <T> T quiescent(String module, Guarded<T> task, long budgetMs, long timeoutMs) throws Exception {
+        RpcException refused = quiescentGate(null, module, budgetMs);
         if (refused != null) {
             throw refused;
         }
-        return runQuiescent(null, new Guarded<T>(task, CallScope.current(), this), budgetMs, timeoutMs);
+        return runQuiescent(null, module, task, budgetMs, timeoutMs);
     }
 
     @Override
@@ -210,6 +249,14 @@ final class CoreThreadBroker implements ThreadBroker {
      * null for {@link #callQuiescent}; the refusal's data then has no {@code primitive}.
      */
     RpcException quiescentGate(String primitive, long budgetMs) {
+        return quiescentGate(primitive, null, budgetMs);
+    }
+
+    /**
+     * {@link #quiescentGate(String, long)} for a primitive or, with {@code primitive} null, a module's own task
+     * ({@code module} its id; null for the core's own calls): a module's penalty refusal carries {@code module}.
+     */
+    RpcException quiescentGate(String primitive, String module, long budgetMs) {
         ThreadPolicyProvider provider = spi.first(ThreadPolicyProvider.class);
         QuiescentPoint point = provider == null ? null : pointOf(provider);
         if (point == null || point.isClosed()) {
@@ -225,20 +272,31 @@ final class CoreThreadBroker implements ThreadBroker {
             return refusal(ErrorCodes.CAPABILITY_UNAVAILABLE, primitive, "quiescent budget exceeds the allowance",
                     more);
         }
-        if (primitive != null) {
+        String key = penaltyKey(primitive, module);
+        if (key != null) {
             long[] penalty;
             synchronized (penalties) {
-                penalty = penalties.get(primitive);
+                penalty = penalties.get(key);
             }
             if (penalty != null) {
                 Map<String, Object> more = new LinkedHashMap<String, Object>();
+                if (primitive == null) {
+                    more.put("module", module);
+                }
                 more.put("budgetMs", Long.valueOf(penalty[0]));
                 more.put("ranMs", Long.valueOf(penalty[1]));
-                return refusal(ErrorCodes.CAPABILITY_UNAVAILABLE, primitive, "quiescent task overran its budget",
-                        more);
+                RpcException refused = refusal(ErrorCodes.CAPABILITY_UNAVAILABLE, primitive,
+                        "quiescent task overran its budget", more);
+                return primitive != null ? refused : new RpcException(ErrorCodes.CAPABILITY_UNAVAILABLE,
+                        "module " + module + ": quiescent task overran its budget", refused.error().data());
             }
         }
         return null;
+    }
+
+    /** The penalty key: the primitive's name, else {@value #MODULE_KEY}{@code <module>}, else null (no penalty). */
+    static String penaltyKey(String primitive, String module) {
+        return primitive != null ? primitive : module != null ? MODULE_KEY + module : null;
     }
 
     private static RpcException refusal(int code, String primitive, String reason, Map<String, Object> more) {
@@ -262,12 +320,18 @@ final class CoreThreadBroker implements ThreadBroker {
      * @throws BrokerTimeout when the task was admitted and still runs at the deadline
      */
     <T> T runQuiescent(String primitive, Guarded<T> task, long budgetMs, long timeoutMs) throws Exception {
+        return runQuiescent(primitive, null, task, budgetMs, timeoutMs);
+    }
+
+    /** {@link #runQuiescent(String, Guarded, long, long)} for a primitive or a module's own task (L2-F3). */
+    <T> T runQuiescent(String primitive, String module, Guarded<T> task, long budgetMs, long timeoutMs)
+            throws Exception {
         ThreadPolicyProvider provider = spi.first(ThreadPolicyProvider.class);
         QuiescentPoint point = provider == null ? null : pointOf(provider);
         if (point == null) {
             throw refusal(ErrorCodes.CAPABILITY_UNAVAILABLE, primitive, "no quiescent point offered", null);
         }
-        QuiescentTask<T> wrapped = new QuiescentTask<T>(task, primitive, budgetMs, this);
+        QuiescentTask<T> wrapped = new QuiescentTask<T>(task, primitive, module, budgetMs, this);
         try {
             return point.await(wrapped, budgetMs, timeoutMs);
         } catch (RpcException e) {
@@ -326,12 +390,19 @@ final class CoreThreadBroker implements ThreadBroker {
         }
     }
 
-    /** Records the run time of a core-wrapped quiescent task: overruns logged once per primitive, 2x penalised. */
-    private void ran(String primitive, long budgetMs, long ranMs) {
+    /**
+     * Records the run time of a core-wrapped quiescent task: overruns logged once per primitive or module, 2x
+     * penalised (a module's own task under {@value #MODULE_KEY}{@code <id>}, L2-F3); the core's own unkeyed calls are
+     * logged once in all and not penalised.
+     */
+    private void ran(String primitive, String module, long budgetMs, long ranMs) {
         if (ranMs <= budgetMs) {
             return;
         }
-        String who = primitive == null ? "a quiescent task" : primitive;
+        String key = penaltyKey(primitive, module);
+        String who = primitive != null ? primitive
+                : module != null ? "a quiescent task of module " + module : "a quiescent task";
+        boolean penalised = key != null && ranMs > 2 * budgetMs;
         boolean first;
         synchronized (penalties) {
             Map<String, Object> last = new LinkedHashMap<String, Object>();
@@ -339,14 +410,14 @@ final class CoreThreadBroker implements ThreadBroker {
             last.put("budgetMs", Long.valueOf(budgetMs));
             last.put("ranMs", Long.valueOf(ranMs));
             lastOverrun = last;
-            first = overrunLogged.add(who);
-            if (primitive != null && ranMs > 2 * budgetMs) {
-                penalties.put(primitive, new long[] {budgetMs, ranMs});
+            first = overrunLogged.add(key != null ? key : who);
+            if (penalised) {
+                penalties.put(key, new long[] {budgetMs, ranMs});
             }
         }
         if (first) {
             log.warn(who + " held the application's thread " + ranMs + " ms, over its quiescent budget of " + budgetMs
-                    + " ms" + (ranMs > 2 * budgetMs && primitive != null
+                    + " ms" + (penalised
                     ? "; it answers CAPABILITY_UNAVAILABLE until agent.capabilities {reprobe: true}" : ""));
         }
     }
@@ -415,11 +486,7 @@ final class CoreThreadBroker implements ThreadBroker {
                 return onApp(task, timeoutMs);
             case APP_QUIESCENT:
                 // phase8-contracts.md 4.1: call(APP_QUIESCENT, task, t) is callQuiescent(task, 50, t).
-                RpcException refused = quiescentGate(null, QuiescentPoint.DEFAULT_BUDGET_MS);
-                if (refused != null) {
-                    throw refused;
-                }
-                return runQuiescent(null, task, QuiescentPoint.DEFAULT_BUDGET_MS, timeoutMs);
+                return quiescent(null, task, QuiescentPoint.DEFAULT_BUDGET_MS, timeoutMs);
             case LANE:
                 // phase8-contracts.md 4.2, D-ET-4: a policy without a lane name; callOnLane names one.
                 throw laneUnnamed();
@@ -676,12 +743,14 @@ final class CoreThreadBroker implements ThreadBroker {
     static final class QuiescentTask<T> implements Callable<T> {
         private final Guarded<T> task;
         private final String primitive;
+        private final String module;
         private final long budgetMs;
         private final CoreThreadBroker broker;
 
-        QuiescentTask(Guarded<T> task, String primitive, long budgetMs, CoreThreadBroker broker) {
+        QuiescentTask(Guarded<T> task, String primitive, String module, long budgetMs, CoreThreadBroker broker) {
             this.task = task;
             this.primitive = primitive;
+            this.module = module;
             this.budgetMs = budgetMs;
             this.broker = broker;
         }
@@ -695,7 +764,7 @@ final class CoreThreadBroker implements ThreadBroker {
                 return task.callAtQuiescentPoint();
             } finally {
                 broker.quiescentRunner = null;
-                broker.ran(primitive, budgetMs, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+                broker.ran(primitive, module, budgetMs, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
             }
         }
     }

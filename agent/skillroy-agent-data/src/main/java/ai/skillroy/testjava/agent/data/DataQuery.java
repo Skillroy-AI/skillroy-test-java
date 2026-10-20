@@ -26,6 +26,7 @@ import ai.skillroy.testjava.agent.api.spi.QueryResult;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.JsonView;
 import ai.skillroy.testjava.protocol.RpcException;
+import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.sql.Rows;
 import ai.skillroy.testjava.protocol.sql.SelectLabels;
 import ai.skillroy.testjava.protocol.sql.StatementGuard;
@@ -78,6 +79,13 @@ import java.util.function.Predicate;
  * {@code BUSY} until it ends (the per-source gate); a lane's own {@code BUSY} applies instead on a lane. Columns a
  * provider leaves unnamed take the labels of the statement's select list ({@link SelectLabels}), or, for
  * {@code SELECT * FROM <table>}, the provider's {@code columns(table)}, before the masks run ({@link Table}).
+ *
+ * <p>Phase 8 security fixes (FB): the masks are asked about a column under every name {@link Table} gives it (a
+ * derived label's other spellings, S163; the names an unnamed item references, S160) and the first answer that alters
+ * the value is kept; while a mask is registered, the non-null cells of a column no name can be given (a list the
+ * statement does not let the agent read, or one the result is wider than, S160, S164) are withheld as
+ * {@code SecretKeys.REDACTED}. A {@code TIMEOUT} from the hand-off is the module's own expiry unless the read itself
+ * threw it (L1-F5).
  *
  * <p>Safe for concurrent calls on agent worker threads; its state (the per-source gate and the live controls) is
  * guarded by its own locks.
@@ -160,16 +168,22 @@ final class DataQuery {
         long budget = Math.max(1L, callMs - RESERVE_MS);
         Control control = new Control(startNanos + TimeUnit.MILLISECONDS.toNanos(budget), log);
         Read read = new Read(provider, source, statement, params, maxRows, budget, control,
-                SelectLabels.of(statement), SelectLabels.starTable(statement));
+                SelectLabels.of(statement), SelectLabels.references(statement), SelectLabels.starTable(statement));
         live.add(control);
         boolean outlived = false;
         try {
-            Rows rows;
+            Table.Named rows;
             try {
                 rows = lane == null ? threads.call(ThreadPolicy.WORKER, read, budget)
                         : threads.callOnLane(lane, read, budget);
             } catch (RpcException e) {
-                if (e.error().code() == ErrorCodes.TIMEOUT && !read.ended()) {
+                if (e.error().code() == ErrorCodes.TIMEOUT) {
+                    RpcException own = read.ownTimeout();
+                    if (own != null) {
+                        // The provider's own TIMEOUT passes through, whichever exception the hand-off rethrew.
+                        throw own;
+                    }
+                    // The hand-off's wait expired (an interruptible read may have ended meanwhile: L1-F5).
                     RpcException timeout = expired(source, lane, enforces, callMs, read, control, startNanos,
                             remainingMs);
                     outlived = !read.ended();
@@ -199,8 +213,7 @@ final class DataQuery {
                                  Control control, long startNanos, LongSupplier remainingMs)
             throws InterruptedException {
         control.cancel();
-        long wait = Math.max(1L, Math.min(RESERVE_MS - ANSWER_MARGIN_MS,
-                remainingMs.getAsLong() - ANSWER_MARGIN_MS));
+        long wait = answerWaitMs(remainingMs.getAsLong());
         long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(wait);
         control.startActions(threads);
         control.awaitActions(until);
@@ -220,12 +233,27 @@ final class DataQuery {
         if (control.actionsPending()) {
             data.put("cancelPending", Boolean.TRUE);
         }
+        if (control.batchNotStarted()) {
+            // L1-F4: the worker pool rejected the cancel batch (it has no queue); no action runs for this read.
+            data.put("cancelNotStarted", Boolean.TRUE);
+            log.warn("data: the cancel actions of the read of source '" + source + "' did not start: no agent worker"
+                    + " was free");
+        }
         data.put("stillRunning", Boolean.valueOf(stillRunning));
         data.put("enforcesTimeout", Boolean.valueOf(enforces));
         log.warn("data: the read of source '" + source + "' did not end within " + read.budgetMs + " ms"
                 + (stillRunning ? "; it still runs" : ""));
         return new RpcException(ErrorCodes.TIMEOUT, "data.query on source '" + source + "' timed out after " + callMs
                 + " ms", data);
+    }
+
+    /**
+     * How long the module waits, after giving up on a read, for its cancel actions and the read together (D638,
+     * L3-F2): the reserve less {@value #ANSWER_MARGIN_MS} ms, and at most what the dispatcher has left less
+     * {@value #ANSWER_MARGIN_MS} ms; at least 1 ms.
+     */
+    static long answerWaitMs(long remainingMs) {
+        return Math.max(1L, Math.min(RESERVE_MS - ANSWER_MARGIN_MS, remainingMs - ANSWER_MARGIN_MS));
     }
 
     /**
@@ -307,7 +335,7 @@ final class DataQuery {
      * conversion), else {@code open()} and the JDBC read under the read's control. Every failure but an interrupt is
      * mapped here, as before Phase 8.
      */
-    private final class Read implements Callable<Rows> {
+    private final class Read implements Callable<Table.Named> {
         final DataSourceProvider provider;
         final String source;
         final String statement;
@@ -316,16 +344,19 @@ final class DataQuery {
         final long budgetMs;
         final Control control;
         final List<String> labels;
+        final List<List<String>> references;
         final String starTable;
         private final CountDownLatch end = new CountDownLatch(1);
         private volatile boolean started;
         private volatile long startNanos;
         private volatile long endNanos;
+        /** The TIMEOUT the read itself threw (the provider's own), or null (L1-F5). */
+        private volatile RpcException ownTimeout;
         /** Run once the read has ended, when set before (guarded by end's state through this). */
         private Runnable onEnd;
 
         Read(DataSourceProvider provider, String source, String statement, List<Object> params, int maxRows,
-             long budgetMs, Control control, List<String> labels, String starTable) {
+             long budgetMs, Control control, List<String> labels, List<List<String>> references, String starTable) {
             this.provider = provider;
             this.source = source;
             this.statement = statement;
@@ -334,15 +365,21 @@ final class DataQuery {
             this.budgetMs = budgetMs;
             this.control = control;
             this.labels = labels;
+            this.references = references;
             this.starTable = starTable;
         }
 
         @Override
-        public Rows call() throws Exception {
+        public Table.Named call() throws Exception {
             startNanos = System.nanoTime();
             started = true;
             try {
                 return read();
+            } catch (RpcException e) {
+                if (e.error().code() == ErrorCodes.TIMEOUT) {
+                    ownTimeout = e;
+                }
+                throw e;
             } finally {
                 endNanos = System.nanoTime();
                 Runnable after;
@@ -356,7 +393,7 @@ final class DataQuery {
             }
         }
 
-        private Rows read() throws InterruptedException {
+        private Table.Named read() throws InterruptedException {
             try {
                 QueryResult result;
                 try {
@@ -369,12 +406,13 @@ final class DataQuery {
                 if (result != null) {
                     List<String> starColumns = starTable != null && !named(result)
                             ? columnsOf(provider, source, starTable) : null;
-                    return Table.fromQueryResult(result, maxRows, labels, starColumns, new Consumer<String>() {
-                        @Override
-                        public void accept(String line) {
-                            log.info("data: source '" + source + "': " + line);
-                        }
-                    });
+                    return Table.fromQueryResult(result, maxRows, labels, references, starColumns,
+                            new Consumer<String>() {
+                                @Override
+                                public void accept(String line) {
+                                    log.info("data: source '" + source + "': " + line);
+                                }
+                            });
                 }
                 Connection connection;
                 try {
@@ -393,8 +431,8 @@ final class DataQuery {
                     throw new RpcException(ErrorCodes.CAPABILITY_UNAVAILABLE, reason, data);
                 }
                 long seconds = Math.max(1L, control.remainingMs() / 1000L);
-                return JdbcExecutor.execute(connection, statement, params, maxRows,
-                        (int) Math.min(Integer.MAX_VALUE, seconds), log, control);
+                return Table.Named.byOwnNames(JdbcExecutor.execute(connection, statement, params, maxRows,
+                        (int) Math.min(Integer.MAX_VALUE, seconds), log, control));
             } catch (SQLException e) {
                 throw sqlFailure(provider, source, e);
             }
@@ -402,6 +440,11 @@ final class DataQuery {
 
         boolean started() {
             return started;
+        }
+
+        /** The TIMEOUT the read itself threw, or null. */
+        RpcException ownTimeout() {
+            return ownTimeout;
         }
 
         boolean ended() {
@@ -491,11 +534,20 @@ final class DataQuery {
         }
     }
 
-    /** The rows with every registered {@code MaskPolicy} applied to every cell, in registration order. */
-    private Rows mask(Rows rows, String source) {
+    /**
+     * The rows with every registered {@code MaskPolicy} applied to every cell, in registration order: each policy is
+     * asked under the column's mask names in turn and its first answer that alters the value is kept (S160, S163); a
+     * column without mask names has its non-null cells withheld as {@link SecretKeys#REDACTED} (S160, S164).
+     */
+    private Rows mask(Table.Named named, String source) {
+        Rows rows = named.rows;
         List<MaskPolicy> masks = spi.all(MaskPolicy.class);
         if (masks.isEmpty()) {
             return rows;
+        }
+        if (named.withheld > 0 && rows.rowCount() > 0) {
+            log.info("data: source '" + source + "': " + named.withheld + " column(s) could not be named from the"
+                    + " statement; their cells are withheld from the answer");
         }
         List<String> names = new ArrayList<String>(rows.columns().size());
         for (Rows.Column column : rows.columns()) {
@@ -506,9 +558,18 @@ final class DataQuery {
             List<Object> row = new ArrayList<Object>(cells);
             for (int c = 0; c < row.size(); c++) {
                 Object value = row.get(c);
+                List<String> ask = named.maskNames.get(c);
+                if (ask == null) {
+                    row.set(c, value == null ? null : SecretKeys.REDACTED);
+                    continue;
+                }
                 for (MaskPolicy mask : masks) {
                     try {
-                        value = mask.mask(source, names.get(c), value);
+                        Object out = mask.mask(source, ask.get(0), value);
+                        for (int k = 1; k < ask.size() && same(out, value); k++) {
+                            out = mask.mask(source, ask.get(k), value);
+                        }
+                        value = out;
                         if (!ValueConverter.isNormal(value)) {
                             value = ValueConverter.convert(value);
                         }
@@ -523,6 +584,11 @@ final class DataQuery {
             masked.add(row);
         }
         return Rows.of(rows.columns(), masked, rows.truncated());
+    }
+
+    /** True when a policy left the value as it was (the same object, or an equal one). */
+    private static boolean same(Object out, Object value) {
+        return out == value || out != null && out.equals(value);
     }
 
     private DataSourceProvider find(String source) {

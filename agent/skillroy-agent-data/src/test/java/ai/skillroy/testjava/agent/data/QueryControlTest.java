@@ -33,8 +33,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 
 import static ai.skillroy.testjava.agent.data.FakeAgentContext.args;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -180,17 +182,34 @@ class QueryControlTest {
         provider.release.countDown();
     }
 
+    /** The reserve arithmetic of D638, without a clock (review fix L3-F2). */
+    @Test
+    void theAnswerWaitsTheReserveLessFiftyAndNeverPastTheDispatchersTime() {
+        assertEquals(200L, DataQuery.answerWaitMs(700));
+        assertEquals(200L, DataQuery.answerWaitMs(100000));
+        assertEquals(150L, DataQuery.answerWaitMs(200));
+        assertEquals(1L, DataQuery.answerWaitMs(30));
+        assertEquals(1L, DataQuery.answerWaitMs(0));
+    }
+
     @Test
     void aBlockingActionIsAbandonedOnItsOwnTaskWhileTheAnswerArrivesInsideTheReserve() throws Exception {
         ctx.remainingMs = 700;
         final CountDownLatch actionRelease = latch();
         final BlockingProvider provider = new BlockingProvider("slowCancel", null);
-        provider.action = new BlockingAction(actionRelease);
+        BlockingAction action = new BlockingAction(actionRelease);
+        provider.action = action;
         ctx.spi.register(DataSourceProvider.class, provider);
         long start = System.nanoTime();
         RpcException e = fails("slowCancel");
-        long tookMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-        assertTrue(tookMs < 700L - DataQuery.ANSWER_MARGIN_MS + 30, "inside the reserve: " + tookMs);
+        long answeredAt = System.nanoTime();
+        // Review fix L3-F2: the answer is not held by the action (it would wait the action's 2,000 ms) ...
+        long tookMs = TimeUnit.NANOSECONDS.toMillis(answeredAt - start);
+        assertTrue(tookMs < 700L + 300L, "not held by the blocking action: " + tookMs);
+        // ... and arrives inside the reserve, measured from the expiry (the action's start), so that the hand-off's
+        // own overshoot is not part of the measurement; the arithmetic itself is the test above.
+        long fromExpiryMs = TimeUnit.NANOSECONDS.toMillis(answeredAt - action.startedAt);
+        assertTrue(fromExpiryMs < DataQuery.RESERVE_MS, "inside the reserve: " + fromExpiryMs);
         Map<String, Object> data = e.error().data();
         assertEquals(Boolean.TRUE, data.get("cancelPending"), data.toString());
         assertEquals(Boolean.FALSE, data.get("cancelled"));
@@ -206,6 +225,199 @@ class QueryControlTest {
         assertTrue(ctx.log.all().contains("data: the cancel action " + BlockingAction.class.getName()
                 + " still ran after 2000 ms; abandoned"), ctx.log.all());
         actionRelease.countDown();
+        provider.release.countDown();
+    }
+
+    /**
+     * Security fix S159 (L3-F1): a 300 ms statement cancel first, then the application's abort; the read ends on its
+     * own just after its time ran out and closes both handles. The abort never starts after its handle was closed
+     * (before the fix it ran about 250 ms after the provider had closed it).
+     */
+    @Test
+    void anActionWhoseHandleWasClosedNeverStartsAfterwards() throws Exception {
+        ctx.remainingMs = 700;
+        final AtomicInteger aborts = new AtomicInteger();
+        final AtomicInteger abortsAfterClose = new AtomicInteger();
+        final AtomicBoolean closedAll = new AtomicBoolean();
+        final CountDownLatch cancelEnded = latch();
+        ctx.spi.register(DataSourceProvider.class, new Provider("closes") {
+            @Override
+            public QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs,
+                                     QueryControl control) throws Exception {
+                AutoCloseable cancel = control.onCancel(() -> {
+                    sleepIgnoringInterrupts(300);
+                    cancelEnded.countDown();
+                });
+                AutoCloseable abort = control.onCancel(() -> {
+                    aborts.incrementAndGet();
+                    if (closedAll.get()) {
+                        abortsAfterClose.incrementAndGet();
+                    }
+                });
+                try {
+                    awaitIgnoringInterrupts(control);
+                    sleepIgnoringInterrupts(50);
+                    return new QueryResult(null, null, ONE_ROW, false);
+                } finally {
+                    cancel.close();
+                    abort.close();
+                    closedAll.set(true);
+                }
+            }
+        });
+        RpcException e = fails("closes");
+        assertEquals(ErrorCodes.TIMEOUT, e.error().code());
+        assertTrue(cancelEnded.await(10, TimeUnit.SECONDS), "the statement cancel ran");
+        Thread.sleep(300);
+        assertEquals(0, abortsAfterClose.get(), "the abort never started after its handle was closed");
+        assertTrue(aborts.get() <= 1);
+        assertTrue(closedAll.get());
+    }
+
+    /**
+     * S159 with the integration guide's own pattern (the security L3 sceptic's probe): one action, a read that polls
+     * {@code cancelled()} and closes its handle once it stops. Its abort never runs after that close.
+     */
+    @Test
+    void aCooperativeReadsAbortNeverRunsAfterItClosedItsHandle() throws Exception {
+        ctx.remainingMs = 300;
+        final AtomicInteger runs = new AtomicInteger();
+        final AtomicInteger afterClose = new AtomicInteger();
+        ctx.spi.register(DataSourceProvider.class, new Provider("coop") {
+            @Override
+            public QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs,
+                                     QueryControl control) throws Exception {
+                final AtomicBoolean closed = new AtomicBoolean();
+                AutoCloseable abort = control.onCancel(() -> {
+                    runs.incrementAndGet();
+                    if (closed.get()) {
+                        afterClose.incrementAndGet();
+                    }
+                });
+                try {
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                    while (!control.cancelled() && System.nanoTime() < deadline) {
+                        LockSupport.parkNanos(200000L);
+                    }
+                    return new QueryResult(null, null, ONE_ROW, false);
+                } finally {
+                    abort.close();
+                    closed.set(true);
+                }
+            }
+        });
+        int timeouts = 0;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+        while (timeouts < 40 && System.nanoTime() < deadline) {
+            RpcException e = fails("coop");
+            if (e.error().code() == ErrorCodes.BUSY) {
+                Thread.sleep(5);
+                continue;
+            }
+            assertEquals(ErrorCodes.TIMEOUT, e.error().code(), e.error().toString());
+            timeouts++;
+        }
+        assertEquals(40, timeouts);
+        Thread.sleep(200);
+        assertEquals(0, afterClose.get(), runs.get() + " aborts ran");
+    }
+
+    /** S159, the sceptic's condition 1: an action that closes its own handle does not wait for itself. */
+    @Test
+    void anActionMayCloseItsOwnHandle() throws Exception {
+        ctx.remainingMs = 600;
+        final AtomicReference<AutoCloseable> handle = new AtomicReference<AutoCloseable>();
+        final AtomicReference<Long> closeTookMs = new AtomicReference<Long>();
+        ctx.spi.register(DataSourceProvider.class, new Provider("self") {
+            @Override
+            public QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs,
+                                     QueryControl control) throws Exception {
+                handle.set(control.onCancel(() -> {
+                    long start = System.nanoTime();
+                    try {
+                        handle.get().close();
+                    } catch (Exception ignored) {
+                        // not expected
+                    }
+                    closeTookMs.set(Long.valueOf(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)));
+                }));
+                awaitIgnoringInterrupts(control);
+                return new QueryResult(null, null, ONE_ROW, false);
+            }
+        });
+        RpcException e = fails("self");
+        assertEquals(Boolean.TRUE, e.error().data().get("cancelled"), e.error().toString());
+        assertTrue(closeTookMs.get() != null && closeTookMs.get().longValue() < 1000L,
+                String.valueOf(closeTookMs.get()));
+    }
+
+    /**
+     * Review fix L1-F5: a read that ends on the broker's interrupt before the module sees the hand-off's TIMEOUT still
+     * gets the module's own TIMEOUT (its data, the read ended), never the dispatcher's.
+     */
+    @Test
+    void aReadThatEndsOnTheInterruptStillGetsTheModulesOwnTimeout() throws Exception {
+        ctx.broker.awaitTaskOnTimeout = true;
+        ctx.remainingMs = 600;
+        ctx.spi.register(DataSourceProvider.class, new Provider("interruptible") {
+            @Override
+            public QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs,
+                                     QueryControl control) throws Exception {
+                Thread.sleep(30000);
+                return new QueryResult(null, null, ONE_ROW, false);
+            }
+        });
+        RpcException e = fails("interruptible");
+        assertEquals(ErrorCodes.TIMEOUT, e.error().code());
+        assertEquals("data.query on source 'interruptible' timed out after 600 ms", e.getMessage());
+        Map<String, Object> data = e.error().data();
+        assertTrue(data != null, "the module's data");
+        assertEquals(Arrays.asList("primitive", "timeoutMs", "source", "lane", "waitedMs", "cancelled",
+                "stillRunning", "enforcesTimeout"), new ArrayList<String>(data.keySet()));
+        assertEquals(Boolean.FALSE, data.get("stillRunning"), "the read ended on the interrupt");
+        assertEquals("[[\"x\"]]", Json.write(((Map<?, ?>) query("other")).get("rows")));
+    }
+
+    /** L1-F5: a TIMEOUT the provider throws itself passes through as it was. */
+    @Test
+    void aProvidersOwnTimeoutPassesThrough() throws Exception {
+        ctx.remainingMs = 5000;
+        final RpcException own = new RpcException(ErrorCodes.TIMEOUT, "the report server timed out",
+                Collections.<String, Object>singletonMap("server", "reports"));
+        ctx.spi.register(DataSourceProvider.class, new Provider("ownTimeout") {
+            @Override
+            public QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs,
+                                     QueryControl control) {
+                throw own;
+            }
+        });
+        RpcException e = fails("ownTimeout");
+        assertEquals("the report server timed out", e.getMessage());
+        assertEquals(Collections.singletonMap("server", "reports"), e.error().data());
+    }
+
+    /**
+     * Review fix L1-F4: a cancel batch the worker pool rejects (the core's broker logs and drops it) is reported as
+     * not started, never as pending.
+     */
+    @Test
+    void aCancelBatchThePoolRejectsIsReportedAsNotStarted() throws Exception {
+        ctx.broker.dropPosts = true;
+        ctx.remainingMs = 600;
+        final AtomicInteger runs = new AtomicInteger();
+        BlockingProvider provider = new BlockingProvider("rejected", null);
+        provider.action = runs::incrementAndGet;
+        ctx.spi.register(DataSourceProvider.class, provider);
+        RpcException e = fails("rejected");
+        Map<String, Object> data = e.error().data();
+        assertEquals(Arrays.asList("primitive", "timeoutMs", "source", "lane", "waitedMs", "cancelled",
+                "cancelNotStarted", "stillRunning", "enforcesTimeout"), new ArrayList<String>(data.keySet()));
+        assertEquals(Boolean.FALSE, data.get("cancelled"));
+        assertEquals(Boolean.TRUE, data.get("cancelNotStarted"));
+        assertEquals(Boolean.TRUE, data.get("stillRunning"));
+        assertTrue(ctx.log.all().contains("data: the cancel actions of the read of source 'rejected' did not start:"
+                + " no agent worker was free"), ctx.log.all());
+        assertEquals(0, runs.get());
         provider.release.countDown();
     }
 
@@ -336,6 +548,15 @@ class QueryControlTest {
         assertTrue(outcome.get() instanceof Map, String.valueOf(outcome.get()));
     }
 
+    /** Sleeps about {@code ms}, ignoring interrupts (like host code that does not stop on one). */
+    static void sleepIgnoringInterrupts(long ms) {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ms);
+        long left;
+        while ((left = deadline - System.nanoTime()) > 0) {
+            LockSupport.parkNanos(left);
+        }
+    }
+
     /** Waits until the control is cancelled, ignoring interrupts, at most 10 s. */
     static void awaitIgnoringInterrupts(QueryControl control) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
@@ -443,6 +664,8 @@ class QueryControlTest {
     /** A cancel action that blocks until released, ignoring interrupts. */
     static final class BlockingAction implements Runnable {
         private final CountDownLatch release;
+        /** {@code System.nanoTime()} when the action started (the module's expiry, give or take a hand-off). */
+        volatile long startedAt;
 
         BlockingAction(CountDownLatch release) {
             this.release = release;
@@ -450,6 +673,7 @@ class QueryControlTest {
 
         @Override
         public void run() {
+            startedAt = System.nanoTime();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
             while (System.nanoTime() < deadline) {
                 try {

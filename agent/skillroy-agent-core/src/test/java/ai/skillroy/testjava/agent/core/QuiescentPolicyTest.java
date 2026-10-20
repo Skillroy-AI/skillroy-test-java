@@ -271,6 +271,69 @@ class QuiescentPolicyTest {
         assertFalse(TestState.engineInterrupted);
     }
 
+    /**
+     * Review fix L2-F3 (as the sceptic narrowed it): a module's own quiescent task ({@code callQuiescent}, and
+     * {@code call(APP_QUIESCENT, …)}) that runs past twice its budget penalises that module, keyed
+     * {@code module:<id>}, until reprobe; another module is not penalised, and the overrun is logged once per module.
+     */
+    @Test
+    void aModulesOwnQuiescentTaskThatOverranTwiceItsBudgetPenalisesThatModuleOnly() throws Exception {
+        startWithPoint();
+        CoreContext core = (CoreContext) agent.runtime.context();
+        ThreadBrokerHolder a = new ThreadBrokerHolder(new ModuleContext(core, "test.a"));
+        ThreadBrokerHolder b = new ThreadBrokerHolder(new ModuleContext(core, "test.b"));
+        assertEquals(ENGINE, a.threads.callQuiescent(sleeping(40), 10, 5000), "runs, then is penalised");
+        assertEquals(Collections.<Object>singletonList("module:test.a"), quiescentInfo().get("penalised"));
+        RpcException refused = expectRpc(() -> a.threads.callQuiescent(threadName(), 10, 5000));
+        assertEquals(ErrorCodes.CAPABILITY_UNAVAILABLE, refused.error().code());
+        assertEquals("module test.a: quiescent task overran its budget", refused.getMessage());
+        assertEquals(Arrays.asList("reason", "module", "budgetMs", "ranMs"),
+                new java.util.ArrayList<String>(refused.error().data().keySet()));
+        assertEquals("quiescent task overran its budget", refused.error().data().get("reason"));
+        assertEquals("test.a", refused.error().data().get("module"));
+        assertEquals(10L, refused.error().data().get("budgetMs"));
+        assertTrue(((Number) refused.error().data().get("ranMs")).longValue() > 20L, refused.error().toString());
+        RpcException viaCall = expectRpc(() -> a.threads.call(ThreadPolicy.APP_QUIESCENT, threadName(), 5000));
+        assertEquals(ErrorCodes.CAPABILITY_UNAVAILABLE, viaCall.error().code(), "call(APP_QUIESCENT) too");
+        assertEquals(ENGINE, b.threads.callQuiescent(threadName(), 10, 5000), "another module is not penalised");
+        assertEquals(ENGINE, agent.runtime.context().threads().callQuiescent(threadName(), 10, 5000),
+                "the core's own call carries no penalty");
+        // call(APP_QUIESCENT, …) is the default budget of 50 ms, keyed by the module as well.
+        assertEquals(ENGINE, b.threads.call(ThreadPolicy.APP_QUIESCENT, sleeping(120), 5000));
+        assertEquals(Arrays.<Object>asList("module:test.a", "module:test.b"), quiescentInfo().get("penalised"));
+        agent.value("agent.capabilities", map("reprobe", Boolean.TRUE));
+        assertEquals(Collections.emptyList(), quiescentInfo().get("penalised"));
+        assertEquals(ENGINE, a.threads.callQuiescent(threadName(), 10, 5000));
+        long logged = 0;
+        for (String line : agent.runtime.context().log().tail(500)) {
+            if (line.contains("a quiescent task of module test.a held the application's thread")) {
+                logged++;
+            }
+        }
+        assertEquals(1, logged, "logged once per module");
+        assertFalse(TestState.engineInterrupted);
+    }
+
+    /** A module context's broker (the scoped view a module's install receives). */
+    private static final class ThreadBrokerHolder {
+        final ai.skillroy.testjava.agent.api.ThreadBroker threads;
+
+        ThreadBrokerHolder(ModuleContext context) {
+            this.threads = context.threads();
+        }
+    }
+
+    private static Callable<String> sleeping(final long ms) {
+        return () -> {
+            long deadline = System.nanoTime() + ms * 1000000L;
+            long left;
+            while ((left = deadline - System.nanoTime()) > 0) {
+                java.util.concurrent.locks.LockSupport.parkNanos(left);
+            }
+            return Thread.currentThread().getName();
+        };
+    }
+
     @Test
     void closeWithdrawsQueuedTasksAndClosesThePointBeforeTheModulesUninstall() throws Exception {
         startWithPoint();

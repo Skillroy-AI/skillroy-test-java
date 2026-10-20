@@ -39,8 +39,11 @@ public final class QueryResult {
      * @param columnNames may be null (or hold null or empty entries) when the source cannot name its columns:
      *     {@code data.query} then names column <i>i</i> with the label the statement's top-level select list gives it
      *     (the alias, or a bare column's name), else, for {@code SELECT * FROM <table>}, with the provider's
-     *     {@link DataSourceProvider#columns(String)}, else {@code c<i>}; the provider's own names always win, and the
-     *     result's width counts the names, the types and every returned row (phase8-contracts.md 4.4)
+     *     {@link DataSourceProvider#columns(String)}, else {@code c<i>}; the provider's own names always win. Such a
+     *     list is used when no name list, type list or returned row is wider than it, and then sets the result's
+     *     width (shorter rows are padded at the end); otherwise the width is the widest of those, and while a
+     *     {@link MaskPolicy} is registered the cells of a column no name can be given are withheld
+     *     (phase8-contracts.md 4.4; Phase 8 security fixes S160, S164)
      * @param columnTypes type names of the columns, may be null
      * @param rows hold JSON-able values or java.sql/java.math/java.util.Date values; null cells are allowed, null
      *     rows are not; null means no rows

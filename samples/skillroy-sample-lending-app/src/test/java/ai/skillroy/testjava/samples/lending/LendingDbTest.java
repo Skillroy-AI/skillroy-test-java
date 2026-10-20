@@ -280,6 +280,14 @@ class LendingDbTest {
             assertEquals(null, db.columnsOf("no_such_table"));
             assertEquals(null, db.columnsOf("OTHER.staff"));
             assertEquals(null, db.columnsOf(" "));
+            // Phase 8 security fix S162: a quoted part (as SelectLabels.starTable spells it) is compared exactly.
+            assertEquals(db.columnsOf("staff"), db.columnsOf("\"STAFF\""));
+            assertEquals(db.columnsOf("staff"), db.columnsOf("\"PUBLIC\".\"STAFF\""));
+            assertEquals(db.columnsOf("staff"), db.columnsOf("public.\"STAFF\""));
+            assertEquals(null, db.columnsOf("\"staff\""), "a quoted lower-case name is another table");
+            assertEquals(null, db.columnsOf("PUBLIC.\"Staff\""));
+            assertEquals(null, db.columnsOf("\"\""));
+            assertEquals(null, db.columnsOf("a.b.c.d"));
         }
     }
 

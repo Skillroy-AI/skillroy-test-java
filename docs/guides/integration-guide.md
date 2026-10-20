@@ -580,7 +580,9 @@ provider creates one `QuiescentPoint(allowanceMs, capacity)`, returns it from `q
 closes it too on `agent.disable` and close, before any module's `uninstall`. A task runs exactly once or never: at the
 FIFO head, only when its budget fits both what the application says is free and what its caller has left; it is never
 interrupted, an overrun is counted, and a primitive whose task ran past twice its budget answers
-`CAPABILITY_UNAVAILABLE` until `agent.capabilities {reprobe: true}`. The thread rules for a quiescent task: it runs on
+`CAPABILITY_UNAVAILABLE` until `agent.capabilities {reprobe: true}`; so does a module's own `callQuiescent` (or
+`call(APP_QUIESCENT, …)`) after such an overrun, for that module only (fix wave, L2-F3). The thread rules for a
+quiescent task: it runs on
 the application's thread (not the EDT), touches no AWT, does not block, takes no application lock the idle point does
 not already hold, and never waits for agent work (`ThreadBroker.call*` and `QuiescentPoint.await` are refused
 `FORBIDDEN_THREAD`; `EventBus.await` is forbidden and not checked); `AgentLog` and `EventBus.publish` are fine; its
@@ -735,7 +737,10 @@ select on one session (gap 13).
 (`lane()`) or a nested worker task and waits the call's remaining time less 250 ms. Override the five-argument
 `query(sql, params, maxRows, timeoutMs, QueryControl control)` to be stoppable: register the means with
 `control.onCancel(action)` (a statement's `cancel`, the application's own abort; at most 4, run once, off the
-dispatching worker, 2 s each), read `control.remainingMs()` and `control.cancelled()`. The JDBC form is cancelled by
+dispatching worker, 2 s each), read `control.remainingMs()` and `control.cancelled()`. Close the handle when the read
+ends: an action never starts once `close()` has returned (S159), but it can run between the end of the read and that
+close, so gate an application-level abort on the read's own state, as the sample's `ReadHandle` does. The JDBC form is
+cancelled by
 the agent itself while its statement is open. `enforcesTimeout()` says the read ends within its `timeoutMs` + 1 s
 whatever the source does. On expiry the module answers `TIMEOUT {source, lane, waitedMs, cancelled, cancelPending?,
 stillRunning, enforcesTimeout}`; without a lane a read that outlives its call makes the next read of that source
@@ -788,6 +793,16 @@ model as rendered. An application's own Paste control is an ordinary click: mask
 sees the label the statement gives: a caller who renames a column (`password AS p`) defeats it on a JDBC source, and
 on a positional source too now that its columns take the statement's labels, no weaker. Cover every source id the
 module registers (the sample's `PasswordMask` covers `lending` and `lending-report`).
+
+**(Phase 8 security fixes S160, S163, FB.)** Compare column names without regard to case: a driver reports a label as
+its database folds it, a positional source keeps the statement's spelling (and `columns(table)` the provider's); the
+agent also asks a policy under a derived label's upper- and lower-case forms. On a positional source a column the
+select list leaves unnamed is asked under the names its item reads (`(password)`, `LOWER(password)`, `password COLLATE
+x`), and while any policy is registered the cells of a column no name can be given are withheld as `<redacted>`: a
+`t.*` item, a `*` over a join, a sub-query, `WITH` or a set operation, a list the result is wider than, or a
+`columns(table)` answer of another width. Name such columns in the statement (or have the provider name them) when a
+caller needs their values. A provider's `columns(table)` receives a quoted part in double quotes: fold an unquoted part
+as the database does, compare a quoted one exactly (S162).
 
 ### 6.12 Capabilities and probes
 

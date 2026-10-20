@@ -138,18 +138,19 @@ class QuiescentPointTest {
     void withdrawsAHeadWhoseCallerHasLessTimeLeftThanItsBudget() throws Exception {
         QuiescentPoint point = new QuiescentPoint(1000, 4);
         final AtomicInteger runs = new AtomicInteger();
-        Future<Integer> late = submitAwait(point, () -> Integer.valueOf(runs.incrementAndGet()), 600, 1000);
+        // Review fix L3-F4 (the sceptic's form): a budget equal to the call's whole time, so that any time spent
+        // leaves too little, and no sleep; the caller's own expiry is then a full second away from the point.
+        Future<Integer> late = submitAwait(point, () -> Integer.valueOf(runs.incrementAndGet()), 1000, 1000);
         awaitQueued(point, 1);
         Future<Integer> next = submitAwait(point, () -> Integer.valueOf(runs.incrementAndGet()), 1, 30000);
         awaitQueued(point, 2);
-        Thread.sleep(500);
-        assertFalse(runOne(point, Long.MAX_VALUE), "about 500 ms left of the call, a 600 ms budget");
+        assertFalse(runOne(point, Long.MAX_VALUE), "less than 1000 ms left of the call, a 1000 ms budget");
         RpcException e = rpcFailure(late);
         assertEquals(ErrorCodes.NOT_READY, e.error().code());
         assertEquals("too little of the call's time left for its budget", e.error().data().get("reason"));
-        assertEquals(600L, e.error().data().get("budgetMs"));
+        assertEquals(1000L, e.error().data().get("budgetMs"));
         long remaining = ((Long) e.error().data().get("remainingMs")).longValue();
-        assertTrue(remaining >= 0 && remaining < 600, "remainingMs " + remaining);
+        assertTrue(remaining >= 0 && remaining < 1000, "remainingMs " + remaining);
         assertEquals(0, runs.get(), "withdrawn unrun, and nothing else ran on that call (FIFO kept)");
         assertFalse(next.isDone());
         assertTrue(runOne(point, Long.MAX_VALUE), "the next head runs at the next point");

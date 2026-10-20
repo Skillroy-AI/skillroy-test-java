@@ -468,7 +468,9 @@ final class CorePrimitives {
             try {
                 ladder = adapter.rungs(action);
             } catch (Throwable t) {
-                ctx.log.warn("DeviceAdapter " + adapter.getClass().getName() + ".rungs(" + action + ") failed", t);
+                // The exception's class only (L8-F6): its message may quote the application's text.
+                ctx.log.warn("DeviceAdapter " + adapter.getClass().getName() + ".rungs(" + action + ") failed: "
+                        + t.getClass().getName());
                 continue;
             }
             if (ladder == null || ladder.isEmpty()) {

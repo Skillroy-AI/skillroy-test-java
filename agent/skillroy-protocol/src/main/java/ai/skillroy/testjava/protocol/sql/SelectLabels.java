@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -54,6 +55,13 @@ import java.util.Set;
  * <p>A label from the text can be wrong exactly as a JDBC driver's label can be chosen by the statement: a caller who
  * writes {@code password AS p} renames the column for a name-keyed {@code MaskPolicy} over either form (stated in the
  * integration guide, 6.11). Never logs; the statement text never leaves this class.
+ *
+ * <p>{@link #references} (Phase 8 security fix, S160, FB) gives, for the same items, the names an item references, so
+ * that the agent can ask the masks about a column the list leaves unnamed ({@code (password)},
+ * {@code password COLLATE x}, {@code LOWER(password)}) under the names it reads; an item that reads columns it does not
+ * name (a {@code SELECT *} inside it) has no answer and its cells are withheld. {@link #starTable} keeps the quoting of
+ * a quoted part (Phase 8 security fix, S162, FB), so that a provider can fold an unquoted name as its database does and
+ * compare a quoted one exactly.
  *
  * <p>Stateless; safe from any thread; never throws; linear in the text with a bounded depth. Java 8, JDK only.
  */
@@ -145,7 +153,10 @@ public final class SelectLabels {
 
     /**
      * For SELECT * FROM &lt;table&gt; [[AS] alias] [WHERE …] [ORDER BY …] [FETCH/LIMIT …] (one table, no join, no set
-     * operation): the table as written, quotes removed, a schema part kept; else null.
+     * operation): the table as written, a schema part kept, each part as the statement spells it: an unquoted part as
+     * written, a quoted part ({@code "x"}, {@code `x`}, {@code [x]}) in double quotes with an inner {@code "} doubled
+     * (Phase 8 security fix, S162, FB: {@code "staff"} and {@code staff} are two names on a database that folds
+     * unquoted names); else null. A quoted part holding a {@code .} gives null, so the parts split at every {@code .}.
      *
      * @return the table, its parts joined with {@code .} (at most three), or null; null also for a statement the
      *     guard rejects and for null
@@ -158,34 +169,38 @@ public final class SelectLabels {
         }
     }
 
+    /**
+     * One entry per top-level select item, split as {@link #of} splits the list (Phase 8 security fix, S160, FB): the
+     * names the item references, in the order they first appear, each the last part of a possibly qualified name (a
+     * quoted identifier without its quotes, or a word that is not a reserved word or a number); a name before
+     * {@code .} (a qualifier) or before {@code (} (a function) is left out. An item read differently by two dialect
+     * readings gets the names of both. A null entry: the item reads columns it does not name (a {@code SELECT *} or
+     * {@code t.*} inside it, such as a scalar sub-query), or holds a name no reading can spell; the caller cannot tell
+     * which columns its value comes from.
+     *
+     * @return an unmodifiable list of unmodifiable lists (an entry may be null), or null exactly when {@link #of} is
+     *     null
+     */
+    public static List<List<String>> references(String sql) {
+        try {
+            return referencesOf(sql);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     private static List<String> labels(String sql) {
-        if (!accepted(sql)) {
+        List<Split> counted = splits(sql);
+        if (counted == null || counted.isEmpty()) {
             return null;
         }
-        List<Object[]> counted = new ArrayList<Object[]>();
-        for (SqlTokens.Dialect d : SqlTokens.DIALECTS) {
-            Object[] entries = listOf(new Reading(sql, d));
-            if (entries == null) {
-                return null;
-            }
-            if (entries == EXCLUDED) {
-                continue;
-            }
-            if (!counted.isEmpty() && counted.get(0).length != entries.length) {
-                return null;
-            }
-            counted.add(entries);
-        }
-        if (counted.isEmpty()) {
-            return null;
-        }
-        int size = counted.get(0).length;
+        int size = counted.get(0).entries.length;
         List<String> labels = new ArrayList<String>(size);
         for (int k = 0; k < size; k++) {
             Object agreed = UNKNOWN;
             boolean conflict = false;
-            for (Object[] entries : counted) {
-                Object entry = entries[k];
+            for (Split split : counted) {
+                Object entry = split.entries[k];
                 if (entry == UNKNOWN) {
                     continue;
                 }
@@ -198,6 +213,88 @@ public final class SelectLabels {
             labels.add(conflict || agreed == UNKNOWN ? null : (String) agreed);
         }
         return Collections.unmodifiableList(labels);
+    }
+
+    private static List<List<String>> referencesOf(String sql) {
+        List<Split> counted = splits(sql);
+        if (counted == null || counted.isEmpty()) {
+            return null;
+        }
+        int size = counted.get(0).entries.length;
+        List<List<String>> references = new ArrayList<List<String>>(size);
+        for (int k = 0; k < size; k++) {
+            Set<String> names = new LinkedHashSet<String>();
+            boolean unknown = false;
+            for (Split split : counted) {
+                int[] item = split.items.get(k);
+                Set<String> read = namesOf(split.reading, item[0], item[1]);
+                if (read == null) {
+                    unknown = true;
+                    break;
+                }
+                names.addAll(read);
+            }
+            references.add(unknown ? null : Collections.unmodifiableList(new ArrayList<String>(names)));
+        }
+        return Collections.unmodifiableList(references);
+    }
+
+    /**
+     * The readings that count, each with its items and their entries; null when the list cannot be read (a reading
+     * gives up, or two readings split it differently); empty when no reading counts.
+     */
+    private static List<Split> splits(String sql) {
+        if (!accepted(sql)) {
+            return null;
+        }
+        List<Split> counted = new ArrayList<Split>();
+        for (SqlTokens.Dialect d : SqlTokens.DIALECTS) {
+            Reading reading = new Reading(sql, d);
+            Object items = itemsOf(reading);
+            if (items == null) {
+                return null;
+            }
+            if (items == EXCLUDED) {
+                continue;
+            }
+            Split split = new Split(reading, castItems(items));
+            if (split.entries == null) {
+                return null;
+            }
+            if (!counted.isEmpty() && counted.get(0).entries.length != split.entries.length) {
+                return null;
+            }
+            counted.add(split);
+        }
+        return counted;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<int[]> castItems(Object items) {
+        return (List<int[]>) items;
+    }
+
+    /**
+     * The names the item of tokens [from, to) references, or null when it reads columns it does not name (a select
+     * star inside it) or holds a name this reading cannot spell.
+     */
+    private static Set<String> namesOf(Reading r, int from, int to) {
+        Set<String> names = new LinkedHashSet<String>();
+        for (int k = from; k < to; k++) {
+            if (r.isOther(k, '*') && (r.isOther(k - 1, '.') || r.isWord(k - 1, "SELECT")
+                    || r.isWord(k - 1, "DISTINCT") || r.isWord(k - 1, "ALL") || r.isWord(k + 1, "FROM"))) {
+                return null;
+            }
+            if (!r.isName(k, false) || k + 1 < to && (r.isOther(k + 1, '.') || r.isOther(k + 1, '('))) {
+                continue;
+            }
+            String name = r.label(k);
+            if (name == null) {
+                return null;
+            }
+            names.add(name);
+        }
+        return names;
     }
 
     private static String star(String sql) {
@@ -234,8 +331,11 @@ public final class SelectLabels {
         }
     }
 
-    /** The entries of one reading (String, null or UNKNOWN), null when the list cannot be read, or EXCLUDED. */
-    private static Object[] listOf(Reading r) {
+    /**
+     * The top-level items of one reading as token ranges [from, to): a {@code List<int[]>}, null when the list cannot
+     * be read, or EXCLUDED.
+     */
+    private static Object itemsOf(Reading r) {
         if (r.broken) {
             return EXCLUDED;
         }
@@ -322,6 +422,11 @@ public final class SelectLabels {
         if (nesting.depth != 0) {
             return EXCLUDED;
         }
+        return items;
+    }
+
+    /** The entries of one reading's items (String, null or UNKNOWN), or null when an item gives the list up. */
+    private static Object[] entriesOf(Reading r, List<int[]> items) {
         Object[] entries = new Object[items.size()];
         for (int k = 0; k < entries.length; k++) {
             Object entry = entry(r, items.get(k)[0], items.get(k)[1]);
@@ -331,6 +436,19 @@ public final class SelectLabels {
             entries[k] = entry;
         }
         return entries;
+    }
+
+    /** One reading that counts: its items and their entries (null when an item gives the list up). */
+    private static final class Split {
+        final Reading reading;
+        final List<int[]> items;
+        final Object[] entries;
+
+        Split(Reading reading, List<int[]> items) {
+            this.reading = reading;
+            this.items = items;
+            this.entries = entriesOf(reading, items);
+        }
     }
 
     /** {@code IS [NOT] DISTINCT FROM} and {@code WITHIN GROUP} are inside an expression, not the list's end. */
@@ -413,7 +531,7 @@ public final class SelectLabels {
             if (part == null || part.indexOf('.') >= 0 || parts.size() == 3) {
                 return null;
             }
-            parts.add(part);
+            parts.add(r.kind[i] == SqlTokens.IDENTIFIER ? '"' + part.replace("\"", "\"\"") + '"' : part);
             if (r.isOther(i + 1, '.')) {
                 i += 2;
             } else {

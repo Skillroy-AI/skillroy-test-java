@@ -45,7 +45,11 @@ public interface QueryControl {
      * abort): on an agent thread of its own (a nested worker task), never the dispatching worker, an application
      * thread or the EDT, bounded (2 s, then abandoned there and logged by class name). Registered after cancellation:
      * run at once on the registering thread. At most 4 per read (IllegalStateException beyond). Closing the handle
-     * unregisters the action.
+     * unregisters the action: once {@code close()} returns, the action will not start; an action already running when
+     * {@code close()} is called is waited for until it ends, at most until its 2 s run out (never on the thread
+     * running it, so an action may close its own handle). The action can still run between the end of the read and
+     * the close of its handle, so an application-level abort checks the read's own state, as a statement handle that
+     * cancels only while its statement is open does (Phase 8 security fix, S159, FB).
      *
      * @throws IllegalStateException for a fifth action
      */
