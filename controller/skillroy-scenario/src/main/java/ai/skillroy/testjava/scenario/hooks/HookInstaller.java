@@ -71,10 +71,13 @@ import java.util.Objects;
  * <p>Phase 8 (phase8-contracts.md 6.9): a catalogue with a non-empty {@code deny} is something to install even without
  * an enabled entry (a zero-spec {@code hook.install} delivers it); the install answer's {@code catalogue.deny}, and on
  * the {@code alreadyInstalled} path step 0's {@code hook.health.deny.catalogue}, must hold every pack pattern, else
- * ERROR / ENVIRONMENT "upgrade the agent" (the echo rule, D565); an {@code INVALID_PARAMS} on a spec while the catalogue
- * uses {@code target.codeSource} carries the upgrade hint (D560); a skip of a pack whose catalogue has a deny records
- * {@code denyNotDelivered: {patterns, agentOption}}, {@code agentOption} read from {@code rule.list.deny.option} when a
- * {@code rule.*} capability exists (D566); the record gains {@code deny} and {@code deniedNow}.
+ * ERROR / ENVIRONMENT "upgrade the agent" (the echo rule, D565); before an install, step 0's {@code hook.health} must
+ * carry its top-level {@code deny} when the catalogue has one, so that an agent that would ignore the deny is refused
+ * before it retransforms anything (fix wave of the Phase 8 review, L2-F4); an {@code INVALID_PARAMS} on a spec while
+ * the catalogue uses {@code target.codeSource} carries the upgrade hint (D560); a skip of a pack whose catalogue has a
+ * deny records {@code denyNotDelivered: {patterns, agentOption}}, {@code agentOption} read from
+ * {@code rule.list.deny.option} when a {@code rule.*} capability exists (D566); the record gains {@code deny} and
+ * {@code deniedNow}.
  *
  * <p>Hooks stay installed after the run: the next run of the same pack finds them ({@code alreadyInstalled}); they go
  * with {@code skillroy hooks remove}, a detach or the target's exit. The caller re-reads the matrix when
@@ -233,6 +236,15 @@ public final class HookInstaller {
                         + " target; `skillroy hooks remove` first", detail);
             }
             replace = true;
+        }
+        if (!catalogue.deny().isEmpty() && !(health.get("deny") instanceof Map<?, ?>)) {
+            // Fix wave (Phase 8 review, FD, L2-F4): step 0's hook.health already tells an agent that knows the deny
+            // (its top-level deny is always present, P8 6.6) from one that ignores it; refuse before hook.install,
+            // which would otherwise retransform the denied classes first. The answer's echo stays the second line.
+            Map<String, Object> early = new LinkedHashMap<>(record);
+            early.put("catalogue", catalogueRef(catalogue, true));
+            denyKeys(early, catalogue, deniedNow);
+            requireEcho(catalogue, null, early);
         }
         Map<String, Object> params = new LinkedHashMap<>();
         List<Object> specs = new ArrayList<>();

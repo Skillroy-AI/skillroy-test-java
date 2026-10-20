@@ -1393,6 +1393,13 @@ abstract class LoadModeChecks {
      * state, which a remote caller cannot arrange: the attempts are bounded, and a leg on which the engine always wins
      * the race says so in the timing log (the deterministic proofs are {@code LendingPrimitivesTest} and
      * {@code CorrelatedAckTest}).
+     *
+     * <p>Fix wave of the Phase 8 review (FD, L3-F1): each attempt is classified by what the second input did, not by
+     * the step's verdict. {@code consumed: QUEUED} means the race happened (the input passed the pre-check and the
+     * engine then dropped it), and the only correct outcome is {@code SYNC_TIMEOUT} naming its {@code inputId}: a PASS
+     * there is the defect this check exists for (a wait that is not correlated ends on the first input's late
+     * acknowledgement) and fails it. Only the pre-check's {@code INPUT_REJECTED} counts as "not observed"; any other
+     * outcome fails.
      */
     private void aQueuedInputsLateAcknowledgementNeverEndsAnotherInputsWait() throws Exception {
         Path dir = ItEnv.runDir(mode().slug, "correlated-ack-session");
@@ -1412,12 +1419,20 @@ abstract class LoadModeChecks {
                         new ai.skillroy.testjava.scenario.pack.PlannedCall("lending.input", Map.of("source", "Key.QTY",
                                 "value", "2", "ackTimeoutMs", 0L), ai.skillroy.testjava.scenario.pack.Sync.ACK, 3000),
                         person);
-                if (second.failureKind() == FailureKind.SYNC_TIMEOUT) {
+                Object result = second.lastResult() == null ? null : second.lastResult().value();
+                Object consumed = result instanceof Map<?, ?> m ? m.get("consumed") : null;
+                if ("QUEUED".equals(consumed)) {
                     observed = true;
-                    String id = String.valueOf(((Map<?, ?>) second.lastResult().value()).get("inputId"));
-                    assertEquals("QUEUED", ((Map<?, ?>) second.lastResult().value()).get("consumed"));
+                    String id = String.valueOf(((Map<?, ?>) result).get("inputId"));
+                    assertEquals(FailureKind.SYNC_TIMEOUT, second.failureKind(), "a queued, dropped input's ACK wait"
+                            + " must not pass on another input's acknowledgement: " + second.status() + " "
+                            + second.message());
                     assertTrue(second.message().contains("matching {\"inputId\":\"" + id + "\"}"), second.message());
                     assertNotEquals(id, value(first).get("inputId"));
+                } else {
+                    assertEquals("INPUT_REJECTED", second.detail().get("error"), "the second input was neither queued"
+                            + " nor refused by the pre-check: " + second.status() + " " + second.failureKind() + " "
+                            + second.message() + " consumed=" + consumed);
                 }
                 Map<String, Object> state = value(client().call("lending.state", Map.of(), CALL));
                 if ("IDLE".equals(state.get("name"))) {

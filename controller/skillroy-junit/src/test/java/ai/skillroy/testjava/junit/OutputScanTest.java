@@ -209,6 +209,94 @@ class OutputScanTest {
         assertTrue(all.contains(new Hit(run.resolve("journal.jsonl"), 2, "Ada-Planted")), String.valueOf(all));
     }
 
+    /**
+     * Phase 8 security fix S152 (security review L1-F3, L8-F5): a planted value that is not digits only is found
+     * wherever it is bounded by a non-letter, non-digit, so Java's map form, {@code key=value} text, brackets,
+     * parentheses and markup no longer hide it, nor does a space inside the value (a name), whitespace runs counting
+     * as one space; a longer word holding it is not a hit. A digits-only value keeps the token rule, so
+     * {@code durationMs=1029} still does not match {@code 1029}. Each of these texts was a miss before the fix.
+     */
+    @Test
+    void aValueNextToMarkupOrHoldingASpaceIsFoundAndALongerWordIsNot() throws Exception {
+        Set<String> name = Set.of("Smith");
+        for (String text : List.of("payload {name=Smith, code=100}", "name=Smith", "(Smith)", "<b>Smith</b>",
+                "Smith;", "[Smith]", "a|Smith|b", "path/Smith/x", "who: Smith")) {
+            assertEquals(1, OutputScan.leaksIn(text, name).size(), text);
+        }
+        for (String text : List.of("Smithson", "XSmith", "Smith2", "the smiths")) {
+            assertEquals(List.of(), OutputScan.leaksIn(text, name), text);
+        }
+        Set<String> person = Set.of("Alice Archer");
+        for (String text : List.of("Signed on: Alice Archer", "unexpected prompt (staff.signedOn): {code=100,"
+                + " name=Alice Archer}", "Alice\n  Archer returned", "expected not {...} but was"
+                + " [{\"payload\":{\"name\":\"Alice Archer\"}}]")) {
+            assertEquals(1, OutputScan.leaksIn(text, person).size(), text);
+        }
+        assertEquals(List.of(), OutputScan.leaksIn("Alice Archers", person));
+        assertEquals(1, OutputScan.leaks(write("run.log", "INFO step s2 {borrower=Alice Archer, id=4}\n"),
+                person).size());
+        assertEquals(1, OutputScan.leaksIn("@x!", Set.of("@x!")).size(), "a value edged by punctuation: no bound");
+        assertEquals(1, OutputScan.leaksIn("a@x!b", Set.of("@x!")).size());
+        // the token rule stays for a digits-only value
+        assertEquals(List.of(), OutputScan.leaksIn("the step took durationMs=1029", SECRETS));
+        assertEquals(List.of(), OutputScan.leaksIn("seq 11112 and 21111", SECRETS));
+    }
+
+    /**
+     * The same fix (security review L8 sceptic): an XML file's attribute values and text are read with the five
+     * predefined entities and numeric character references decoded, so a quoted password inside another tool's
+     * {@code message="…"} attribute is a token again.
+     */
+    @Test
+    void anXmlAttributesEntitiesAreDecodedBeforeTheSearch() throws Exception {
+        Path xml = write("TEST-other.xml", "<testsuite><testcase name=\"t\"><failure message=\"typed"
+                + " &quot;1111&quot; at &lt;desk&gt;\" type=\"x\"/></testcase><system-out>user&#10;Alice"
+                + "&#x20;Archer</system-out></testsuite>");
+        assertEquals(1, OutputScan.leaks(xml, SECRETS).size(), Files.readString(xml));
+        assertEquals(1, OutputScan.leaks(xml, Set.of("Alice Archer")).size());
+        assertEquals("a<b>&\"'\n&bogus;", OutputScan.unescapeXml("a&lt;b&gt;&amp;&quot;&apos;&#10;&bogus;"));
+    }
+
+    /**
+     * Phase 8 security fix S152 (security review L1-F3, L8-F4): {@link Scope#EVENTS} also reads the records that carry
+     * event payloads since the {@code events} fact root: a {@code warning} (its {@code data}), {@code run-end} (its
+     * message quotes a failed negation's actual), and the run's {@code expect} and a session journal's {@code check}
+     * and {@code observe} on a path rooted at {@code events} or {@code hooks}; an {@code expect} of {@code app} or
+     * {@code ui} and a {@code sync} record stay out. Before the fix none of these was read.
+     */
+    @Test
+    void theEventsScopeReadsTheEventsRootsExpectationsWarningsAndTheRunEnd() throws Exception {
+        Files.createDirectories(dir.resolve("run"));
+        Files.createDirectories(dir.resolve("session"));
+        Path run = dir.resolve("run");
+        String name = "Alice Archer";
+        write("run/run.jsonl", "{\"type\":\"expect\",\"path\":\"events[*topic=loan.posted]\",\"actual\":"
+                + "[{\"payload\":{\"borrower\":\"Alice Archer\"}}],\"result\":\"held\"}\n"
+                + "{\"type\":\"expect\",\"path\":\"hooks.limit.applied.last\",\"actual\":{\"who\":"
+                + "\"Alice Archer\"}}\n"
+                + "{\"type\":\"expect\",\"path\":\"app.state.status\",\"actual\":\"Signed on: Alice Archer\"}\n"
+                + "{\"type\":\"expect\",\"path\":\"ui.status\",\"actual\":\"Signed on: Alice Archer\"}\n"
+                + "{\"type\":\"expect\",\"path\":\"eventsLog\",\"actual\":\"Alice Archer\"}\n"
+                + "{\"type\":\"warning\",\"code\":\"VALUE_COERCED\",\"data\":{\"taken\":\"Alice Archer\"}}\n"
+                + "{\"type\":\"sync\",\"note\":\"Alice Archer\"}\n"
+                + "{\"type\":\"run-end\",\"status\":\"FAIL\",\"message\":\"s3: expected not {containsWhere:"
+                + " ...} but was [{payload={name=Alice Archer}}]\"}\n");
+        write("session/journal.jsonl", "{\"type\":\"check\",\"path\":\"events[0].payload\",\"actual\":"
+                + "{\"name\":\"Alice Archer\"},\"held\":true}\n"
+                + "{\"type\":\"observe\",\"path\":\" events[0].payload.name\",\"value\":\"Alice Archer\"}\n"
+                + "{\"type\":\"check\",\"path\":\"app.state\",\"actual\":\"Alice Archer\",\"held\":true}\n"
+                + "{\"type\":\"observe\",\"value\":\"Alice Archer\"}\n");
+        Set<String> planted = Set.of(name);
+        Path session = dir.resolve("session");
+        assertEquals(List.of(new Hit(run.resolve("run.jsonl"), 1, name), new Hit(run.resolve("run.jsonl"), 2, name),
+                new Hit(run.resolve("run.jsonl"), 6, name), new Hit(run.resolve("run.jsonl"), 8, name)),
+                OutputScan.leaks(run, planted, Scope.EVENTS));
+        assertEquals(List.of(new Hit(session.resolve("journal.jsonl"), 1, name),
+                new Hit(session.resolve("journal.jsonl"), 2, name)), OutputScan.leaks(session, planted, Scope.EVENTS));
+        assertEquals(8, OutputScan.leaks(run, planted, Scope.ALL).size(), "every record holds it");
+        assertEquals(4, OutputScan.leaks(session, planted, Scope.ALL).size());
+    }
+
     /** A PNG, by its name or its signature, is named and never read; another binary file is read as text. */
     @Test
     void aPngIsNamedNotRead() throws Exception {

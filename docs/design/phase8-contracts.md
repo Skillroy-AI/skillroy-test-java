@@ -1353,6 +1353,25 @@ directory form (D544 as revised); `SecretScanTest` moves with it as `OutputScanT
 exists because a personal value in an event may legitimately be on screen too (the desk's status line shows the signed-on
 staff member's name, `LendingFrame.java:184`), so a whole-run scan would find the snapshot, not the leak.
 
+**Fix wave (Phase 8 security fix, S152, FD).** D544's reader and its `Scope.EVENTS` sentence are amended; the kit is
+§11 rule 3's backstop, and both gaps made a layer's proof pass with the value in its outputs. (1) **Layer 3**: a
+planted value of digits only keeps the token rule (a whole string or a token of the split; `durationMs=1029` stays one
+token, so a four-digit password is not found in a duration); **any other planted value is searched in the text with a
+boundary rule**: found where it occurs with the text's edge or a character that is neither a letter nor a digit
+(`Character.isLetterOrDigit`) on each side where the value itself begins or ends with a letter or a digit, runs of
+whitespace counting as one space in the text and in the value. So Java's map form (`{name=Smith, code=100}`, the
+executor's own "unexpected prompt" reason), `key=value` log text, brackets, parentheses, `;` and markup no longer hide a
+word, and a value holding a separator (a name with a space: item 15's `Alice Archer`) is found inside a longer text;
+`Smithson` does not match `Smith`. A digits-only value next to `=` or inside a map form is still not found (the
+duration rule's price; the guide says to plant a word). (2) **XML**: attribute values and the text have the five
+predefined entities and numeric character references decoded before the search (another tool's `message="…&quot;
+1111&quot;"` attribute). (3) **`Scope.EVENTS`** reads, in `run.jsonl` and `journal.jsonl`, the records of type `call`,
+`prompt`, `capture`, `step`, **`warning`** (its `data`, e.g. `taken`) and **`run-end`** (its message quotes a failed
+negation's actual, `Values.brief(actual, 200)`), and the records of type **`expect`, `check` and `observe` whose `path`
+starts at the root `events` or `hooks`** (the payloads as published, §8.6); an `expect`/`check` on `ui`, `app` or any
+other root stays out, which keeps the scope's reason (the status line in a snapshot). `failure/events.json` and `*.xml`
+as before. `OutputScanTest` holds both sceptics' probe lines.
+
 **As built (Phase 8, EW, step 1, 2026-10-19).** `EventMasks` (package-private, `agent-core`), the bus's fourth
 constructor argument and `agent.info.events` as specified, with these completions. (a) The scalar bound counts the
 scalars handed to a policy, so it applies only while a policy is registered: without one no scalar is visited and
@@ -1708,6 +1727,22 @@ reported (D154's rule: a path may hold a user name).
 | `jrt:/java.base` | `java.base` |
 | `bundleresource://12.fwk/` | `bundleresource:12.fwk` |
 | no domain, no location, `String.class` | `(none)` |
+| `jar:file:C:\Users\x\plugins\desk.jar!/` (S178) | `desk.jar` |
+| `file` with the path `C:\Users\x\lib\desk.jar` (S178) | `desk.jar` |
+| `file:%2Fhome%2Fx%2Flib%2Fdesk.jar`, `file:/C:%5CUsers%5Cx%5Clib%5Cdesk.jar` (S178) | `desk.jar` |
+
+**Fix wave (Phase 8 security fix, S178, FD).** Step (3) for part 0 reads: **percent-decoded first, then
+trailing `/` and `\` stripped, then the text after the last `/` or `\`** (D556 amended; the as-built code cut at the
+last `/` and decoded after the cut). Two location shapes keep a Windows native path's backslashes: a `jar:file:C:\…!/`
+URL, which Java 8's `URLClassPath` gives a class as its code source as written (the plugin-loader idiom
+`new URL("jar:file:" + path + "!/")`, also `new URL("jar", "", "file:" + path + "!/")`), and a `file` URL made with the
+three- or four-argument constructor from a native path (any Java); the drive letter went as a "scheme" and the rest of
+the path stayed in the name, user name included. A whole path percent-encoded (`URLEncoder` on a path; a Windows
+`URI` quotes `\` as `%5C`) became a path only after the cut. Both now name the jar, as `OtherAgents` does for D154's
+names. Cost: on POSIX a backslash is a legal file-name character, so a jar named `a\b.jar` is named `b.jar` and a
+qualifier written for `a\b.jar` fails closed (the copy is not matched). Parts 1 and later (entries inside an archive)
+are unchanged. Not changed (operator-only, recorded by the security review as L7-S2): a directory whose name begins or
+ends with `!` is still split as an archive boundary.
 
 **Cost and thread:** read once per candidate copy per `hook.probe`/`hook.install` on the agent worker (both are
 `WORKER`), cached in the ledger entry at its creation (`Ledger.Entry.codeSource`, final), never on an application thread,
@@ -2036,6 +2071,16 @@ catalogue built in Java is a catalogue (`isEmpty()` stays "no entry").
 (D-EH-11). Under `off` the catalogue is read for the record only, and a catalogue that cannot be read records nothing.
 The record's `deny` and `deniedNow` come after its other keys, so a record without them is byte-identical to today's;
 the echo's ERROR record carries the catalogue reference and both keys.
+
+**Fix wave (Phase 8 review, FD, 2026-10-19): the deny is checked before the install (L2-F4).** When the pack's
+catalogue has a non-empty deny, step 0's `hook.health` answer must carry its top-level `deny` object (§6.6: always
+present on a new agent) **before `hook.install` is sent**, on a first install and on a replace; without it the run is
+refused with the echo's ERROR / ENVIRONMENT text, the detail `{missing: [every pack pattern], answered: null}` and the
+same record (catalogue reference, `deny`, `deniedNow`), and nothing is sent. Before the fix the install went out first
+and the echo check of its answer refused afterwards, so a 0.1.0 agent, which ignores `catalogue.deny`, had already
+retransformed the denied classes (they stay instrumented until `skillroy hooks remove`). The answer's echo check stays
+as the second line (an agent whose health carries the deny but whose install answer does not hold every pattern); the
+`alreadyInstalled` path is unchanged (it already reads `hook.health.deny.catalogue` and sends nothing).
 
 ### 6.10 `skillroy hooks status` (P6 §6.2 amended)
 
@@ -3066,6 +3111,25 @@ message naming the pack and the id; nothing is evaluated and nothing is sent:
 | the scenario schema | `ScenarioSchema.requiresItem` appends `"; the pack contributes: <id> (<description>), …"` (the description omitted when null), so a planner can write `requires:` and guards with them |
 | `skillroy caps` | a row per pack id with `SOURCE pack:<packId>` (table and `--json`); `skillroy_catalogue` the same through `ExecutorSession.capabilities()` (its `source` field is generic) |
 
+**Fix wave (Phase 8 review, FD, 2026-10-19): `skillroy_catalogue` within the answer bound (L1-F2).** Every MCP answer
+is cut at 25,000 characters (P5 §9.3), and the sample pack's catalogue was longer, with the matrix written after the
+verbs' schemas: a client got cut text, no JSON and no `capabilities`, so this row and §13.2 item 42 did not hold. The
+catalogue now (1) writes its sections in the order `pack`, `mutating`, `capabilities`, `dataQuerySources`, `verbs`,
+`renamedPrimitives`, `withheldVerbs`, `queries`, `oracles` (always: the bounded part a client needs for `requires:` and
+guards comes first); (2) when the masked answer is longer than the bound, withholds schemas from the end, the verbs'
+`argsSchema` first (last verb back), each set to `null` with `note: "argsSchema withheld: answer bound; see
+skillroy://schema/scenario"`, then the queries' `args` and the oracles' `input` (`note: "<key> withheld: answer
+bound"`), until the answer fits, and adds
+`withheld: {reason, schemas: <count>}` after `mutating`; (3) if even that does not fit, answers
+`{pack, mutating, withheld: {reason}, capabilities, dataQuerySources}` (the verbs, queries and oracles withheld), and
+when that is still too long `{pack, mutating, withheld: {reason}}` naming `skillroy_facts {root: caps}` and the
+scenario schema's resource. The
+answer is therefore always valid JSON within the bound; a withheld verb schema stays readable in
+`skillroy://schema/scenario` (a resource, not cut) and, on a `--mutating` server, as the verb tool's `inputSchema`. A
+catalogue within the bound is unchanged but for the section order. Alternative not taken: an optional
+`section`/`verb` argument (pages the catalogue, but changes the shared tool declaration of `WorkflowTools.CATALOGUE`
+and every client's call).
+
 #### 9.1.5 The hosts (D612, D623)
 
 One public class carries the rules, so that no host drifts:
@@ -3907,6 +3971,14 @@ the `CODE SOURCE` column with `-` (the CLI test pack's catalogue has no qualifie
 answers a spec whose `codeSource` is not a regular expression `INVALID_PARAMS` `specs[0].target.codeSource` (a
 `ProbeItemsTest` case).
 
+**Fix wave (Phase 8 review, FD, 2026-10-19), rows 5 and 34 (L3-F5).** "`OutputScan` (§5.1) over the new files" is
+`BindingsUpToDateTest.noCommittedBindingsPlanOrExportHoldsASamplePassword`, whose roots now include the committed
+scenarios' YAML (`scenarios/`, `scanner/` included) and the negatives (`src/test/resources/negative/`) beside the
+bindings, the plans and the exports, each file once: the new negatives (`vetoed-click`, `warning-not-accepted`,
+`accept-unknown-code`, `min-rung-without-ladder`, `sign-on-any-password-required`) and ES's committed scenarios were
+checked only for the substring `password:` or through their compiled plans, so a seeded password written as a value
+(`enter: {value: …}`, a comment) passed; the test names those files and its floor rises to 70 scanned text files.
+
 ### 13.2 End to end (the Linux image; `ci/run-in-linux.sh … -Dskillroy.headless=false`; Java 8 and Java 25 targets; no key)
 
 Where each item lives. `LoadModeChecks` (every load mode of `LendingEndToEndIT`, both target Javas through the matrix's
@@ -4118,6 +4190,19 @@ named per item host the agent-level half of a proof.
    a state that drops the input (sent through the session API) returns `consumed: QUEUED` and a following verb's
    correlated wait ends `SYNC_TIMEOUT` naming the `inputId` rather than passing on another input's acknowledgement;
    `input.acked` payloads never carry a value (the password check of slot 200 extended to `taken` and warnings).
+
+   As built (Phase 8, ES; D-ES-17), recorded by the fix wave (Phase 8 review, FD, 2026-10-19; L3-F1): the
+   late-acknowledgement half is a race a remote caller cannot arrange (the second input passes its pre-check only if
+   it reads the desk's state before the engine takes the first input), so it runs up to 10 bounded attempts in one
+   session and writes `correlatedAckRaceObserved=<bool> attempts=<n>` to the timing log; ES saw the race on two Java 8
+   target legs of ten. The deterministic proofs are `LendingPrimitivesTest` (a gated engine listener) and
+   `CorrelatedAckTest`. **Fix wave (L3-F1):** an attempt is classified by what the second input did, not by its
+   step's verdict: `consumed: QUEUED` means the race happened and the attempt must end `SYNC_TIMEOUT` naming its own
+   `inputId` (a PASS, which is what an uncorrelated wait gives, fails the check); the pre-check's `INPUT_REJECTED`
+   is "not observed"; any other outcome fails. Before the fix the assertions ran only when the step had already ended
+   `SYNC_TIMEOUT`, so the defect the half exists for counted as "not observed". Alternative not taken (an owner's
+   choice, D-ES-17's rejected seam): a test-only desk option that delays the engine's take of an input, set on one
+   leg, which would make the race happen every time.
 28. **Composites** (ES). (`@Order(174)`): `sign-on-any` PASS (branches `auto` and `password` in the `call` records,
    `state.staff.code` held); `scan-checked` PASS with the `prompt` record `expected: true, answeredBy:
    lending.scanChecked` for `induction-check` and the loan line present; `sign-on-any-password-required` `FAIL /
@@ -4203,6 +4288,11 @@ named per item host the agent-level half of a proof.
    `beforeRequires()` there is `capabilities, hook.health, capabilities, data.query`; scenario E unchanged.
 42. **`InferenceChecks`' MCP subprocess item** (EP): `skillroy_catalogue` lists `lending.returns.ceiling` with
    `source: pack:lending`.
+
+   Fix wave (Phase 8 review, FD, 2026-10-19; L1-F2): asserted as written: the catalogue is parsed (within the bound,
+   never cut, §9.1.4's fix-wave note) and lists `lending.returns.ceiling` `OK` with `source: pack:lending`; the
+   `caps`-root read EP used instead stays as a second check. `CatalogueBoundTest` (`skillroy-mcp`) proves the bound on
+   a pack whose verb schemas overflow it.
 
    As built (Phase 8, EP): items 36-42 and §13.1 rows 42-50 with the corrections of §9.7 (the calls before `requires`
    include `data.sources`; slot 177's `contributed`; item 38 without the driver; the CLI pack's id `clitest`).

@@ -228,6 +228,11 @@ class BindingsUpToDateTest {
      * exports under {@code scenarios/exported/} (YAML, plan, bindings); no sample staff password of either seed is a
      * value in any of them. A baseline PNG is bytes, so its half is its name: no password in it (and
      * {@link #everyBaselinePngIsNamedByItsBindingsFileAndIsItsRaster} pins every name to an entry).
+     *
+     * <p>Fix wave of the Phase 8 review (FD, L3-F5; phase8-contracts.md 13.1 rows 5 and 34): the committed scenarios'
+     * YAML ({@code scenarios/}, {@code scanner/} included) and the negatives ({@code src/test/resources/negative/})
+     * are scanned too, so that a seeded password written as a value in a scenario no plan copies (a negative, a
+     * comment) is found; each file once.
      */
     @Test
     void noCommittedBindingsPlanOrExportHoldsASamplePassword() throws Exception {
@@ -235,13 +240,15 @@ class BindingsUpToDateTest {
         for (Env env : Env.values()) {
             passwords.addAll(SampleCredentials.staff(env).values());
         }
-        List<Path> files = new ArrayList<>();
+        java.util.SortedSet<Path> unique = new java.util.TreeSet<>();
         for (Path root : List.of(ScenarioA.bindingsRoot(), BranchVariant.bindingsRoot(), ItEnv.moduleDir()
-                .resolve("plan"), ItEnv.moduleDir().resolve("scenarios").resolve("exported"))) {
+                .resolve("plan"), ItEnv.moduleDir().resolve("scenarios"), ItEnv.moduleDir()
+                .resolve("src/test/resources/negative"))) {
             try (Stream<Path> walk = Files.walk(root)) {
-                walk.filter(Files::isRegularFile).sorted().forEach(files::add);
+                walk.filter(Files::isRegularFile).map(p -> p.toAbsolutePath().normalize()).forEach(unique::add);
             }
         }
+        List<Path> files = new ArrayList<>(unique);
         int scanned = 0;
         int pngs = 0;
         for (Path file : files) {
@@ -258,7 +265,12 @@ class BindingsUpToDateTest {
                 "keypad-image's files are among them");
         assertTrue(files.stream().anyMatch(f -> f.getFileName().toString().equals("session-vision-loan.yaml")),
                 "and the vision session's export");
-        assertTrue(scanned >= 20 && pngs == 8, scanned + " text files, " + pngs + " baselines");
+        for (String yaml : List.of("vetoed-click.yaml", "warning-not-accepted.yaml", "accept-unknown-code.yaml",
+                "min-rung-without-ladder.yaml", "sign-on-any-password-required.yaml", "semantic-input-warnings.yaml",
+                "sign-on-any.yaml", "scan-checked.yaml", "device-scan.yaml", "device-scan-physical.yaml")) {
+            assertTrue(files.stream().anyMatch(f -> f.getFileName().toString().equals(yaml)), yaml + " is scanned");
+        }
+        assertTrue(scanned >= 70 && pngs == 8, scanned + " text files, " + pngs + " baselines");
     }
 
     /**

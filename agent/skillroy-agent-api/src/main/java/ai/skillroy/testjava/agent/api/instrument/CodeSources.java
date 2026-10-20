@@ -45,8 +45,11 @@ import java.util.List;
  *
  * <p><b>The name</b> ({@link #name}): (1) every leading scheme prefix ({@code [A-Za-z][A-Za-z0-9+.-]*:}) is stripped
  * from the path (a {@code jar:} URL's path begins with the inner URL); (2) the path is split at every {@code !/} and
- * {@code /!}, in order; (3) part 0, the outer location: trailing {@code /} stripped, the text after the last
- * {@code /}, percent-decoded ({@code %XX} as UTF-8, {@code +} kept, an undecodable sequence kept as written); later
+ * {@code /!}, in order; (3) part 0, the outer location: percent-decoded ({@code %XX} as UTF-8, {@code +} kept, an
+ * undecodable sequence kept as written), then trailing {@code /} and {@code \} stripped, then the text after the last
+ * {@code /} or {@code \} (Phase 8 security fix, S178: a Windows native path in a {@code jar:file:C:\…!/} or a
+ * {@code file} location made with the multi-argument constructor, and an encoded {@code %2F} or {@code %5C}, never
+ * leave a directory in the name; a POSIX file name holding a backslash is named by its text after it); later
  * parts, entries inside an archive: leading and trailing {@code /} stripped, percent-decoded, kept whole; after
  * decoding, control characters (U+0000-U+001F, U+007F) become spaces; (4) empty parts are dropped, and with none left
  * the name is {@code <protocol>:<host>}; (5) the parts are joined with {@code !/} and cut at {@link #MAX_LENGTH}
@@ -125,21 +128,35 @@ public final class CodeSources {
         return name.length() > MAX_LENGTH ? name.substring(0, MAX_LENGTH) : name;
     }
 
-    /** Part 0: the text after the last slash, trailing slashes stripped; later parts: kept whole, slashes trimmed. */
+    /**
+     * Part 0: percent-decoded first, then trailing {@code /} and {@code \} stripped and the text after the last of
+     * either kept (Phase 8 security fix, S178: a Windows native path keeps its backslashes in a location made from it,
+     * and a {@code %2F} or {@code %5C} is a separator only once decoded, so cutting before decoding kept the
+     * directories); later parts: leading and trailing {@code /} stripped, decoded, kept whole.
+     */
     private static String part(String raw, int index) {
+        if (index == 0) {
+            String s = decode(raw);
+            int end = s.length();
+            while (end > 0 && separator(s.charAt(end - 1))) {
+                end--;
+            }
+            s = s.substring(0, end);
+            int cut = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+            return controls(cut < 0 ? s : s.substring(cut + 1));
+        }
         String s = raw;
         while (s.endsWith("/")) {
             s = s.substring(0, s.length() - 1);
         }
-        if (index == 0) {
-            int slash = s.lastIndexOf('/');
-            s = slash < 0 ? s : s.substring(slash + 1);
-        } else {
-            while (s.startsWith("/")) {
-                s = s.substring(1);
-            }
+        while (s.startsWith("/")) {
+            s = s.substring(1);
         }
         return controls(decode(s));
+    }
+
+    private static boolean separator(char c) {
+        return c == '/' || c == '\\';
     }
 
     /** Every leading {@code scheme:} prefix stripped. */
