@@ -1,5 +1,5 @@
 {
-  "fingerprint": "8e15123018a2dfade2da7adea01c6f8a5b959d96600f27c20ecd992db13ffdbd",
+  "fingerprint": "5f924f8226f830db593a920d8451b332db237e63a30d39e3837662f560334615",
   "model": "scripted-model",
   "modelClass": "SONNET_CLASS",
   "purpose": "session",
@@ -58,6 +58,93 @@
           }
         ],
         "role": "USER"
+      },
+      {
+        "parts": [
+          {
+            "text": "Scan the item.",
+            "type": "text"
+          },
+          {
+            "id": "toolu_scripted_2",
+            "input": {
+              "barcode": null,
+              "item": "$item",
+              "times": null
+            },
+            "name": "lending_scan",
+            "type": "tool_use"
+          }
+        ],
+        "role": "ASSISTANT"
+      },
+      {
+        "parts": [
+          {
+            "content": "<target-state>\n{\n  \"stepId\": \"s2\",\n  \"verb\": \"scan\",\n  \"status\": \"PASS\",\n  \"executed\": 1,\n  \"events\": [],\n  \"snapshotHash\": \"sha256:04828d486e062946916b7ae0b26b7b13a34763e54bb261ee0383e11786ae5b13\"\n}\n\n</target-state>",
+            "error": false,
+            "toolUseId": "toolu_scripted_2",
+            "type": "tool_result"
+          }
+        ],
+        "role": "USER"
+      },
+      {
+        "parts": [
+          {
+            "text": "Ask for the deposit due.",
+            "type": "text"
+          },
+          {
+            "id": "toolu_scripted_3",
+            "input": {
+              "action": "DUE",
+              "value": null
+            },
+            "name": "lending_key",
+            "type": "tool_use"
+          }
+        ],
+        "role": "ASSISTANT"
+      },
+      {
+        "parts": [
+          {
+            "content": "<target-state>\n{\n  \"stepId\": \"s3\",\n  \"verb\": \"key\",\n  \"status\": \"PASS\",\n  \"executed\": 1,\n  \"events\": [],\n  \"snapshotHash\": \"sha256:aeaa638bcbb66cada3a75a8c84745c35931058d2008538c143effdb8af6e50fc\"\n}\n\n</target-state>",
+            "error": false,
+            "toolUseId": "toolu_scripted_3",
+            "type": "tool_result"
+          }
+        ],
+        "role": "USER"
+      },
+      {
+        "parts": [
+          {
+            "text": "Take exactly the deposit due.",
+            "type": "text"
+          },
+          {
+            "id": "toolu_scripted_4",
+            "input": {
+              "amount": null
+            },
+            "name": "lending_deposit",
+            "type": "tool_use"
+          }
+        ],
+        "role": "ASSISTANT"
+      },
+      {
+        "parts": [
+          {
+            "content": "<target-state>\n{\n  \"stepId\": \"s4\",\n  \"verb\": \"deposit\",\n  \"status\": \"PASS\",\n  \"executed\": 1,\n  \"events\": [],\n  \"snapshotHash\": \"sha256:8f28a6e2cf118e209fcee7fefc6e01f52503fc41113380e98c049fdae43bfeb7\"\n}\n\n</target-state>",
+            "error": false,
+            "toolUseId": "toolu_scripted_4",
+            "type": "tool_result"
+          }
+        ],
+        "role": "USER"
       }
     ],
     "outputSchema": null,
@@ -67,7 +154,7 @@
         "type": "text"
       },
       {
-        "text": "The pack: lending 0.7.0.\nIts verbs, each a tool, with the JSON Schema of their arguments (a $reference such as $item.code names a non-secret field of a resolved slot, never a credential's secret nor a credential slot as a whole: the person signs on):\n- answerPrompt (tool lending_answer_prompt): {\"additionalProperties\":false,\"description\":\"Answers the open prompt by pressing one of its buttons, then waits until the desk is ready again or asks its next question.\",\"properties\":{\"choice\":{\"description\":\"The button's label, such as OK, Cancel, Yes or No; or a $reference to one.\",\"type\":\"string\"},\"id\":{\"description\":\"Answer only if the open prompt has this id, such as unknown-item; or a $reference to one.\",\"type\":\"string\"}},\"required\":[\"choice\"],\"type\":\"object\"}\n- authorise (tool lending_authorise): {\"additionalProperties\":false,\"description\":\"A supervisor authorises what the desk asked for with the supervisor-required prompt: answers it with OK, then enters the supervisor's code and password, which comes from credentials.yaml, each time waiting until the desk is ready again. If the desk refuses, its authorisation-failed prompt fails the step.\",\"properties\":{\"staff\":{\"description\":\"The supervisor who authorises: a $reference to a slot that declares a credential (credential: <redacted> staff, key: code}), such as $assistant; never a staff member or a password written out.\",\"pattern\":\"^\\\\$[A-Za-z_][A-Za-z0-9_]*$\",\"type\":\"string\"}},\"required\":[\"staff\"],\"type\":\"object\"}\n- deposit (tool lending_deposit): {\"additionalProperties\":false,\"description\":\"Takes the deposit (the DEPOSIT key) and waits until the desk is ready again: with an amount, the deposit received, which must be at least the amount due; without one, exactly the amount due. A return hands its deposit back and takes no amount: write deposit: {}.\",\"properties\":{\"amount\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}],\"description\":\"The deposit received: money as a decimal string, such as \\\"10.00\\\", or a number, or a $reference, such as $oracle.due.total.\"}},\"type\":\"object\"}\n- deviceScan (tool lending_device_scan): {\"additionalProperties\":false,\"description\":\"Scans an item with the desk's barcode scanner device: through the scanner driver when the desk runs one (rung PHYSICAL), else straight into the desk (rung SEMANTIC, a lower fidelity that makes the run DEGRADED). A step requires the physical path with minRung: PHYSICAL. Give exactly one of item and barcode.\",\"properties\":{\"barcode\":{\"description\":\"The barcode to send, quoted, or a $reference to one.\",\"type\":\"string\"},\"item\":{\"anyOf\":[{\"description\":\"a $reference to a slot, an oracle or $env\",\"pattern\":\"^\\\\$[A-Za-z_]\",\"type\":\"string\"},{\"additionalProperties\":false,\"properties\":{\"barcode\":{\"description\":\"What scanning the item sends.\",\"type\":\"string\"},\"code\":{\"description\":\"The item's code.\",\"type\":\"string\"},\"deposit\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}],\"description\":\"The deposit for one unit or one day.\"},\"title\":{\"description\":\"The item's name as the slip prints it.\",\"type\":\"string\"}},\"required\":[\"barcode\"],\"type\":\"object\"}],\"description\":\"The item to scan, whose barcode is sent: an item ({code, barcode, title, deposit}, at least its barcode) or a $reference to an item slot, such as $item.\"}},\"type\":\"object\"}\n- enter (tool lending_enter): {\"additionalProperties\":false,\"description\":\"Types a value into the desk's entry field and presses Enter, then waits until the desk is ready again: a staff code at sign-on, a barcode or an item code on a loan.\",\"properties\":{\"value\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"},{\"type\":\"boolean\"}],\"description\":\"The value to enter: text, a number, or a $reference, such as $assistant.code.\"}},\"required\":[\"value\"],\"type\":\"object\"}\n- expectPrompt (tool lending_expect_prompt): {\"additionalProperties\":false,\"description\":\"Waits until the desk asks a question (a prompt), matched by its id or its text when given, and counts the question as expected; the step fails when none comes in time. Answer it next with answerPrompt, or with authorise for supervisor-required.\",\"properties\":{\"id\":{\"description\":\"The prompt's id, such as supervisor-required, unknown-item or induction-check; or a $reference to one.\",\"type\":\"string\"},\"text\":{\"description\":\"The prompt's text, such as \\\"Unknown item\\\"; or a $reference to one.\",\"type\":\"string\"},\"within\":{\"anyOf\":[{\"type\":\"integer\"},{\"pattern\":\"^\\\\s*(\\\\d{1,15}|\\\\d{1,12}\\\\s*([Mm][Ss]|[Ss]|[Mm]))\\\\s*$\",\"type\":\"string\"}],\"description\":\"How long to wait: a duration such as \\\"10s\\\" or \\\"500ms\\\", or a number of milliseconds; at most 119 s; the step timeout when left out.\"}},\"type\":\"object\"}\n- key (tool lending_key): {\"additionalProperties\":false,\"description\":\"Presses a key of the desk's keypad, with a value when one is given, and waits until the desk is ready again.\",\"properties\":{\"action\":{\"anyOf\":[{\"enum\":[\"DUE\",\"DEPOSIT\",\"RETURN\",\"CANCEL\",\"SIGN_OFF\",\"QTY\"],\"type\":\"string\"},{\"pattern\":\"^\\\\$[A-Za-z_][A-Za-z0-9_]*\\\\.[A-Za-z0-9_]+$\",\"type\":\"string\"}],\"description\":\"The key: DUE (the deposit due), DEPOSIT (the deposit received), RETURN (return mode), CANCEL (cancel the open loan), SIGN_OFF, or QTY (the quantity of the next item); or a $reference into an ActionKey slot, such as $keys.RETURN, which also checks that the key is on the keypad.\"},\"value\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"},{\"type\":\"boolean\"}],\"description\":\"A value sent with the key, as if typed before pressing it: text, a number, or a $reference.\"}},\"required\":[\"action\"],\"type\":\"object\"}\n- quantity (tool lending_quantity): {\"additionalProperties\":false,\"description\":\"Sets the quantity of the next item scanned (the QTY key with the quantity): units of an item counted in units, or days of an item lent by the day.\",\"properties\":{\"n\":{\"anyOf\":[{\"type\":\"number\"},{\"description\":\"a $reference to a slot, an oracle or $env\",\"pattern\":\"^\\\\$[A-Za-z_]\",\"type\":\"string\"}],\"description\":\"The quantity: a number of units or days (up to three decimals), or a $reference to one, such as $oracle.needed.qty.\"}},\"required\":[\"n\"],\"type\":\"object\"}\n- scan (tool lending_scan): {\"additionalProperties\":false,\"description\":\"Scans an item: one barcode per unit, each time waiting until the desk is ready again or asks a question (unknown-item, item-not-for-loan, induction-check, supervisor-required, ...; expect it with expectPrompt). Give exactly one of item and barcode.\",\"properties\":{\"barcode\":{\"description\":\"The barcode to send, quoted, such as \\\"5000000000017\\\", or a $reference to one, such as $item.barcode.\",\"type\":\"string\"},\"item\":{\"anyOf\":[{\"description\":\"a $reference to a slot, an oracle or $env\",\"pattern\":\"^\\\\$[A-Za-z_]\",\"type\":\"string\"},{\"additionalProperties\":false,\"properties\":{\"barcode\":{\"description\":\"What scanning the item sends.\",\"type\":\"string\"},\"code\":{\"description\":\"The item's code.\",\"type\":\"string\"},\"deposit\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}],\"description\":\"The deposit for one unit or one day.\"},\"title\":{\"description\":\"The item's name as the slip prints it.\",\"type\":\"string\"}},\"required\":[\"barcode\"],\"type\":\"object\"}],\"description\":\"The item to scan, whose barcode is sent: an item ({code, barcode, title, deposit}, at least its barcode) or a $reference to an item slot, such as $item.\"},\"times\":{\"description\":\"How many units to scan, from 1 to 99; 1 when left out.\",\"type\":\"integer\"}},\"type\":\"object\"}\n- scanChecked (tool lending_scan_checked): {\"additionalProperties\":false,\"description\":\"Scans an item and answers the desk's induction check itself when it asks one (Yes when inducted, No otherwise), then waits until the desk is ready again. Another question the desk asks stays open and fails the step unless expected. Give exactly one of item and barcode.\",\"properties\":{\"barcode\":{\"description\":\"The barcode to send, quoted, or a $reference to one.\",\"type\":\"string\"},\"inducted\":{\"description\":\"Whether the borrower completed the safety induction.\",\"type\":\"boolean\"},\"item\":{\"anyOf\":[{\"description\":\"a $reference to a slot, an oracle or $env\",\"pattern\":\"^\\\\$[A-Za-z_]\",\"type\":\"string\"},{\"additionalProperties\":false,\"properties\":{\"barcode\":{\"description\":\"What scanning the item sends.\",\"type\":\"string\"},\"code\":{\"description\":\"The item's code.\",\"type\":\"string\"},\"deposit\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}],\"description\":\"The deposit for one unit or one day.\"},\"title\":{\"description\":\"The item's name as the slip prints it.\",\"type\":\"string\"}},\"required\":[\"barcode\"],\"type\":\"object\"}],\"description\":\"The item to scan, whose barcode is sent: an item ({code, barcode, title, deposit}, at least its barcode) or a $reference to an item slot, such as $item.\"}},\"required\":[\"inducted\"],\"type\":\"object\"}\n- signOff (tool lending_sign_off): {\"additionalProperties\":false,\"description\":\"Signs the signed-on staff member off (the SIGN_OFF key) and waits until the desk is ready again. Takes no arguments: write signOff: {}.\",\"properties\":{},\"type\":\"object\"}\n- signOn (tool lending_sign_on): {\"additionalProperties\":false,\"description\":\"Signs a staff member on at the desk: enters their code, then their password, which comes from credentials.yaml and never from the scenario, each time waiting until the desk is ready again. A scenario that passes signs off again at its end.\",\"properties\":{\"staff\":{\"description\":\"The staff member to sign on: a $reference to a slot that declares a credential (credential: <redacted> staff, key: code}), such as $assistant; never a staff member or a password written out.\",\"pattern\":\"^\\\\$[A-Za-z_][A-Za-z0-9_]*$\",\"type\":\"string\"}},\"required\":[\"staff\"],\"type\":\"object\"}\n- signOnAny (tool lending_sign_on_any): {\"additionalProperties\":false,\"description\":\"Signs a staff member on whichever way the desk asks: an auto-sign-on member at once, a member with a password with the password from credentials.yaml (only when the slot declares a credential), in one call that reports the branch it took (auto, password, passwordRequired with the warning lending.PASSWORD_REQUIRED, refused). A scenario that passes signs off again at its end.\",\"properties\":{\"staff\":{\"description\":\"The staff member to sign on: a $reference to a slot with their code, such as $assistant; when the slot declares a credential (credential: <redacted> staff, key: code}) the password comes from credentials.yaml; never a password written out.\",\"pattern\":\"^\\\\$[A-Za-z_][A-Za-z0-9_]*$\",\"type\":\"string\"}},\"required\":[\"staff\"],\"type\":\"object\"}\nThe tools: skillroy_snapshot, skillroy_facts, skillroy_events, skillroy_catalogue, skillroy_resolve, skillroy_check, skillroy_observe, skillroy_note, lending_answer_prompt, lending_authorise, lending_deposit, lending_device_scan, lending_enter, lending_expect_prompt, lending_key, lending_quantity, lending_scan, lending_scan_checked, lending_sign_off, lending_sign_on, lending_sign_on_any, done, ask_person.\n",
+        "text": "The pack: lending 0.7.0.\nIts verbs, each a tool, with the JSON Schema of their arguments (a $reference such as $item.code names a non-secret field of a resolved slot, never a credential's secret nor a credential slot as a whole: the person signs on):\n- answerPrompt (tool lending_answer_prompt): {\"additionalProperties\":false,\"description\":\"Answers the open prompt by pressing one of its buttons, then waits until the desk is ready again or asks its next question.\",\"properties\":{\"choice\":{\"description\":\"The button's label, such as OK, Cancel, Yes or No; or a $reference to one.\",\"type\":\"string\"},\"id\":{\"description\":\"Answer only if the open prompt has this id, such as unknown-item; or a $reference to one.\",\"type\":\"string\"}},\"required\":[\"choice\"],\"type\":\"object\"}\n- authorise (tool lending_authorise): {\"additionalProperties\":false,\"description\":\"A supervisor authorises what the desk asked for with the supervisor-required prompt: answers it with OK, then enters the supervisor's code and password, which comes from credentials.yaml, each time waiting until the desk is ready again. If the desk refuses, its authorisation-failed prompt fails the step.\",\"properties\":{\"staff\":{\"description\":\"The supervisor who authorises: a $reference to a slot that declares a credential (credential: <redacted>), such as $assistant; never a staff member or a password written out.\",\"pattern\":\"^\\\\$[A-Za-z_][A-Za-z0-9_]*$\",\"type\":\"string\"}},\"required\":[\"staff\"],\"type\":\"object\"}\n- deposit (tool lending_deposit): {\"additionalProperties\":false,\"description\":\"Takes the deposit (the DEPOSIT key) and waits until the desk is ready again: with an amount, the deposit received, which must be at least the amount due; without one, exactly the amount due. A return hands its deposit back and takes no amount: write deposit: {}.\",\"properties\":{\"amount\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}],\"description\":\"The deposit received: money as a decimal string, such as \\\"10.00\\\", or a number, or a $reference, such as $oracle.due.total.\"}},\"type\":\"object\"}\n- deviceScan (tool lending_device_scan): {\"additionalProperties\":false,\"description\":\"Scans an item with the desk's barcode scanner device: through the scanner driver when the desk runs one (rung PHYSICAL), else straight into the desk (rung SEMANTIC, a lower fidelity that makes the run DEGRADED). A step requires the physical path with minRung: PHYSICAL. Give exactly one of item and barcode.\",\"properties\":{\"barcode\":{\"description\":\"The barcode to send, quoted, or a $reference to one.\",\"type\":\"string\"},\"item\":{\"anyOf\":[{\"description\":\"a $reference to a slot, an oracle or $env\",\"pattern\":\"^\\\\$[A-Za-z_]\",\"type\":\"string\"},{\"additionalProperties\":false,\"properties\":{\"barcode\":{\"description\":\"What scanning the item sends.\",\"type\":\"string\"},\"code\":{\"description\":\"The item's code.\",\"type\":\"string\"},\"deposit\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}],\"description\":\"The deposit for one unit or one day.\"},\"title\":{\"description\":\"The item's name as the slip prints it.\",\"type\":\"string\"}},\"required\":[\"barcode\"],\"type\":\"object\"}],\"description\":\"The item to scan, whose barcode is sent: an item ({code, barcode, title, deposit}, at least its barcode) or a $reference to an item slot, such as $item.\"}},\"type\":\"object\"}\n- enter (tool lending_enter): {\"additionalProperties\":false,\"description\":\"Types a value into the desk's entry field and presses Enter, then waits until the desk is ready again: a staff code at sign-on, a barcode or an item code on a loan.\",\"properties\":{\"value\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"},{\"type\":\"boolean\"}],\"description\":\"The value to enter: text, a number, or a $reference, such as $assistant.code.\"}},\"required\":[\"value\"],\"type\":\"object\"}\n- expectPrompt (tool lending_expect_prompt): {\"additionalProperties\":false,\"description\":\"Waits until the desk asks a question (a prompt), matched by its id or its text when given, and counts the question as expected; the step fails when none comes in time. Answer it next with answerPrompt, or with authorise for supervisor-required.\",\"properties\":{\"id\":{\"description\":\"The prompt's id, such as supervisor-required, unknown-item or induction-check; or a $reference to one.\",\"type\":\"string\"},\"text\":{\"description\":\"The prompt's text, such as \\\"Unknown item\\\"; or a $reference to one.\",\"type\":\"string\"},\"within\":{\"anyOf\":[{\"type\":\"integer\"},{\"pattern\":\"^\\\\s*(\\\\d{1,15}|\\\\d{1,12}\\\\s*([Mm][Ss]|[Ss]|[Mm]))\\\\s*$\",\"type\":\"string\"}],\"description\":\"How long to wait: a duration such as \\\"10s\\\" or \\\"500ms\\\", or a number of milliseconds; at most 119 s; the step timeout when left out.\"}},\"type\":\"object\"}\n- key (tool lending_key): {\"additionalProperties\":false,\"description\":\"Presses a key of the desk's keypad, with a value when one is given, and waits until the desk is ready again.\",\"properties\":{\"action\":{\"anyOf\":[{\"enum\":[\"DUE\",\"DEPOSIT\",\"RETURN\",\"CANCEL\",\"SIGN_OFF\",\"QTY\"],\"type\":\"string\"},{\"pattern\":\"^\\\\$[A-Za-z_][A-Za-z0-9_]*\\\\.[A-Za-z0-9_]+$\",\"type\":\"string\"}],\"description\":\"The key: DUE (the deposit due), DEPOSIT (the deposit received), RETURN (return mode), CANCEL (cancel the open loan), SIGN_OFF, or QTY (the quantity of the next item); or a $reference into an ActionKey slot, such as $keys.RETURN, which also checks that the key is on the keypad.\"},\"value\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"},{\"type\":\"boolean\"}],\"description\":\"A value sent with the key, as if typed before pressing it: text, a number, or a $reference.\"}},\"required\":[\"action\"],\"type\":\"object\"}\n- quantity (tool lending_quantity): {\"additionalProperties\":false,\"description\":\"Sets the quantity of the next item scanned (the QTY key with the quantity): units of an item counted in units, or days of an item lent by the day.\",\"properties\":{\"n\":{\"anyOf\":[{\"type\":\"number\"},{\"description\":\"a $reference to a slot, an oracle or $env\",\"pattern\":\"^\\\\$[A-Za-z_]\",\"type\":\"string\"}],\"description\":\"The quantity: a number of units or days (up to three decimals), or a $reference to one, such as $oracle.needed.qty.\"}},\"required\":[\"n\"],\"type\":\"object\"}\n- scan (tool lending_scan): {\"additionalProperties\":false,\"description\":\"Scans an item: one barcode per unit, each time waiting until the desk is ready again or asks a question (unknown-item, item-not-for-loan, induction-check, supervisor-required, ...; expect it with expectPrompt). Give exactly one of item and barcode.\",\"properties\":{\"barcode\":{\"description\":\"The barcode to send, quoted, such as \\\"5000000000017\\\", or a $reference to one, such as $item.barcode.\",\"type\":\"string\"},\"item\":{\"anyOf\":[{\"description\":\"a $reference to a slot, an oracle or $env\",\"pattern\":\"^\\\\$[A-Za-z_]\",\"type\":\"string\"},{\"additionalProperties\":false,\"properties\":{\"barcode\":{\"description\":\"What scanning the item sends.\",\"type\":\"string\"},\"code\":{\"description\":\"The item's code.\",\"type\":\"string\"},\"deposit\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}],\"description\":\"The deposit for one unit or one day.\"},\"title\":{\"description\":\"The item's name as the slip prints it.\",\"type\":\"string\"}},\"required\":[\"barcode\"],\"type\":\"object\"}],\"description\":\"The item to scan, whose barcode is sent: an item ({code, barcode, title, deposit}, at least its barcode) or a $reference to an item slot, such as $item.\"},\"times\":{\"description\":\"How many units to scan, from 1 to 99; 1 when left out.\",\"type\":\"integer\"}},\"type\":\"object\"}\n- scanChecked (tool lending_scan_checked): {\"additionalProperties\":false,\"description\":\"Scans an item and answers the desk's induction check itself when it asks one (Yes when inducted, No otherwise), then waits until the desk is ready again. Another question the desk asks stays open and fails the step unless expected. Give exactly one of item and barcode.\",\"properties\":{\"barcode\":{\"description\":\"The barcode to send, quoted, or a $reference to one.\",\"type\":\"string\"},\"inducted\":{\"description\":\"Whether the borrower completed the safety induction.\",\"type\":\"boolean\"},\"item\":{\"anyOf\":[{\"description\":\"a $reference to a slot, an oracle or $env\",\"pattern\":\"^\\\\$[A-Za-z_]\",\"type\":\"string\"},{\"additionalProperties\":false,\"properties\":{\"barcode\":{\"description\":\"What scanning the item sends.\",\"type\":\"string\"},\"code\":{\"description\":\"The item's code.\",\"type\":\"string\"},\"deposit\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}],\"description\":\"The deposit for one unit or one day.\"},\"title\":{\"description\":\"The item's name as the slip prints it.\",\"type\":\"string\"}},\"required\":[\"barcode\"],\"type\":\"object\"}],\"description\":\"The item to scan, whose barcode is sent: an item ({code, barcode, title, deposit}, at least its barcode) or a $reference to an item slot, such as $item.\"}},\"required\":[\"inducted\"],\"type\":\"object\"}\n- signOff (tool lending_sign_off): {\"additionalProperties\":false,\"description\":\"Signs the signed-on staff member off (the SIGN_OFF key) and waits until the desk is ready again. Takes no arguments: write signOff: {}.\",\"properties\":{},\"type\":\"object\"}\n- signOn (tool lending_sign_on): {\"additionalProperties\":false,\"description\":\"Signs a staff member on at the desk: enters their code, then their password, which comes from credentials.yaml and never from the scenario, each time waiting until the desk is ready again. A scenario that passes signs off again at its end.\",\"properties\":{\"staff\":{\"description\":\"The staff member to sign on: a $reference to a slot that declares a credential (credential: <redacted>), such as $assistant; never a staff member or a password written out.\",\"pattern\":\"^\\\\$[A-Za-z_][A-Za-z0-9_]*$\",\"type\":\"string\"}},\"required\":[\"staff\"],\"type\":\"object\"}\n- signOnAny (tool lending_sign_on_any): {\"additionalProperties\":false,\"description\":\"Signs a staff member on whichever way the desk asks: an auto-sign-on member at once, a member with a password with the password from credentials.yaml (only when the slot declares a credential), in one call that reports the branch it took (auto, password, passwordRequired with the warning lending.PASSWORD_REQUIRED, refused). A scenario that passes signs off again at its end.\",\"properties\":{\"staff\":{\"description\":\"The staff member to sign on: a $reference to a slot with their code, such as $assistant; when the slot declares a credential (credential: <redacted>) the password comes from credentials.yaml; never a password written out.\",\"pattern\":\"^\\\\$[A-Za-z_][A-Za-z0-9_]*$\",\"type\":\"string\"}},\"required\":[\"staff\"],\"type\":\"object\"}\nThe tools: skillroy_snapshot, skillroy_facts, skillroy_events, skillroy_catalogue, skillroy_resolve, skillroy_check, skillroy_observe, skillroy_note, lending_answer_prompt, lending_authorise, lending_deposit, lending_device_scan, lending_enter, lending_expect_prompt, lending_key, lending_quantity, lending_scan, lending_scan_checked, lending_sign_off, lending_sign_on, lending_sign_on_any, done, ask_person.\n",
         "type": "text"
       }
     ],
@@ -309,7 +396,7 @@
           "description": "A supervisor authorises what the desk asked for with the supervisor-required prompt: answers it with OK, then enters the supervisor's code and password, which comes from credentials.yaml, each time waiting until the desk is ready again. If the desk refuses, its authorisation-failed prompt fails the step.",
           "properties": {
             "staff": {
-              "description": "The supervisor who authorises: a $reference to a slot that declares a credential (credential: <redacted> staff, key: code}), such as $assistant; never a staff member or a password written out.",
+              "description": "The supervisor who authorises: a $reference to a slot that declares a credential (credential: <redacted>), such as $assistant; never a staff member or a password written out.",
               "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$",
               "type": "string"
             }
@@ -834,7 +921,7 @@
           "description": "Signs a staff member on at the desk: enters their code, then their password, which comes from credentials.yaml and never from the scenario, each time waiting until the desk is ready again. A scenario that passes signs off again at its end.",
           "properties": {
             "staff": {
-              "description": "The staff member to sign on: a $reference to a slot that declares a credential (credential: <redacted> staff, key: code}), such as $assistant; never a staff member or a password written out.",
+              "description": "The staff member to sign on: a $reference to a slot that declares a credential (credential: <redacted>), such as $assistant; never a staff member or a password written out.",
               "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$",
               "type": "string"
             }
@@ -855,7 +942,7 @@
           "description": "Signs a staff member on whichever way the desk asks: an auto-sign-on member at once, a member with a password with the password from credentials.yaml (only when the slot declares a credential), in one call that reports the branch it took (auto, password, passwordRequired with the warning lending.PASSWORD_REQUIRED, refused). A scenario that passes signs off again at its end.",
           "properties": {
             "staff": {
-              "description": "The staff member to sign on: a $reference to a slot with their code, such as $assistant; when the slot declares a credential (credential: <redacted> staff, key: code}) the password comes from credentials.yaml; never a password written out.",
+              "description": "The staff member to sign on: a $reference to a slot with their code, such as $assistant; when the slot declares a credential (credential: <redacted>) the password comes from credentials.yaml; never a password written out.",
               "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$",
               "type": "string"
             }
@@ -912,17 +999,15 @@
   "response": {
     "parts": [
       {
-        "text": "Scan the item.",
+        "text": "The loan is recorded.",
         "type": "text"
       },
       {
-        "id": "toolu_scripted_2",
+        "id": "toolu_scripted_5",
         "input": {
-          "barcode": null,
-          "item": "$item",
-          "times": null
+          "answer": "One plain item, the cheapest counted one with a deposit between 1.00 and 2.00, is lent to the walk-in borrower and its deposit is settled; the desk waits for the next loan."
         },
-        "name": "lending_scan",
+        "name": "done",
         "type": "tool_use"
       }
     ],
@@ -935,12 +1020,12 @@
       "cacheWrite5mTokens": 0,
       "costUsd": "0",
       "elapsedMs": 0,
-      "inputTokens": 7156,
+      "inputTokens": 7330,
       "model": "scripted-model",
       "note": null,
-      "outputTokens": 25,
+      "outputTokens": 60,
       "provider": "scripted",
-      "requestId": "scripted-7156-25",
+      "requestId": "scripted-7330-60",
       "requestedModel": "scripted-model"
     }
   },
