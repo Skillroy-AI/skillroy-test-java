@@ -1,5 +1,5 @@
 {
-  "planVersion": 6,
+  "planVersion": 7,
   "scenarioId": "session-vision-loan",
   "pack": "lending",
   "packVersion": "0.6.0",

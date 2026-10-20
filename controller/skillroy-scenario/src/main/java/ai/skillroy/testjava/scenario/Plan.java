@@ -19,6 +19,7 @@ package ai.skillroy.testjava.scenario;
 import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
+import ai.skillroy.testjava.protocol.PayloadMatch;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.TopicFilter;
@@ -57,12 +58,13 @@ import java.util.regex.Pattern;
  * order, no timestamps, no absolute paths, nothing from an environment), so compiling the same YAML with the same pack
  * version gives byte-identical files.
  *
- * <p>Shape, version 6 (phase2-contracts.md 5, phase3-contracts.md 4, phase4-contracts.md 7.3, phase5-contracts.md
- * 13.2, phase7-contracts.md 8.2; version 6 adds {@code images} and a call's {@code guard} to the keys of version 4 and
- * 5): {@code planVersion,
+ * <p>Shape, version 7 (phase2-contracts.md 5, phase3-contracts.md 4, phase4-contracts.md 7.3, phase5-contracts.md
+ * 13.2, phase7-contracts.md 8.2, phase8-contracts.md 8.2; version 6 adds {@code images} and a call's {@code guard} to
+ * the keys of version 4 and 5, version 7 a step's {@code facts}): {@code planVersion,
  * scenarioId, pack, packVersion, sourceHash, inference, requires, slots, oracles, resolutionGraph, steps[{id, verb,
- * source{line}, calls[{primitive, args, sync, timeoutMs, await?, handlesPrompt?, capture?, guard?}], expect[]}],
- * verify, cleanup, launchProperties, artifacts, onPrompt, stepTimeoutMs, ui?, web?, images?, bindTimeoutMs}}. A slot is
+ * source{line}, calls[{primitive, args, sync, timeoutMs, await?, handlesPrompt?, capture?, guard?}], expect[],
+ * facts?}], verify, cleanup, launchProperties, artifacts, onPrompt, stepTimeoutMs, ui?, web?, images?,
+ * bindTimeoutMs}}. A slot is
  * {@code fixture} ({@code value}, optional {@code credential}), {@code query} ({@code query, args, strategy?, verify,
  * credential?}) or {@code capture} ({@code step, fields}); an oracle is {@code {name, fn, args, mustEqual?,
  * crossCheck?}}; an element of {@code verify} or of a step's {@code expect} is an {@link Expectation} ({@code path})
@@ -79,7 +81,15 @@ import java.util.regex.Pattern;
  * computes it, and the reader requires a plan to say exactly that. {@code images} (version 6) lists, sorted, the labels
  * of every {@code expectImage} check and of every anchored {@code pointer} call's guard; absent when empty.
  *
- * <p>The reader accepts versions 1 to 6 (decisions D41, D58, D81, D325; a version 5 plan is read as version 6 without
+ * <p>Version 7 (phase8-contracts.md 8.2, decisions D595, D596) adds no top-level key. It adds a step's {@code facts}
+ * (the verb {@code captureFacts}, {@link FactCapture}), list filters, dotted filter fields and {@code [json]} in a path,
+ * the matchers {@code anyOf} and {@code containsWhere}, {@code {has: scalar}} in an event match, and the call keys
+ * {@code accept}, {@code rungs} and {@code minRung} (phase8-contracts.md 7.3, 7.6), each refused below version 7
+ * with "needs a version 7 plan". From version 7 on a step or a call holding a key outside {@code STEP_KEYS_V7} or
+ * {@code CALL_KEYS_V7} is refused; below 7 such a key is ignored, as every earlier reader did.
+ *
+ * <p>The reader accepts versions 1 to 7 (decisions D41, D58, D81, D325, D595; a version 6 plan is read as version 7
+ * without the Phase 8 content, which needs version 7; a version 5 plan is read as version 6 without
  * {@code images}, guards, the two Phase 7 checks, the four Phase 7 verbs and {@code inference: run}, which need
  * version 6). A version 1 plan is read as version 5 with
  * {@code inference: none}, no oracles, an empty graph and {@code bindTimeoutMs} 60000; a version 2 plan is read as
@@ -124,8 +134,8 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                    List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs, WebSettings web,
                    List<String> images) {
 
-    /** The plan format version this code writes; it reads 1 to 6 (phase7-contracts.md 8.2, decision D325). */
-    public static final int VERSION = 6;
+    /** The plan format version this code writes; it reads 1 to 7 (phase8-contracts.md 8.2, decision D595). */
+    public static final int VERSION = 7;
 
     /** {@code inference} of a plan whose bind needs no model (every plan before version 5). */
     public static final String INFERENCE_NONE = "none";
@@ -142,6 +152,32 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
 
     /** The verbs a plan below version 6 cannot hold (phase7-contracts.md 8.2). */
     static final Set<String> PHASE7_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage");
+
+    /** The base verb that captures facts into a slot (phase8-contracts.md 8.7): the one step that holds {@code facts}. */
+    static final String CAPTURE_FACTS = "captureFacts";
+
+    /** The verbs a plan below version 7 cannot hold (phase8-contracts.md 8.2). */
+    static final Set<String> PHASE8_VERBS = Set.of(CAPTURE_FACTS);
+
+    /**
+     * The keys a step object may hold from version 7 on (phase8-contracts.md 8.2, decision D596): any other is refused.
+     * A YAML step modifier compiles into the step's calls, so no step key is reserved for phase8-contracts.md 7.
+     */
+    static final Set<String> STEP_KEYS_V7 = Set.of("id", "verb", "source", "calls", "expect", "facts");
+
+    /**
+     * The keys a call object may hold from version 7 on (phase8-contracts.md 8.2, decision D596): any other is refused.
+     * {@code accept}, {@code rungs} and {@code minRung} are reserved here for phase8-contracts.md 7.3 and 7.6, whose
+     * readers are that section's own.
+     */
+    static final Set<String> CALL_KEYS_V7 = Set.of("primitive", "args", "sync", "timeoutMs", "await", "handlesPrompt",
+            "capture", "guard", "accept", "rungs", "minRung");
+
+    /** The most fields one {@code captureFacts} step captures (phase8-contracts.md 8.7). */
+    public static final int MAX_FACT_FIELDS = 32;
+
+    /** A field name of a {@code captureFacts} step: the name a later step reads as {@code $slot.<name>}. */
+    static final Pattern FACT_FIELD = Pattern.compile("[A-Za-z0-9_]+");
 
     /** The bind budget when {@code timeouts.bind} is absent: 60 s. */
     public static final long DEFAULT_BIND_TIMEOUT_MS = 60_000L;
@@ -445,17 +481,108 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
      * @param id {@code s1}, {@code s2}, …
      * @param verb the YAML verb
      * @param line source line in the YAML, 0 when unknown
-     * @param calls the calls in execution order (empty for {@code expect})
+     * @param calls the calls in execution order (empty for {@code expect} and {@code captureFacts})
      * @param expect checks evaluated after the calls (only {@code expect} steps have them)
+     * @param facts what a {@code captureFacts} step captures (phase8-contracts.md 8.7; plan version 7), null for every
+     *     other verb
      */
-    public record Step(String id, String verb, int line, List<Call> calls, List<Check> expect) {
+    public record Step(String id, String verb, int line, List<Call> calls, List<Check> expect, FactCapture facts) {
 
-        /** Copies the lists. */
+        /**
+         * Copies the lists.
+         *
+         * @throws IllegalArgumentException if {@code facts} is given on a verb other than {@code captureFacts}, or
+         *     beside a call or a check
+         */
         public Step {
             Objects.requireNonNull(id, "id");
             Objects.requireNonNull(verb, "verb");
             calls = List.copyOf(calls);
             expect = List.copyOf(expect);
+            if (facts != null && !CAPTURE_FACTS.equals(verb)) {
+                throw new IllegalArgumentException("step " + id + ": 'facts' is allowed on " + CAPTURE_FACTS
+                        + " only");
+            }
+            if (facts != null && (!calls.isEmpty() || !expect.isEmpty())) {
+                throw new IllegalArgumentException("step " + id + ": " + CAPTURE_FACTS + " has no calls");
+            }
+        }
+
+        /** A step without captured facts (the Phase 1-7 shape). */
+        public Step(String id, String verb, int line, List<Call> calls, List<Check> expect) {
+            this(id, verb, line, calls, expect, null);
+        }
+    }
+
+    /**
+     * What a {@code captureFacts} step captures (phase8-contracts.md 8.7, decision D604): fact paths read once where the
+     * step stands and bound into a captured slot. {@code plan.json}: {@code "facts": {"slot", "fields": {<name>:
+     * {"path": p} | {"size": p}}}}, the fields sorted by name.
+     *
+     * @param slot the captured slot's name, {@code [A-Za-z_][A-Za-z0-9_]*}
+     * @param fields 1 to {@link Plan#MAX_FACT_FIELDS} fields by name ({@code [A-Za-z0-9_]+}), sorted
+     */
+    public record FactCapture(String slot, Map<String, FactField> fields) {
+
+        /**
+         * Sorts the fields.
+         *
+         * @throws IllegalArgumentException if the slot or a field name is malformed, or there are no fields or more
+         *     than {@link Plan#MAX_FACT_FIELDS}
+         */
+        public FactCapture {
+            if (slot == null || !NAME.matcher(slot).matches()) {
+                throw new IllegalArgumentException("the slot name must match [A-Za-z_][A-Za-z0-9_]*, found " + slot);
+            }
+            if (fields == null || fields.isEmpty() || fields.size() > MAX_FACT_FIELDS) {
+                throw new IllegalArgumentException("captureFacts needs 1 to " + MAX_FACT_FIELDS + " fields, found "
+                        + (fields == null ? 0 : fields.size()));
+            }
+            Map<String, FactField> sorted = new TreeMap<>();
+            for (Map.Entry<String, FactField> e : fields.entrySet()) {
+                if (e.getKey() == null || !FACT_FIELD.matcher(e.getKey()).matches()) {
+                    throw new IllegalArgumentException("the field name '" + e.getKey() + "' must match [A-Za-z0-9_]+");
+                }
+                sorted.put(e.getKey(), Objects.requireNonNull(e.getValue(), "field " + e.getKey()));
+            }
+            fields = Collections.unmodifiableMap(new LinkedHashMap<>(sorted));
+        }
+
+        /** {@code {slot, fields}}, the fields sorted; a new map on each call. */
+        public Map<String, Object> toJson() {
+            Map<String, Object> json = new LinkedHashMap<>();
+            json.put("slot", slot);
+            Map<String, Object> fieldsJson = new LinkedHashMap<>();
+            for (Map.Entry<String, FactField> e : fields.entrySet()) {
+                fieldsJson.put(e.getKey(), e.getValue().toJson());
+            }
+            json.put("fields", fieldsJson);
+            return json;
+        }
+    }
+
+    /**
+     * One captured fact (phase8-contracts.md 8.7): the value at a path, or with {@code size} the size the {@code size}
+     * matcher measures (a list's or map's size, a string's length). {@code plan.json}: {@code {"path": p}} or
+     * {@code {"size": p}}.
+     *
+     * @param path an expectation path; it may hold {@code $slot} references in filter values
+     * @param size true to capture the size of the value at the path
+     */
+    public record FactField(String path, boolean size) {
+
+        /** @throws IllegalArgumentException if the path is null or blank */
+        public FactField {
+            if (path == null || path.isBlank()) {
+                throw new IllegalArgumentException("a captured fact needs a path");
+            }
+        }
+
+        /** {@code {"path": p}} or {@code {"size": p}}; a new map on each call. */
+        public Map<String, Object> toJson() {
+            Map<String, Object> json = new LinkedHashMap<>();
+            json.put(size ? "size" : "path", path);
+            return json;
         }
     }
 
@@ -798,6 +925,9 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             s.put("source", source);
             s.put("calls", step.calls().stream().map(Call::toJson).toList());
             s.put("expect", step.expect().stream().map(Check::toJson).toList());
+            if (step.facts() != null) {
+                s.put("facts", step.facts().toJson());
+            }
             stepsJson.add(s);
         }
         json.put("steps", stepsJson);
@@ -875,14 +1005,14 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
 
     /**
      * @throws IOException if the file cannot be read
-     * @throws ScenarioException if it is not a valid plan of version 1 to 6
+     * @throws ScenarioException if it is not a valid plan of version 1 to 7
      */
     public static Plan read(Path file) throws IOException, ScenarioException {
         return parse(Files.readString(file, StandardCharsets.UTF_8));
     }
 
     /**
-     * @throws ScenarioException if the text is not a valid plan of version 1 to 6
+     * @throws ScenarioException if the text is not a valid plan of version 1 to 7
      */
     public static Plan parse(String text) throws ScenarioException {
         Map<String, Object> json;
@@ -903,16 +1033,20 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
      * element's {@code aggregates} need version 3, the top-level {@code web} needs version 4, {@code inference: bind}
      * and the strategy token {@code llm-sql} need version 5; {@code images}, a call's {@code guard}, the checks
      * {@code visual} and {@code image}, the verbs {@code aiAct}, {@code aiExpect}, {@code pointer} and
-     * {@code expectImage} and {@code inference: run} need version 6. A plan's {@code inference} must be what its slots
+     * {@code expectImage} and {@code inference: run} need version 6; a step's {@code facts} (the verb
+     * {@code captureFacts}), a list filter, a dotted filter field or {@code [json]} in a path, the matchers
+     * {@code anyOf} and {@code containsWhere} and an operator object ({@code {has: …}}) in an event match need version
+     * 7, from which on a step or a call holding a key outside {@code STEP_KEYS_V7} or {@code CALL_KEYS_V7} is refused
+     * (phase8-contracts.md 8.2). A plan's {@code inference} must be what its slots
      * and steps give ({@link #inferenceOf(List, List)}) and its {@code images} what its steps name
      * ({@link #imagesOf}); the tokens {@code llm-reason} and {@code llm-vision} are refused as not in this version.
      *
-     * @throws ScenarioException if a key is missing, unknown or of the wrong type, or the version is not 1 to 6
+     * @throws ScenarioException if a key is missing, unknown or of the wrong type, or the version is not 1 to 7
      */
     public static Plan fromJson(Map<String, Object> json) throws ScenarioException {
         PlanReader r = new PlanReader(json);
         if (!(json.get("planVersion") instanceof Long rawVersion) || rawVersion < 1 || rawVersion > VERSION) {
-            throw r.error("planVersion " + json.get("planVersion") + " is not supported (expected 1, 2, 3, 4, 5 or "
+            throw r.error("planVersion " + json.get("planVersion") + " is not supported (expected 1, 2, 3, 4, 5, 6 or "
                     + VERSION + ")");
         }
         boolean v2OrLater = rawVersion >= 2;
@@ -960,6 +1094,9 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         }
         List<Step> steps = new ArrayList<>();
         for (Map<String, Object> s : r.objects(json, "steps")) {
+            if (rawVersion >= 7) {
+                r.keys(s, STEP_KEYS_V7, "step " + r.str(s, "id"));
+            }
             List<Call> calls = new ArrayList<>();
             for (Map<String, Object> c : r.objects(s, "calls")) {
                 calls.add(r.call(c));
@@ -976,7 +1113,8 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             if (PHASE7_VERBS.contains(verb) && rawVersion < 6) {
                 throw r.error("the verb '" + verb + "' needs a version 6 plan");
             }
-            steps.add(new Step(r.str(s, "id"), verb, (int) line, calls, expect));
+            String id = r.str(s, "id");
+            steps.add(new Step(id, verb, (int) line, calls, expect, r.facts(s, id, verb, calls, expect)));
         }
         String given = inference;
         String derived = inferenceOf(slots, steps);
@@ -1140,7 +1278,7 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         private static final Set<String> EXPECTATION_KEYS = Set.of("path", "matcher", "capability");
 
         private String id;
-        /** The plan's own version (1 to 6); keys of a later version are refused. */
+        /** The plan's own version (1 to 7); keys of a later version are refused. */
         private int version = VERSION;
 
         /** Errors name the scenario id as soon as the JSON holds one. */
@@ -1376,6 +1514,9 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             if (primitive.isBlank()) {
                 throw error("'primitive' must not be blank");
             }
+            if (version >= 7) {
+                keys(json, CALL_KEYS_V7, "call " + primitive);
+            }
             AwaitSpec await = json.get("await") == null ? null : await(primitive, object(json, "await"));
             if (sync == Sync.EVENT && await == null) {
                 throw error("call " + primitive + ": sync EVENT needs 'await'");
@@ -1419,8 +1560,104 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                     throw error("call " + primitive + ": " + e.getMessage());
                 }
             }
+            syncAwaitMatch(primitive, object(json, "args"));
             return new Call(primitive, object(json, "args"), sync, positive(json, "timeoutMs"), await,
                     Boolean.TRUE.equals(handles), capture, guard);
+        }
+
+        /**
+         * The {@code match} argument of a {@code sync.await} call (phase8-contracts.md 8.9): the rules of an await's
+         * match ({@link AwaitRules#checkMatch}), and an operator object only from version 7 on.
+         */
+        private void syncAwaitMatch(String primitive, Map<String, Object> args) throws ScenarioException {
+            if (!"sync.await".equals(primitive) || !(args.get("match") instanceof Map<?, ?> raw)) {
+                return;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> match = (Map<String, Object>) raw;
+            if (version < 7 && PayloadMatch.usesOperator(match)) {
+                throw error("call " + primitive + " await: {has} needs a version 7 plan");
+            }
+            String problem = AwaitRules.checkMatch(match);
+            if (problem != null) {
+                throw error("call " + primitive + ": " + problem);
+            }
+        }
+
+        /**
+         * A step's {@code facts} (phase8-contracts.md 8.7; version 7): exactly {@code slot} and {@code fields} on a
+         * {@code captureFacts} step without calls or checks, each field exactly one of {@code path} and {@code size}
+         * holding an expectation path; null for every other step. Below version 7 the verb and the member are refused.
+         */
+        FactCapture facts(Map<String, Object> s, String id, String verb, List<Call> calls, List<Check> expect)
+                throws ScenarioException {
+            boolean capture = PHASE8_VERBS.contains(verb);
+            boolean present = s.containsKey("facts");
+            if (version < 7) {
+                if (capture) {
+                    throw error("the verb '" + verb + "' needs a version 7 plan");
+                }
+                if (present) {
+                    throw error("step " + id + ": 'facts' needs a version 7 plan");
+                }
+                return null;
+            }
+            if (!present) {
+                if (capture) {
+                    throw error("step " + id + ": " + CAPTURE_FACTS + " needs 'facts'");
+                }
+                return null;
+            }
+            if (!capture) {
+                throw error("step " + id + ": 'facts' is allowed on " + CAPTURE_FACTS + " only");
+            }
+            if (!calls.isEmpty() || !expect.isEmpty()) {
+                throw error("step " + id + ": " + CAPTURE_FACTS + " has no calls");
+            }
+            String where = "step " + id + " facts";
+            Map<String, Object> json = object(s, "facts");
+            keys(json, Set.of("slot", "fields"), where);
+            String slot = str(json, "slot");
+            Map<String, FactField> fields = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> e : object(json, "fields").entrySet()) {
+                String field = where + ": field '" + e.getKey() + "'";
+                if (!(e.getValue() instanceof Map<?, ?> raw) || raw.size() != 1
+                        || !(raw.containsKey("path") || raw.containsKey("size"))) {
+                    throw error(field + " needs exactly one of 'path' and 'size'");
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> typed = (Map<String, Object>) raw;
+                boolean size = typed.containsKey("size");
+                if (!(typed.get(size ? "size" : "path") instanceof String path)) {
+                    throw error(field + ": '" + (size ? "size" : "path") + "' must be a string");
+                }
+                try {
+                    gatePath(ExpectationPath.parse(path), field);
+                    fields.put(e.getKey(), new FactField(path, size));
+                } catch (IllegalArgumentException ex) {
+                    throw error(field + ": " + ex.getMessage());
+                }
+            }
+            try {
+                return new FactCapture(slot, fields);
+            } catch (IllegalArgumentException e) {
+                throw error(where + ": " + e.getMessage());
+            }
+        }
+
+        /** Refuses a path's Phase 8 item (a list filter, a dotted filter field, {@code [json]}) below version 7. */
+        private void gatePath(ExpectationPath path, String where) throws ScenarioException {
+            if (version < 7 && path.minPlanVersion() >= 7) {
+                throw error(where + ": " + path.version7Item() + " needs a version 7 plan");
+            }
+        }
+
+        /** Refuses {@code anyOf} or {@code containsWhere} inside a matcher in normal form below version 7. */
+        private void gateMatcher(Object normalised, String where) throws ScenarioException {
+            if (version < 7 && Matchers.minPlanVersion(normalised) >= 7) {
+                throw error(where + ": matcher '" + Matchers.version7Matcher(normalised) + "' needs a version 7"
+                        + " plan");
+            }
         }
 
         /** A call's {@code await} object: {@code topics}, {@code match} (object or null), {@code timeoutMs}. */
@@ -1436,6 +1673,9 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 throw error(where + "'topics' must name at least one topic glob");
             }
             Map<String, Object> match = json.get("match") == null ? null : object(json, "match");
+            if (version < 7 && PayloadMatch.usesOperator(match)) {
+                throw error(where + "{has} needs a version 7 plan");
+            }
             String problem = match == null ? null : AwaitRules.checkMatch(match);
             if (problem == null) {
                 problem = AwaitRules.checkTimeout(num(json, "timeoutMs"));
@@ -1581,8 +1821,10 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             }
             String path = str(json, "path");
             try {
-                ExpectationPath.parse(path);
-                return new Expectation(path, Matchers.normalise(json.get("matcher")), (String) capability);
+                gatePath(ExpectationPath.parse(path), "expectation " + path);
+                Map<String, Object> matcher = Matchers.normalise(json.get("matcher"));
+                gateMatcher(matcher, "expectation " + path);
+                return new Expectation(path, matcher, (String) capability);
             } catch (IllegalArgumentException e) {
                 throw error("expectation " + path + ": " + e.getMessage());
             }
@@ -1637,23 +1879,37 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 }
             }
             try {
-                Object rows = Matchers.normalise(json.get("rows"));
+                Object rows = rowMatcher(Matchers.normalise(json.get("rows")), where);
                 Map<String, Object> expect = new LinkedHashMap<>();
                 for (Map.Entry<String, Object> e : object(json, "expect").entrySet()) {
                     if (e.getValue() == null) {
                         throw error(where + ": column " + e.getKey() + " needs a matcher");
                     }
-                    expect.put(e.getKey(), Matchers.normalise(e.getValue()));
+                    expect.put(e.getKey(), rowMatcher(Matchers.normalise(e.getValue()), where));
                 }
                 Map<String, Object> normalAggregates = new LinkedHashMap<>();
                 for (Map.Entry<String, Object> e : aggregates.entrySet()) {
-                    normalAggregates.put(e.getKey(), Matchers.normalise(e.getValue()));
+                    normalAggregates.put(e.getKey(), rowMatcher(Matchers.normalise(e.getValue()), where));
                 }
                 return new RowCheck(table, str(json, "source"), sql, params, rows, expect, normalAggregates,
                         (String) capability);
             } catch (IllegalArgumentException e) {
                 throw error(where + ": " + e.getMessage());
             }
+        }
+
+        /**
+         * A stored-row check's matcher in normal form (its {@code rows}, a column's, an aggregate's): {@code anyOf}
+         * only from version 7 on, and {@code containsWhere} never, whatever the version (phase8-contracts.md 8.4,
+         * decision D600: a cell is a scalar).
+         */
+        private Object rowMatcher(Map<String, Object> normalised, String where) throws ScenarioException {
+            if (Matchers.mentions(normalised, Matchers.CONTAINS_WHERE)) {
+                throw error(where + ": '" + Matchers.CONTAINS_WHERE + "' needs a list, and a stored-row cell is a"
+                        + " scalar");
+            }
+            gateMatcher(normalised, where);
+            return normalised;
         }
     }
 }

@@ -91,6 +91,33 @@ final class ExpectationPath {
     }
 
     /**
+     * The plan version this path needs (phase8-contracts.md 8.2): 7 when it holds a list filter ({@code [*…]}), a
+     * dotted filter field or {@code [json]}, else 1.
+     */
+    int minPlanVersion() {
+        return version7Item() == null ? 1 : 7;
+    }
+
+    /**
+     * The first Phase 8 item of this path as the plan reader's refusal names it ({@code "a list filter"},
+     * {@code "a dotted filter field"}), or null. A filter field that starts with {@code *} or holds a {@code .} is
+     * such an item: a reader below version 7 would have read it as a literal key.
+     */
+    String version7Item() {
+        for (Segment segment : segments) {
+            if (segment instanceof Filter f) {
+                if (f.field().startsWith("*")) {
+                    return "a list filter";
+                }
+                if (f.field().indexOf('.') >= 0) {
+                    return "a dotted filter field";
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * @throws IllegalArgumentException with the position and reason if the text does not follow the grammar
      */
     static ExpectationPath parse(String text) {

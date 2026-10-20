@@ -1,5 +1,5 @@
 {
-  "planVersion": 6,
+  "planVersion": 7,
   "scenarioId": "borrow-in-page",
   "pack": "webhost",
   "packVersion": "0.1.0",

@@ -153,6 +153,86 @@ final class Matchers {
         }
     }
 
+    /** The matcher of a list of alternatives (phase8-contracts.md 8.4); it needs a version 7 plan. */
+    static final String ANY_OF = "anyOf";
+
+    /** The matcher of "some element of the list where …" (phase8-contracts.md 8.4); it needs a version 7 plan. */
+    static final String CONTAINS_WHERE = "containsWhere";
+
+    /** The matchers a plan below version 7 cannot hold (phase8-contracts.md 8.2). */
+    private static final List<String> VERSION7_NAMES = List.of(ANY_OF, CONTAINS_WHERE);
+
+    /** How deep {@link #mentions} looks; the plan reader's own depth bound is 200. */
+    private static final int MAX_WALK_DEPTH = 200;
+
+    /**
+     * The plan version a matcher in normal form needs (phase8-contracts.md 8.2): 7 when {@code anyOf} or
+     * {@code containsWhere} appears anywhere in it (through {@code not}, {@code size}, {@code anyOf} and
+     * {@code containsWhere}), else 1.
+     */
+    static int minPlanVersion(Object normalised) {
+        return version7Matcher(normalised) == null ? 1 : 7;
+    }
+
+    /** The first of {@code anyOf} and {@code containsWhere} the matcher holds anywhere, or null. */
+    static String version7Matcher(Object normalised) {
+        for (String name : VERSION7_NAMES) {
+            if (mentions(normalised, name)) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * True when the matcher in normal form uses the matcher {@code name} at its top or nested inside {@code not},
+     * {@code size}, {@code anyOf} or {@code containsWhere}; the operand of {@code equals}, {@code contains} and
+     * {@code in} is a value and is not searched.
+     */
+    static boolean mentions(Object normalised, String name) {
+        return mentions(normalised, name, 0);
+    }
+
+    private static boolean mentions(Object matcher, String name, int depth) {
+        if (depth > MAX_WALK_DEPTH || !(matcher instanceof Map<?, ?> map) || map.size() != 1) {
+            return false;
+        }
+        Map.Entry<?, ?> only = map.entrySet().iterator().next();
+        String key = String.valueOf(only.getKey());
+        if (key.equals(name)) {
+            return true;
+        }
+        Object value = only.getValue();
+        switch (key) {
+            case "not", "size" -> {
+                return mentions(value, name, depth + 1);
+            }
+            case ANY_OF -> {
+                if (value instanceof List<?> alternatives) {
+                    for (Object alternative : alternatives) {
+                        if (mentions(alternative, name, depth + 1)) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            case CONTAINS_WHERE -> {
+                if (value instanceof Map<?, ?> fields) {
+                    for (Object field : fields.values()) {
+                        if (mentions(field, name, depth + 1)) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            default -> {
+                return false;
+            }
+        }
+    }
+
     private static boolean isReference(Object value) {
         return value instanceof String s && References.containsReference(s);
     }
