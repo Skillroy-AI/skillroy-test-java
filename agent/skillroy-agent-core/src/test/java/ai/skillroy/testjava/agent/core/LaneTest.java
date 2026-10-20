@@ -311,8 +311,15 @@ class LaneTest {
                 .get("threads")).get("lanes");
         assertEquals(1L, ((Map<?, ?>) lanes.get(CoreTestModule.SLOW_LANE)).get("abandoned"));
         TestState.laneRelease.countDown();
-        AgentHarness.await("the stuck call ended", 10000, () -> ((Map<?, ?>) ((Map<?, ?>) agent.valueMap(
-                "agent.info", null).get("threads")).get("abandoned")).isEmpty());
+        // The dispatcher's abandoned-call entry is cleared when the stuck task returns; the lane's own counts are
+        // cleared a moment later on the lane's thread, and a call in between is rightly "lane stuck" (seen once on an
+        // emulated amd64 Java 8 test JVM, 2026-10-20). Wait for both.
+        AgentHarness.await("the stuck call ended", 10000, () -> {
+            Map<?, ?> threads = (Map<?, ?>) agent.valueMap("agent.info", null).get("threads");
+            Map<?, ?> slow = (Map<?, ?>) ((Map<?, ?>) threads.get("lanes")).get(CoreTestModule.SLOW_LANE);
+            return ((Map<?, ?>) threads.get("abandoned")).isEmpty() && Long.valueOf(0).equals(slow.get("abandoned"))
+                    && Long.valueOf(0).equals(slow.get("active"));
+        });
         assertTrue(((String) agent.value("test.lane.stuck", null)).startsWith("skillroy-lane-"));
         assertEquals(2, TestState.LANE_RUNS.get());
 
