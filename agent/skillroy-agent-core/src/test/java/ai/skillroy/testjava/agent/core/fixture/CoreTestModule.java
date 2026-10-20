@@ -23,6 +23,7 @@ import ai.skillroy.testjava.agent.api.PrimitiveSpec;
 import ai.skillroy.testjava.agent.api.Primitives;
 import ai.skillroy.testjava.agent.api.Probe;
 import ai.skillroy.testjava.agent.api.ProbeResult;
+import ai.skillroy.testjava.agent.api.QuiescentPoint;
 import ai.skillroy.testjava.agent.api.ThreadPolicy;
 import ai.skillroy.testjava.agent.api.spi.AppStateProvider;
 import ai.skillroy.testjava.agent.api.spi.DeviceAdapter;
@@ -65,12 +66,24 @@ import java.util.regex.Pattern;
  *
  * <p>It registers a ProductionMarker that passes, so that the default fixture set (which contains FAILED modules)
  * still becomes ready under the production gate of finding S14; {@code coretest.noMarker=true} leaves it out.
+ *
+ * <p>Phase 8 (phase8-contracts.md 4.1, 4.2): it declares the lanes {@link #WHERE_LANE} (2 threads, queue 4) and
+ * {@link #SLOW_LANE} (1 thread, queue 1); with {@code coretest.appThread=true} and {@code coretest.quiescent=true} its
+ * provider offers a {@link QuiescentPoint} (allowance {@link #ALLOWANCE_MS}, capacity 4) that an "engine" thread
+ * named with the forbidden prefix drives every 2 ms unless {@link TestState#enginePaused}
+ * ({@code coretest.quiescent=null} offers none, {@code throw} makes {@code quiescentPoint()} throw).
  */
 public final class CoreTestModule implements AgentModule {
 
     static final String FORBIDDEN_PREFIX = "coretest-forbidden";
     /** The lane {@code test.where.lane} names (phase8-contracts.md 4.2). */
     static final String WHERE_LANE = "coretest.where";
+    /** The lane of {@code test.lane.stuck}: one thread, a queue of one. */
+    public static final String SLOW_LANE = "coretest.slow";
+    /** The fixture point's allowance; {@code test.quiescent.big}'s budget is twice it. */
+    public static final long ALLOWANCE_MS = 100L;
+    /** {@code test.quiescent.view}'s budget. */
+    public static final long VIEW_BUDGET_MS = 20L;
     /** The topic of {@code coretest.eventMask}'s planted events and what its policy answers (Phase 8, 5.1). */
     public static final String MASKED_TOPIC = "test.masked";
     public static final String PERSONAL = "<personal>";
@@ -81,6 +94,9 @@ public final class CoreTestModule implements AgentModule {
 
     private ExecutorService appThread;
     private ExecutorService forbiddenThread;
+    private volatile QuiescentPoint point;
+    private volatile Thread engine;
+    private volatile boolean engineStopped;
 
     @Override
     public String id() {
@@ -431,6 +447,8 @@ public final class CoreTestModule implements AgentModule {
                     }
                 }));
 
+        registerQuiescentAndLanes(ctx);
+
         if ("manual".equals(ctx.options().get("coretest.readiness"))) {
             ctx.spi().register(ReadinessSource.class, new ReadinessSource() {
                 @Override
@@ -489,6 +507,14 @@ public final class CoreTestModule implements AgentModule {
                 @Override
                 public boolean available() {
                     return TestState.appAvailable;
+                }
+
+                @Override
+                public QuiescentPoint quiescentPoint() {
+                    if ("throw".equals(ctx.options().get("coretest.quiescent"))) {
+                        throw new IllegalStateException("no point today");
+                    }
+                    return point;
                 }
 
                 @Override
@@ -596,6 +622,148 @@ public final class CoreTestModule implements AgentModule {
         return payload;
     }
 
+    /**
+     * Phase 8 (phase8-contracts.md 4.1, 4.2): the fixture's lanes, its quiescent point and engine thread, and the
+     * primitives that run there.
+     */
+    private void registerQuiescentAndLanes(final AgentContext ctx) {
+        ctx.threads().declareLane(WHERE_LANE, 2, 4);
+        ctx.threads().declareLane(SLOW_LANE, 1, 1);
+        if ("true".equals(ctx.options().get("coretest.quiescent"))) {
+            final QuiescentPoint p = new QuiescentPoint(ALLOWANCE_MS, 4);
+            point = p;
+            TestState.point = p;
+            engineStopped = false;
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    while (!engineStopped) {
+                        if (!TestState.enginePaused) {
+                            p.runOne(TestState.engineAvailableMs);
+                        }
+                        if (Thread.currentThread().isInterrupted()) {
+                            TestState.engineInterrupted = true;
+                        }
+                        try {
+                            Thread.sleep(2L);
+                        } catch (InterruptedException e) {
+                            TestState.engineInterrupted = true;
+                        }
+                    }
+                }
+            }, FORBIDDEN_PREFIX + "-engine");
+            t.setDaemon(true);
+            engine = t;
+            t.start();
+        }
+        ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.quiescent.view")
+                .thread(ThreadPolicy.APP_QUIESCENT).quiescentBudgetMs(VIEW_BUDGET_MS).timeoutMs(2000L).build(),
+                new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) throws Exception {
+                        TestState.QUIESCENT_RUNS.incrementAndGet();
+                        if (Thread.currentThread().isInterrupted()) {
+                            TestState.engineInterrupted = true;
+                        }
+                        long sleep = TestState.quiescentSleepMs;
+                        if (sleep > 0) {
+                            long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(sleep);
+                            while (System.nanoTime() - until < 0) {
+                                Thread.yield();
+                            }
+                        }
+                        nested(ctx);
+                        String thread = Thread.currentThread().getName();
+                        ctx.events().publish("test.quiescent", "coretest",
+                                Collections.<String, Object>singletonMap("thread", thread));
+                        Map<String, Object> out = new LinkedHashMap<String, Object>();
+                        out.put("thread", thread);
+                        out.put("correlationId", inv.correlationId());
+                        out.put("interrupted", Boolean.valueOf(Thread.currentThread().isInterrupted()));
+                        return out;
+                    }
+                }));
+        ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.quiescent.mutate")
+                .thread(ThreadPolicy.APP_QUIESCENT).quiescentBudgetMs(VIEW_BUDGET_MS).mutating().build(),
+                new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        TestState.QUIESCENT_RUNS.incrementAndGet();
+                        return Thread.currentThread().getName();
+                    }
+                }));
+        ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.quiescent.big")
+                .thread(ThreadPolicy.APP_QUIESCENT).quiescentBudgetMs(2 * ALLOWANCE_MS).build(),
+                new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        TestState.QUIESCENT_RUNS.incrementAndGet();
+                        return Thread.currentThread().getName();
+                    }
+                }));
+        ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.lane.stuck").lane(SLOW_LANE).build(),
+                new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        TestState.LANE_RUNS.incrementAndGet();
+                        boolean released = awaitIgnoringInterrupts(TestState.laneRelease, 60);
+                        return released ? Thread.currentThread().getName() : "gave up";
+                    }
+                }));
+        ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.lane.none").lane("coretest.undeclared")
+                .build(), new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        TestState.LANE_RUNS.incrementAndGet();
+                        return "ran";
+                    }
+                }));
+    }
+
+    /** What {@link TestState#quiescentNested} asks the quiescent view to try from inside its task. */
+    private void nested(AgentContext ctx) {
+        String mode = TestState.quiescentNested;
+        try {
+            if ("call".equals(mode)) {
+                ctx.threads().call(ThreadPolicy.WORKER, new Callable<String>() {
+                    @Override
+                    public String call() {
+                        return "ran";
+                    }
+                }, 1000L);
+                TestState.NESTED.add("ran");
+            } else if ("callQuiescent".equals(mode)) {
+                ctx.threads().callQuiescent(new Callable<String>() {
+                    @Override
+                    public String call() {
+                        return "ran";
+                    }
+                }, 10L, 1000L);
+                TestState.NESTED.add("ran");
+            } else if ("await".equals(mode)) {
+                point.await(new Callable<String>() {
+                    @Override
+                    public String call() {
+                        return "ran";
+                    }
+                }, 10L, 1000L);
+                TestState.NESTED.add("ran");
+            } else if ("post".equals(mode)) {
+                ctx.threads().post(ThreadPolicy.WORKER, new Runnable() {
+                    @Override
+                    public void run() {
+                        TestState.NESTED.add("posted ran on " + Thread.currentThread().getName());
+                    }
+                });
+                TestState.NESTED.add("posted");
+            }
+        } catch (RpcException e) {
+            TestState.NESTED.add(Long.valueOf(e.error().code()));
+        } catch (Exception e) {
+            TestState.NESTED.add(e.toString());
+        }
+    }
+
     /** A primitive that waits for {@link TestState#stuck} and ignores interrupts, as host code blocked on a monitor. */
     private void registerStuck(AgentContext ctx, String name, ThreadPolicy policy) {
         ctx.primitives().register(Primitives.of(PrimitiveSpec.builder(name).thread(policy).build(),
@@ -676,6 +844,12 @@ public final class CoreTestModule implements AgentModule {
     public void uninstall() {
         TestState.LIFECYCLE.add("uninstall");
         TestState.UNINSTALLED.add(id());
+        QuiescentPoint p = point;
+        if (p != null) {
+            TestState.pointClosedAtUninstall = Boolean.valueOf(p.isClosed());
+            engineStopped = true;
+            p.close();
+        }
         if (appThread != null) {
             appThread.shutdownNow();
         }

@@ -154,3 +154,6 @@ SELECT /*+ OPTIMIZE */ i.code FROM item i
 
 @@ UNSUPPORTED OPTIMIZE FOR after FETCH FIRST
 SELECT i.code FROM item i ORDER BY i.code FETCH FIRST 10 ROWS ONLY OPTIMIZE FOR 10 ROWS
+
+@@ PROCEDURE CALL of a procedure: no data channel runs a procedure call (gap 119; BS6 admitted this one)
+CALL open_loan_count(?)

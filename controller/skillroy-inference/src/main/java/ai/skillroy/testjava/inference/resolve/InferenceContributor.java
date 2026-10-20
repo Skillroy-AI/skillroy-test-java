@@ -98,6 +98,11 @@ public final class InferenceContributor implements ResolverContributor, Capabili
             return List.of();
         }
         for (SqlAllowList list : lists) {
+            String procedures = AllowListCheck.proceduresRefusal(list);
+            if (procedures != null) {
+                // phase8-contracts.md 4.5 (gap 119): refused where the list is put to use, at load.
+                throw new ContributionException(procedures);
+            }
             if (!SqlGuard.served(list.dialect())) {
                 throw new ContributionException("SQL dialect " + list.dialect() + " of source " + list.source()
                         + " is not served: no BS6 corpus");

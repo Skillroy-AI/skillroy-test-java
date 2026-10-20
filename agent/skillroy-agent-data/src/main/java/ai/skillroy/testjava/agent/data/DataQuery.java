@@ -18,6 +18,8 @@ package ai.skillroy.testjava.agent.data;
 
 import ai.skillroy.testjava.agent.api.AgentLog;
 import ai.skillroy.testjava.agent.api.SpiRegistry;
+import ai.skillroy.testjava.agent.api.ThreadBroker;
+import ai.skillroy.testjava.agent.api.ThreadPolicy;
 import ai.skillroy.testjava.agent.api.spi.DataSourceProvider;
 import ai.skillroy.testjava.agent.api.spi.MaskPolicy;
 import ai.skillroy.testjava.agent.api.spi.QueryResult;
@@ -25,6 +27,7 @@ import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.JsonView;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.sql.Rows;
+import ai.skillroy.testjava.protocol.sql.SelectLabels;
 import ai.skillroy.testjava.protocol.sql.StatementGuard;
 import ai.skillroy.testjava.protocol.sql.ValueConverter;
 
@@ -32,11 +35,17 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 
@@ -58,29 +67,56 @@ import java.util.function.Predicate;
  * otherwise {@code data} carries {@code messageWithheld: true}. Parameter values and cell values never appear in an
  * error message or in the log.
  *
- * <p>Stateless apart from its collaborators; safe for concurrent calls on agent worker threads.
+ * <p>Phase 8 (phase8-contracts.md 4.2 to 4.4, D527, D529 to D532, D638): the provider's work (either form, and
+ * {@code columns(table)}) is handed to the source's lane ({@code DataSourceProvider.lane()}) or, without one, to a
+ * nested agent worker task, and the dispatching worker waits at most the call's remaining time less a reserve of
+ * {@value #RESERVE_MS} ms. On expiry it marks the read's {@link Control} cancelled, starts the registered cancel
+ * actions off the dispatching worker, waits at most {@code reserve - 50 ms} for them and the read together and
+ * answers its own {@code TIMEOUT} inside the reserve ({@code data {primitive, timeoutMs, source, lane, waitedMs,
+ * cancelled, cancelPending?, stillRunning, enforcesTimeout}}), so the dispatcher never abandons the call. A read of a
+ * source without a lane that still runs after its call ended makes the next read of that source answer
+ * {@code BUSY} until it ends (the per-source gate); a lane's own {@code BUSY} applies instead on a lane. Columns a
+ * provider leaves unnamed take the labels of the statement's select list ({@link SelectLabels}), or, for
+ * {@code SELECT * FROM <table>}, the provider's {@code columns(table)}, before the masks run ({@link Table}).
+ *
+ * <p>Safe for concurrent calls on agent worker threads; its state (the per-source gate and the live controls) is
+ * guarded by its own locks.
  */
 final class DataQuery {
 
     /** Default and upper bound of {@code maxRows}. */
     static final int MAX_ROWS = 200;
+    /** The module answers this long before the dispatcher would (phase8-contracts.md 4.2). */
+    static final long RESERVE_MS = 250L;
+    /** Of the reserve, what is left when the module answers after giving up on a read (D638). */
+    static final long ANSWER_MARGIN_MS = 50L;
 
     private final SpiRegistry spi;
     private final AgentLog log;
+    private final ThreadBroker threads;
     /** Replaces the provider's own opt-in answer; null in production. */
     private final Predicate<DataSourceProvider> optInOverride;
+    /** Reads of sources without a lane that still run after their call ended, per source id; guarded by itself. */
+    private final Map<String, List<Read>> lingering = new HashMap<String, List<Read>>();
+    /** The controls of the reads running now (cancelled on uninstall). */
+    private final Set<Control> live = Collections.newSetFromMap(new ConcurrentHashMap<Control, Boolean>());
 
     /**
+     * @param threads the broker the reads are handed to
      * @param optIn answers in place of the providers' own {@code exposesErrorText()} (tests only); null asks the
      *     providers
      */
-    DataQuery(SpiRegistry spi, AgentLog log, Predicate<DataSourceProvider> optIn) {
+    DataQuery(SpiRegistry spi, AgentLog log, ThreadBroker threads, Predicate<DataSourceProvider> optIn) {
         this.spi = spi;
         this.log = log;
+        this.threads = threads;
         this.optInOverride = optIn;
     }
 
-    /** {@code {sources:[{id, describe}]}} in registration order; a repeated id is listed once. */
+    /**
+     * {@code {sources:[{id, describe, lane, enforcesTimeout}]}} in registration order; a repeated id is listed once
+     * ({@code lane} and {@code enforcesTimeout} are Phase 8's, phase8-contracts.md 4.2, 4.3).
+     */
     Map<String, Object> sources() {
         List<Object> sources = new ArrayList<Object>();
         Set<String> seen = new LinkedHashSet<String>();
@@ -92,6 +128,8 @@ final class DataQuery {
             Map<String, Object> source = new LinkedHashMap<String, Object>();
             source.put("id", id);
             source.put("describe", describeOf(provider, id));
+            source.put("lane", laneOf(provider, id));
+            source.put("enforcesTimeout", Boolean.valueOf(enforcesTimeoutOf(provider, id)));
             sources.add(source);
         }
         Map<String, Object> result = new LinkedHashMap<String, Object>();
@@ -102,8 +140,8 @@ final class DataQuery {
     /**
      * Runs one {@code data.query} call.
      *
-     * @param remainingMs time left before the dispatcher gives up, read when each stage starts
-     * @throws InterruptedException if the worker is interrupted while reading rows
+     * @param remainingMs time left before the dispatcher gives up, read when the call starts and when it expires
+     * @throws InterruptedException if the provider or the waiting worker was interrupted
      */
     Map<String, Object> query(JsonView args, LongSupplier remainingMs) throws InterruptedException {
         String source = args.requireStr("source");
@@ -112,45 +150,344 @@ final class DataQuery {
         List<Object> params = params(args);
         String statement = StatementGuard.check(sql);
         DataSourceProvider provider = find(source);
-        Rows rows = run(provider, source, statement, params, maxRows, remainingMs);
-        return mask(rows, source).toJson();
-    }
-
-    private Rows run(DataSourceProvider provider, String source, String statement, List<Object> params,
-                      int maxRows, LongSupplier remainingMs) throws InterruptedException {
+        long startNanos = System.nanoTime();
+        long callMs = Math.max(0L, remainingMs.getAsLong());
+        String lane = laneOf(provider, source);
+        boolean enforces = enforcesTimeoutOf(provider, source);
+        if (lane == null) {
+            checkSourceGate(source);
+        }
+        long budget = Math.max(1L, callMs - RESERVE_MS);
+        Control control = new Control(startNanos + TimeUnit.MILLISECONDS.toNanos(budget), log);
+        Read read = new Read(provider, source, statement, params, maxRows, budget, control,
+                SelectLabels.of(statement), SelectLabels.starTable(statement));
+        live.add(control);
+        boolean outlived = false;
         try {
-            QueryResult result;
+            Rows rows;
             try {
-                result = provider.query(statement, params, maxRows + 1, Math.max(1L, remainingMs.getAsLong()));
-            } catch (RpcException | SQLException | InterruptedException e) {
+                rows = lane == null ? threads.call(ThreadPolicy.WORKER, read, budget)
+                        : threads.callOnLane(lane, read, budget);
+            } catch (RpcException e) {
+                if (e.error().code() == ErrorCodes.TIMEOUT && !read.ended()) {
+                    RpcException timeout = expired(source, lane, enforces, callMs, read, control, startNanos,
+                            remainingMs);
+                    outlived = !read.ended();
+                    throw timeout;
+                }
+                throw e;
+            } catch (InterruptedException | RuntimeException e) {
                 throw e;
             } catch (Exception e) {
-                throw providerFailure(provider, source, "query", e);
+                // Read.call maps every failure but an interrupt; nothing else is expected from the broker.
+                throw new IllegalStateException("data.query: unexpected " + e.getClass().getName(), e);
             }
-            if (result != null) {
-                return Table.fromQueryResult(result, maxRows);
+            return mask(rows, source).toJson();
+        } finally {
+            if (!outlived) {
+                live.remove(control);
             }
-            Connection connection;
-            try {
-                connection = provider.open();
-            } catch (RuntimeException e) {
-                if (e instanceof RpcException) {
-                    throw e;
+        }
+    }
+
+    /**
+     * The module's own {@code TIMEOUT} after its wait on the read expired (D638): cancels the read, starts its cancel
+     * actions off this thread, waits at most {@code reserve - 50 ms} (and at most what the dispatcher has left, less
+     * 50 ms) for them and the read together, and arms the per-source gate when the read outlives the answer.
+     */
+    private RpcException expired(String source, String lane, boolean enforces, long callMs, Read read,
+                                 Control control, long startNanos, LongSupplier remainingMs)
+            throws InterruptedException {
+        control.cancel();
+        long wait = Math.max(1L, Math.min(RESERVE_MS - ANSWER_MARGIN_MS,
+                remainingMs.getAsLong() - ANSWER_MARGIN_MS));
+        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(wait);
+        control.startActions(threads);
+        control.awaitActions(until);
+        read.awaitEnd(until);
+        boolean stillRunning = read.started() && !read.ended();
+        if (stillRunning) {
+            linger(source, lane, read, control);
+        }
+        long waitedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("primitive", DataModule.QUERY);
+        data.put("timeoutMs", Long.valueOf(callMs));
+        data.put("source", source);
+        data.put("lane", lane);
+        data.put("waitedMs", Long.valueOf(waitedMs));
+        data.put("cancelled", Boolean.valueOf(control.cancelledByAction()));
+        if (control.actionsPending()) {
+            data.put("cancelPending", Boolean.TRUE);
+        }
+        data.put("stillRunning", Boolean.valueOf(stillRunning));
+        data.put("enforcesTimeout", Boolean.valueOf(enforces));
+        log.warn("data: the read of source '" + source + "' did not end within " + read.budgetMs + " ms"
+                + (stillRunning ? "; it still runs" : ""));
+        return new RpcException(ErrorCodes.TIMEOUT, "data.query on source '" + source + "' timed out after " + callMs
+                + " ms", data);
+    }
+
+    /**
+     * Arms the per-source gate for a read that outlives its call (no lane: a lane's own BUSY applies there) and logs
+     * its end, which clears the gate and the control.
+     */
+    private void linger(final String source, String lane, final Read read, final Control control) {
+        if (lane == null) {
+            synchronized (lingering) {
+                List<Read> reads = lingering.get(source);
+                if (reads == null) {
+                    reads = new ArrayList<Read>();
+                    lingering.put(source, reads);
                 }
-                throw providerFailure(provider, source, "open", e);
+                reads.add(read);
             }
-            if (connection == null) {
-                String reason = "data source '" + source + "' offers neither query() nor open()";
-                Map<String, Object> data = new LinkedHashMap<String, Object>();
-                data.put("source", source);
-                data.put("reason", reason);
-                throw new RpcException(ErrorCodes.CAPABILITY_UNAVAILABLE, reason, data);
+        }
+        read.onEnd(new Runnable() {
+            @Override
+            public void run() {
+                synchronized (lingering) {
+                    List<Read> reads = lingering.get(source);
+                    if (reads != null) {
+                        reads.remove(read);
+                        if (reads.isEmpty()) {
+                            lingering.remove(source);
+                        }
+                    }
+                }
+                live.remove(control);
+                log.info("data: the read of source '" + source + "' ended after " + read.ranMs() + " ms");
             }
-            long seconds = Math.max(1L, remainingMs.getAsLong() / 1000L);
-            return JdbcExecutor.execute(connection, statement, params, maxRows,
-                    (int) Math.min(Integer.MAX_VALUE, seconds), log);
-        } catch (SQLException e) {
-            throw sqlFailure(provider, source, e);
+        });
+    }
+
+    /** BUSY while an earlier read of the source (no lane) still runs after its call ended. */
+    private void checkSourceGate(String source) {
+        Read stuck;
+        synchronized (lingering) {
+            List<Read> reads = lingering.get(source);
+            stuck = reads == null || reads.isEmpty() ? null : reads.get(0);
+        }
+        if (stuck == null) {
+            return;
+        }
+        long runningForMs = stuck.ranMs();
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("reason", "an earlier read of the source still runs");
+        data.put("source", source);
+        data.put("runningForMs", Long.valueOf(runningForMs));
+        throw new RpcException(ErrorCodes.BUSY, "an earlier read of data source '" + source + "' timed out and still"
+                + " runs (" + runningForMs + " ms); try again when it has ended", data);
+    }
+
+    /**
+     * Agent close (phase8-contracts.md 4.3): cancels every live read, starts each one's actions the same way (one
+     * posted worker task per read) and waits for them at most {@code waitMs} in all.
+     */
+    void cancelAll(long waitMs) {
+        List<Control> controls = new ArrayList<Control>(live);
+        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMs);
+        for (Control control : controls) {
+            if (control.cancel()) {
+                control.startActions(threads);
+            }
+        }
+        try {
+            for (Control control : controls) {
+                control.awaitActions(until);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * The provider's work for one read, on the source's lane or a nested worker task: the five-argument
+     * {@code query()} (then {@code columns(table)} for the star form whose result named no column, and the
+     * conversion), else {@code open()} and the JDBC read under the read's control. Every failure but an interrupt is
+     * mapped here, as before Phase 8.
+     */
+    private final class Read implements Callable<Rows> {
+        final DataSourceProvider provider;
+        final String source;
+        final String statement;
+        final List<Object> params;
+        final int maxRows;
+        final long budgetMs;
+        final Control control;
+        final List<String> labels;
+        final String starTable;
+        private final CountDownLatch end = new CountDownLatch(1);
+        private volatile boolean started;
+        private volatile long startNanos;
+        private volatile long endNanos;
+        /** Run once the read has ended, when set before (guarded by end's state through this). */
+        private Runnable onEnd;
+
+        Read(DataSourceProvider provider, String source, String statement, List<Object> params, int maxRows,
+             long budgetMs, Control control, List<String> labels, String starTable) {
+            this.provider = provider;
+            this.source = source;
+            this.statement = statement;
+            this.params = params;
+            this.maxRows = maxRows;
+            this.budgetMs = budgetMs;
+            this.control = control;
+            this.labels = labels;
+            this.starTable = starTable;
+        }
+
+        @Override
+        public Rows call() throws Exception {
+            startNanos = System.nanoTime();
+            started = true;
+            try {
+                return read();
+            } finally {
+                endNanos = System.nanoTime();
+                Runnable after;
+                synchronized (this) {
+                    end.countDown();
+                    after = onEnd;
+                }
+                if (after != null) {
+                    after.run();
+                }
+            }
+        }
+
+        private Rows read() throws InterruptedException {
+            try {
+                QueryResult result;
+                try {
+                    result = provider.query(statement, params, maxRows + 1, budgetMs, control);
+                } catch (RpcException | SQLException | InterruptedException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw providerFailure(provider, source, "query", e);
+                }
+                if (result != null) {
+                    List<String> starColumns = starTable != null && !named(result)
+                            ? columnsOf(provider, source, starTable) : null;
+                    return Table.fromQueryResult(result, maxRows, labels, starColumns, new Consumer<String>() {
+                        @Override
+                        public void accept(String line) {
+                            log.info("data: source '" + source + "': " + line);
+                        }
+                    });
+                }
+                Connection connection;
+                try {
+                    connection = provider.open();
+                } catch (RuntimeException e) {
+                    if (e instanceof RpcException) {
+                        throw e;
+                    }
+                    throw providerFailure(provider, source, "open", e);
+                }
+                if (connection == null) {
+                    String reason = "data source '" + source + "' offers neither query() nor open()";
+                    Map<String, Object> data = new LinkedHashMap<String, Object>();
+                    data.put("source", source);
+                    data.put("reason", reason);
+                    throw new RpcException(ErrorCodes.CAPABILITY_UNAVAILABLE, reason, data);
+                }
+                long seconds = Math.max(1L, control.remainingMs() / 1000L);
+                return JdbcExecutor.execute(connection, statement, params, maxRows,
+                        (int) Math.min(Integer.MAX_VALUE, seconds), log, control);
+            } catch (SQLException e) {
+                throw sqlFailure(provider, source, e);
+            }
+        }
+
+        boolean started() {
+            return started;
+        }
+
+        boolean ended() {
+            return end.getCount() == 0;
+        }
+
+        void awaitEnd(long untilNanos) throws InterruptedException {
+            end.await(Math.max(0L, untilNanos - System.nanoTime()), TimeUnit.NANOSECONDS);
+        }
+
+        /** How long the read ran (or has run so far). */
+        long ranMs() {
+            long endAt = ended() ? endNanos : System.nanoTime();
+            return started ? TimeUnit.NANOSECONDS.toMillis(endAt - startNanos) : 0L;
+        }
+
+        /** Runs {@code after} once the read has ended (at once if it has). */
+        void onEnd(Runnable after) {
+            boolean now;
+            synchronized (this) {
+                now = ended();
+                if (!now) {
+                    onEnd = after;
+                }
+            }
+            if (now) {
+                after.run();
+            }
+        }
+    }
+
+    /** True when the provider named at least one column. */
+    private static boolean named(QueryResult result) {
+        List<String> names = result.columnNames();
+        if (names != null) {
+            for (String name : names) {
+                if (name != null && !name.isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * {@code columns(table)} once for the star form (gap 117, D532): null for null, for a list with a null or empty
+     * entry, and for a provider that throws (logged by the exception's class only, S22).
+     */
+    private List<String> columnsOf(DataSourceProvider provider, String source, String table) {
+        List<String> columns;
+        try {
+            columns = provider.columns(table);
+        } catch (RuntimeException | LinkageError e) {
+            log.warn("data: data source '" + source + "' failed in columns(): " + e.getClass().getName());
+            return null;
+        }
+        if (columns == null || columns.isEmpty()) {
+            return null;
+        }
+        for (String column : columns) {
+            if (column == null || column.isEmpty()) {
+                log.info("data: data source '" + source + "' answered columns() with an unnamed entry; not used");
+                return null;
+            }
+        }
+        return new ArrayList<String>(columns);
+    }
+
+    /** The provider's lane, or null; a throw counts as null (logged by class name). */
+    private String laneOf(DataSourceProvider provider, String source) {
+        try {
+            return provider.lane();
+        } catch (RuntimeException | LinkageError e) {
+            log.warn("data: data source '" + source + "' failed in lane(); its reads run on a worker: "
+                    + e.getClass().getName());
+            return null;
+        }
+    }
+
+    /** The provider's {@code enforcesTimeout()}; a throw counts as false (logged by class name). */
+    private boolean enforcesTimeoutOf(DataSourceProvider provider, String source) {
+        try {
+            return provider.enforcesTimeout();
+        } catch (RuntimeException | LinkageError e) {
+            log.warn("data: data source '" + source + "' failed in enforcesTimeout(): " + e.getClass().getName());
+            return false;
         }
     }
 

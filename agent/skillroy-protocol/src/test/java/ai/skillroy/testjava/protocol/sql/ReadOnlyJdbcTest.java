@@ -375,6 +375,70 @@ class ReadOnlyJdbcTest {
     }
 
     @Test
+    void theStatementSinkGetsTheStatementOnceItIsPreparedAndNullOnceItIsClosed() throws Exception {
+        final JdbcSpy spy = new JdbcSpy();
+        final List<String> seen = Collections.synchronizedList(new ArrayList<String>());
+        Rows rows = ReadOnlyJdbc.executeLenient(spy.wrap(db.open()), "SELECT code FROM person", NO_PARAMS, 10, 5, warn,
+                statement -> seen.add((statement == null ? "null" : "statement") + "@" + spy.calls.size()));
+        assertEquals(3, rows.rowCount());
+        assertEquals(2, seen.size(), seen.toString());
+        int handed = Integer.parseInt(seen.get(0).substring("statement@".length()));
+        int cleared = Integer.parseInt(seen.get(1).substring("null@".length()));
+        assertTrue(seen.get(0).startsWith("statement@") && seen.get(1).startsWith("null@"), seen.toString());
+        assertEquals(spy.indexOf("Connection.prepareStatement") + 1, handed, "right after prepareStatement");
+        assertTrue(handed <= spy.indexOf("PreparedStatement.setQueryTimeout"), spy.toString());
+        assertTrue(cleared > spy.indexOf("PreparedStatement.close"), "null only after the close: " + spy);
+        assertTrue(cleared <= spy.indexOf("Connection.rollback"), "and before the connection is restored");
+        // A failing sink does not change the outcome.
+        Rows again = ReadOnlyJdbc.executeLenient(db.open(), "SELECT code FROM person", NO_PARAMS, 10, 5, warn,
+                statement -> {
+                    throw new IllegalStateException("sink");
+                });
+        assertEquals(3, again.rowCount());
+        assertTrue(warnings.contains("the statement sink failed: java.lang.IllegalStateException"),
+                warnings.toString());
+    }
+
+    @Test
+    void aStatementCancelledWhileItRunsEndsWithTheDriversExceptionAndTheConnectionIsRestored() throws Exception {
+        final JdbcSpy spy = new JdbcSpy();
+        final AtomicReference<java.sql.Statement> open = new AtomicReference<java.sql.Statement>();
+        final Connection real = db.open();
+        final AtomicReference<Throwable> outcome = new AtomicReference<Throwable>();
+        Thread reader = new Thread(() -> {
+            try {
+                // A four-way cross join over 250 rows: it ends only when it is stopped.
+                ReadOnlyJdbc.executeLenient(spy.wrap(real), "SELECT COUNT(*) FROM item a, item b, item c, item d"
+                        + " WHERE a.deposit + b.deposit + c.deposit + d.deposit < 0", NO_PARAMS, 10, 60, warn,
+                        open::set);
+                outcome.set(new AssertionError("not cancelled"));
+            } catch (Throwable t) {
+                outcome.set(t);
+            }
+        }, "skillroy-test-cancelled-reader");
+        reader.setDaemon(true);
+        reader.start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while ((open.get() == null || spy.count("PreparedStatement.executeQuery") == 0)
+                && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        Thread.sleep(200);
+        java.sql.Statement statement = open.get();
+        assertTrue(statement != null, "the statement is open while it runs");
+        statement.cancel();
+        reader.join(TimeUnit.SECONDS.toMillis(30));
+        assertFalse(reader.isAlive(), "the cancel ended the statement");
+        assertTrue(outcome.get() instanceof SQLException, String.valueOf(outcome.get()));
+        assertEquals(null, open.get(), "null once the statement is closed: nothing is left to cancel");
+        assertTrue(spy.statementsClosedConnectionKept(), spy.toString());
+        assertTrue(spy.calls.contains("Connection.rollback"), spy.toString());
+        assertTrue(real.getAutoCommit() && !real.isReadOnly(), "restored");
+        assertEquals(1L, db.scalar("SELECT COUNT(*) FROM item WHERE id = 1"), "the database still answers");
+        real.close();
+    }
+
+    @Test
     void describeNamesClassStateAndCodeButNeverTheMessage() {
         SQLException sql = new SQLException("driver text with value 1111", "42501", -5501);
         assertEquals("java.sql.SQLException (sqlState=42501, errorCode=-5501)", ReadOnlyJdbc.describe(sql));

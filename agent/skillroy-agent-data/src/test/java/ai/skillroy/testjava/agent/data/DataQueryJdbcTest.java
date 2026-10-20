@@ -480,15 +480,46 @@ class DataQueryJdbcTest {
     @Timeout(value = 5, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void theQueryTimeoutStopsARunawayStatement() throws Exception {
         ctx.remainingMs = 1000;
-        // A four-way cross join over 250 rows has about four billion combinations: it ends only by its timeout.
+        // A four-way cross join over 250 rows has about four billion combinations: it ends only when stopped. Phase 8
+        // (phase8-contracts.md 4.3, D530): the module gives up 250 ms before the call's time, cancels the open
+        // statement and answers its own TIMEOUT inside that reserve.
+        long start = System.nanoTime();
         RpcException e = queryFails("SELECT COUNT(*) FROM item a, item b, item c, item d"
                 + " WHERE a.deposit + b.deposit + c.deposit + d.deposit < 0");
-        assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code());
-        assertEquals("40502", e.error().data().get("sqlState"), e.error().data().toString());
+        long tookMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertEquals(ErrorCodes.TIMEOUT, e.error().code(), e.error().toString());
+        Map<String, Object> data = e.error().data();
+        assertEquals("data.query", data.get("primitive"));
+        assertEquals(1000L, data.get("timeoutMs"));
+        assertEquals("db", data.get("source"));
+        assertEquals(null, data.get("lane"));
+        assertEquals(Boolean.TRUE, data.get("cancelled"), data.toString());
+        assertEquals(Boolean.FALSE, data.get("stillRunning"), data.toString());
+        assertEquals(Boolean.FALSE, data.get("enforcesTimeout"));
+        assertFalse(data.containsKey("cancelPending"), data.toString());
+        assertTrue(tookMs < 1000, "answered inside the call's time: " + tookMs);
         assertTrue(provider.spy.calls.contains("PreparedStatement.setQueryTimeout[1]"), provider.spy.toString());
+        assertEquals(1, provider.spy.count("PreparedStatement.cancel"), provider.spy.toString());
+        assertTrue(provider.spy.indexOf("PreparedStatement.cancel") < provider.spy.indexOf("PreparedStatement.close"),
+                "cancelled while open: " + provider.spy);
         assertTrue(provider.spy.allClosed(), provider.spy.toString());
-        // The database is still usable afterwards.
+        // The database and the source are still usable afterwards: no BUSY.
         assertEquals(1L, query("SELECT id FROM item WHERE id = 1").get("rowCount"));
+    }
+
+    @Test
+    void aStatementIsCancelledOnlyWhileItIsOpen() throws Exception {
+        // phase8-contracts.md 4.3, D530: a cancel that comes after the read never touches a statement.
+        Control control = new Control(System.nanoTime() + TimeUnit.SECONDS.toNanos(10), ctx.log);
+        JdbcSpy spy = new JdbcSpy();
+        JdbcExecutor.execute(spy.wrap(db.open()), "SELECT code FROM person", Collections.<Object>emptyList(), 10, 5,
+                ctx.log, control);
+        assertTrue(control.cancel());
+        control.startActions(ctx.broker);
+        control.awaitActions(System.nanoTime() + TimeUnit.SECONDS.toNanos(5));
+        assertEquals(0, spy.count("PreparedStatement.cancel"), spy.toString());
+        assertFalse(control.cancelledByAction());
+        assertFalse(control.actionsPending());
     }
 
     @Test

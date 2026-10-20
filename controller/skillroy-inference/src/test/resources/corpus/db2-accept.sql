@@ -149,7 +149,3 @@ SELECT l.id FROM loan l WHERE l.borrower <> '' ORDER BY l.borrower
 @@ two parameters
 SELECT l.id FROM loan l WHERE l.opened >= ? AND l.staff_code = ?
 => SELECT l.id FROM loan l WHERE l.opened >= ? AND l.staff_code = ? ORDER BY l.id FETCH FIRST 200 ROWS ONLY
-
-@@ CALL of the allow-listed procedure
-CALL open_loan_count(?)
-=> CALL open_loan_count (?)

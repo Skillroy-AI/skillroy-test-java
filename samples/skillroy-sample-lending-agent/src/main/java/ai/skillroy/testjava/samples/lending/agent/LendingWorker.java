@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.samples.lending.agent;
 
+import ai.skillroy.testjava.agent.api.QuiescentPoint;
 import ai.skillroy.testjava.agent.api.spi.ThreadPolicyProvider;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.RpcException;
@@ -38,6 +39,11 @@ import java.util.concurrent.TimeoutException;
  * enough.
  *
  * <p>The worker thread is created on first use and ends after a minute without work. Thread-safe.
+ *
+ * <p>Phase 8 (phase8-contracts.md 4.1, 12.2): the worker also offers the desk's quiescent point, one
+ * {@link QuiescentPoint} with an allowance of {@value #POINT_ALLOWANCE_MS} ms and room for {@value #POINT_CAPACITY}
+ * tasks, which the module's engine listener drives from the engine's idle callback ({@code EngineEvents.idle}); a task
+ * of {@code ThreadPolicy.APP_QUIESCENT} then runs on the engine thread itself, at the point the engine chose.
  */
 final class LendingWorker implements ThreadPolicyProvider {
 
@@ -46,8 +52,13 @@ final class LendingWorker implements ThreadPolicyProvider {
 
     private static final ThreadLocal<Boolean> ON_WORKER = new ThreadLocal<Boolean>();
 
+    /** The quiescent point's allowance and capacity (phase8-contracts.md 12.2). */
+    static final long POINT_ALLOWANCE_MS = 50L;
+    static final int POINT_CAPACITY = 4;
+
     private final LendingAccess access;
     private final ThreadPoolExecutor executor;
+    private final QuiescentPoint point = new QuiescentPoint(POINT_ALLOWANCE_MS, POINT_CAPACITY);
 
     LendingWorker(LendingAccess access) {
         this.access = access;
@@ -108,6 +119,17 @@ final class LendingWorker implements ThreadPolicyProvider {
             }
             throw e;
         }
+    }
+
+    /** The desk's quiescent point, the same instance on every call (phase8-contracts.md 4.1). */
+    @Override
+    public QuiescentPoint quiescentPoint() {
+        return point;
+    }
+
+    /** Closes the quiescent point: queued tasks are withdrawn, nothing runs on the engine thread any more. */
+    void closePoint() {
+        point.close();
     }
 
     /** Stops the worker: queued tasks are dropped and a running one is interrupted. */

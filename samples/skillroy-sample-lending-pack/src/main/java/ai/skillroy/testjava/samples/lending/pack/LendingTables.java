@@ -69,10 +69,13 @@ final class LendingTables {
                     StoredColumn.of("kind", ColumnKind.TEXT),
                     StoredColumn.of("staff_code", ColumnKind.TEXT)), List.of("loan_id", "kind", "staff_code")));
 
-    /** The controller-side twin of the agent module's password {@code MaskPolicy}. */
+    /** The agent module's positional source, the desk's report reader (phase8-contracts.md 12.2, 12.3). */
+    static final String REPORT_SOURCE = "lending-report";
+
+    /** The controller-side twin of the agent module's password {@code MaskPolicy}, over both of its sources. */
     static final RowMask PASSWORD_MASK = (sourceId, column, value) ->
-            value != null && LendingResolvers.SOURCE.equals(sourceId) && PASSWORD_COLUMN.equalsIgnoreCase(column)
-                    ? SecretKeys.REDACTED : value;
+            value != null && (LendingResolvers.SOURCE.equals(sourceId) || REPORT_SOURCE.equals(sourceId))
+                    && PASSWORD_COLUMN.equalsIgnoreCase(column) ? SecretKeys.REDACTED : value;
 
     private LendingTables() {
     }

@@ -218,6 +218,36 @@ class ExecutorPhase2Test {
         assertTrue(types().contains("sources"));
     }
 
+    /**
+     * phase8-contracts.md 4.4 and 13.1 row 11 (gaps 12, 117): over a positional source the agent names the columns
+     * {@code c1..cn} (or by the statement's labels) and the executor matches stored-row checks by position, never by
+     * name, so such a source can be checked; a zero-row answer carries the columns' width (the agent's width rule), so
+     * an absence check ({@code rows: 0}) holds. No controller code changed for this: the test documents the rule.
+     */
+    @Test
+    void aPositionalSourceIsCheckedByPositionAndAnAbsenceCheckHolds() throws Exception {
+        FakeAgentConnection.Handler query = agent.handler("data.query");
+        List<Rows.Column> positional = List.of(new Rows.Column("c1", null), new Rows.Column("c2", null),
+                new Rows.Column("c3", null), new Rows.Column("c4", null), new Rows.Column("c5", null));
+        List<Object> answer = new ArrayList<>();
+        agent.on("data.query", params -> LINE_SQL.equals(params.get("sql")) ? answer.get(0) : query.handle(params));
+        answer.add(Rows.of(positional, List.of(java.util.Arrays.asList(41L, "B2", "-5.00", true, null)), false)
+                .toJson());
+        RunResult held = run(DB);
+        assertEquals(Status.PASS, held.status(), held.message());
+
+        answer.set(0, Rows.of(positional, List.of(), false).toJson());
+        RunResult absent = run(DB.replace("note: { exists: false } }", "rows: 0 }")
+                .replace("amount: \"-5\", returned: true, ", ""));
+        assertEquals(Status.PASS, absent.status(), absent.message());
+
+        answer.set(0, Rows.of(List.of(), List.of(), false).toJson());
+        RunResult noColumns = run(DB.replace("note: { exists: false } }", "rows: 0 }")
+                .replace("amount: \"-5\", returned: true, ", ""));
+        assertEquals(Status.ERROR, noColumns.status(), "a zero-row answer without columns, as before Phase 8");
+        assertTrue(noColumns.message().contains("returned 0 columns, the pack declares 5"), noColumns.message());
+    }
+
     @Test
     void aDbCheckWhoseCapabilityIsNotOkIsSkippedAndRecordedUnderItsTable() throws Exception {
         RunResult result = run(DB.replace("note: { exists: false } }", "note: { exists: false },"

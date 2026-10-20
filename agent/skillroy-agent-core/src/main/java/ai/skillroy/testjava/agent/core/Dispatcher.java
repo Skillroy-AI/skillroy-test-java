@@ -61,6 +61,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * resources such as pooled connections, that calls blocked in uninterruptible host code can hold at one per
  * primitive, however often a controller retries.
  *
+ * <p>Phase 8 (phase8-contracts.md 4.1, 4.2): an {@code APP_QUIESCENT} primitive passes, in place of the A19 branch,
+ * the quiescent gates (no point offered, the provider not available for reads and mutating calls alike, a budget above
+ * the point's allowance, the primitive penalised for an overrun) and then runs at the first provider's quiescent
+ * point; a {@code LANE} primitive runs on the lane its spec names. Both join the S30 gate.
+ *
  * <p>Secret parameters (contract amendment A34): a request may name, in {@code _meta.secretParams}, top-level params
  * whose values are secrets. The primitive receives them unchanged; the error the call answers with, the dispatcher's
  * log lines about the call (an unexpected failure, a timeout that leaves the call running), and (through the call's
@@ -262,7 +267,13 @@ final class Dispatcher {
                     + " was withdrawn", data);
         }
         ThreadPolicy policy = spec.thread();
-        if (policy == ThreadPolicy.APP && ctx.threads.appThreadUnavailable()) {
+        if (policy == ThreadPolicy.APP_QUIESCENT) {
+            // phase8-contracts.md 4.1: in place of the A19 branch; no fall-back to another thread (D522).
+            RpcException refused = ctx.threads.quiescentGate(method, spec.quiescentBudgetMs());
+            if (refused != null) {
+                return refused.error();
+            }
+        } else if (policy == ThreadPolicy.APP && ctx.threads.appThreadUnavailable()) {
             if (spec.mutating()) {
                 Map<String, Object> data = new LinkedHashMap<String, Object>();
                 data.put("primitive", method);
@@ -271,7 +282,8 @@ final class Dispatcher {
             }
             policy = ThreadPolicy.WORKER;
         }
-        if (policy == ThreadPolicy.CALLER || policy == ThreadPolicy.WORKER || policy == ThreadPolicy.APP) {
+        if (policy == ThreadPolicy.CALLER || policy == ThreadPolicy.WORKER || policy == ThreadPolicy.APP
+                || policy == ThreadPolicy.APP_QUIESCENT || policy == ThreadPolicy.LANE) {
             RpcError busy = busy(method);
             if (busy != null) {
                 return busy;
@@ -290,12 +302,12 @@ final class Dispatcher {
         }
         String correlationId = meta.str("correlationId", null);
         String traceparent = meta.str("traceparent", null);
-        return run(method, primitive, policy, argsView, correlationId, traceparent, timeoutMs, secrets,
+        return run(method, primitive, spec, policy, argsView, correlationId, traceparent, timeoutMs, secrets,
                 secretNames(meta, args));
     }
 
-    private Object run(final String method, final Primitive primitive, ThreadPolicy policy, JsonView args,
-                       String correlationId, String traceparent, long timeoutMs, SecretParams secrets,
+    private Object run(final String method, final Primitive primitive, PrimitiveSpec spec, ThreadPolicy policy,
+                       JsonView args, String correlationId, String traceparent, long timeoutMs, SecretParams secrets,
                        List<String> secretNames) {
         CallScope scope = new CallScope(correlationId, traceparent, secrets);
         long start = System.nanoTime();
@@ -314,7 +326,14 @@ final class Dispatcher {
         }, scope, ctx.threads);
         long seqBefore = ctx.events.lastSeq();
         try {
-            Object value = ctx.threads.run(policy, task, timeoutMs, callerPool);
+            Object value;
+            if (policy == ThreadPolicy.APP_QUIESCENT) {
+                value = ctx.threads.runQuiescent(method, task, spec.quiescentBudgetMs(), timeoutMs);
+            } else if (policy == ThreadPolicy.LANE) {
+                value = ctx.threads.runOnLane(spec.lane(), task, timeoutMs);
+            } else {
+                value = ctx.threads.run(policy, task, timeoutMs, callerPool);
+            }
             List<Event> events = scope.close();
             long seqAfter = ctx.events.lastSeq();
             long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);

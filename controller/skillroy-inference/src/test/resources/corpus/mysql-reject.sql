@@ -178,3 +178,6 @@ SELECT SQL_CALC_FOUND_ROWS i.code FROM item i
 
 @@ FUNCTION a regular-expression match
 SELECT i.code FROM item i WHERE i.title REGEXP '^(a+)+$'
+
+@@ PROCEDURE CALL of a procedure: no data channel runs a procedure call (gap 119; BS6 admitted this one)
+CALL open_loan_count(?)

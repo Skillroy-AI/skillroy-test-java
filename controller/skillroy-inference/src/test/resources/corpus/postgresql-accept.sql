@@ -144,7 +144,3 @@ SELECT s.code FROM staff s WHERE s.name ILIKE 'a%' ORDER BY s.name
 @@ two parameters
 SELECT x.loan_id, x.line_no FROM loan_line x WHERE x.item_code = ? AND x.qty > ?
 => SELECT x.loan_id, x.line_no FROM loan_line x WHERE x.item_code = ? AND x.qty > ? ORDER BY x.loan_id, x.line_no LIMIT 200
-
-@@ CALL of the allow-listed procedure
-CALL open_loan_count(?)
-=> CALL open_loan_count (?)

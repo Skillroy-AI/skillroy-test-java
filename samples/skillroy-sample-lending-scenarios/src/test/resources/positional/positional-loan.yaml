@@ -1,0 +1,27 @@
+# Phase 8 (phase8-contracts.md 4.4, 12.4; gaps 12, 117): a basic loan whose stored rows are checked over the agent
+# module's positional source lending-report (the desk's report reader, which answers by position), through the
+# test-only PositionalOverlayPack. A rows: 1 check and a rows: 0 absence check both hold: the agent names the
+# columns from the statement and takes a zero-row answer's width from its select list (before Phase 8 the absence
+# check ended ERROR / ENVIRONMENT "returned 0 columns"). Not a committed scenario: it lives beside the tests.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml); YRD-001 at 3.50.
+scenario: positional-loan
+pack: lending
+tags: [positional]
+requires: [lending.input, lending.state, lending.loan]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017", deposit: "3.50" } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item }
+  - key: { action: DUE }
+  - deposit: { amount: "5.00" }
+  - waitFor: { topic: loan.posted, within: 10s, capture: { slot: loan, fields: { id: loanId } } }
+verify:
+  - { "state.name": IDLE }
+  - db.loan: { where: { id: $loan.id }, rows: 1, staff_code: $assistant.code, total: "3.50" }
+  - db.loan_line: { where: { loan_id: $loan.id }, rows: 1, item_code: $item.code, returned: false }
+  - db.loan_authorisation: { where: { loan_id: $loan.id }, rows: 0 }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

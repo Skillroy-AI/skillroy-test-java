@@ -74,6 +74,11 @@ final class LendingFixture implements AutoCloseable {
         return new LendingFixture(LendingOptions.defaults().seed(Seed.A).edition(edition));
     }
 
+    /** A desk with these options (phase8-contracts.md 13.1 row 13: an idle lock and an idle tick of its own). */
+    static LendingFixture start(LendingOptions options) throws Exception {
+        return new LendingFixture(options);
+    }
+
     static LendingFixture start(Seed seed, Clock clock) throws Exception {
         return new LendingFixture(LendingOptions.defaults().seed(seed).clock(clock));
     }

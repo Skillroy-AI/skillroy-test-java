@@ -49,6 +49,19 @@ public interface EngineListener {
     default void inputRequested(LendingState state, String prompt) {
     }
 
+    /**
+     * The engine is idle: it waits for input (phase8-contracts.md 12.1, D535). Called right after
+     * {@link #inputRequested} and then every idle tick ({@link Engine#idleTickMillis()}) until an input is taken;
+     * never while an input is processed or a prompt is open. Inside this callback, and only here,
+     * {@link Engine#idleView()} reads the engine's own state. Like every callback it must return quickly; an agent's
+     * quiescent task runs here.
+     *
+     * @param state the current state
+     * @param availableMs the time left until the idle lock fires, {@code Long.MAX_VALUE} when no lock applies
+     */
+    default void idle(LendingState state, long availableMs) {
+    }
+
     /** An input was taken from the inbox and is valid in the current state; called before it is processed. */
     default void inputAccepted(LendingInput input) {
     }

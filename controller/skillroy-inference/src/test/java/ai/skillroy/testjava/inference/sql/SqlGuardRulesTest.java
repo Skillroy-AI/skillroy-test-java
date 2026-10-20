@@ -260,14 +260,32 @@ class SqlGuardRulesTest {
             assertEquals(Reason.REWRITE, refused(comment, "SELECT i.code FROM item i"));
             assertEquals(Reason.REWRITE, refused(changed, "SELECT i.code FROM item i"));
             assertEquals(Reason.REWRITE, refused(reparsed, "SELECT i.code FROM item i"));
-            assertEquals(Reason.REWRITE, refused(comment, "CALL open_loan_count(?)"));
         }
     }
 
     @Test
-    void anAllowListedProcedureIsCalledWithParametersOnly() throws Exception {
-        assertEquals("CALL open_loan_count (?)", hsqldb.guard("CALL open_loan_count(?)").sql());
-        assertEquals(Reason.PROCEDURE, refused(hsqldb, "CALL open_loan_count('S01')"));
+    void everyProcedureCallIsRefusedNamingGap119() throws Exception {
+        // phase8-contracts.md 4.5, D533: no data channel runs a procedure call, so the guard refuses every CALL and
+        // EXEC, whatever the allow-list says, with the reason where the model hears it.
+        for (String call : List.of("CALL open_loan_count(?)", "CALL open_loan_count('S01')", "CALL other(?, ?)",
+                "CALL open_loan_count()")) {
+            GuardViolation v = assertThrows(GuardViolation.class, () -> hsqldb.guard(call), call);
+            assertEquals(Reason.PROCEDURE, v.reason(), call);
+            assertEquals(SqlGuard.PROCEDURE_RETIRED, v.fragment(), call);
+            assertTrue(v.fragment().contains("gap 119"));
+        }
+        SqlAllowList.Builder b = SqlAllowList.builder("lending", SqlDialect.HSQLDB);
+        for (SqlAllowList.AllowedTable table : LendingFixture.allowList(SqlDialect.HSQLDB).tables()) {
+            b.table(table);
+        }
+        @SuppressWarnings("deprecation")
+        SqlAllowList withProcedure = b.procedure("open_loan_count").build();
+        try (SqlGuard listed = new SqlGuard(withProcedure)) {
+            assertEquals(Reason.PROCEDURE, refused(listed, "CALL open_loan_count(?)"), "even one the list names");
+        }
+        try (SqlGuard mssql = new SqlGuard(LendingFixture.allowList(SqlDialect.SQLSERVER))) {
+            assertEquals(Reason.PROCEDURE, refused(mssql, "EXECUTE open_loan_count 'S01'"));
+        }
     }
 
     @Test

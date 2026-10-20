@@ -42,7 +42,7 @@ CREATE INDEX ix_due ON loan (due)
 @@ PROCEDURE xp_cmdshell
 EXEC xp_cmdshell 'dir'
 
-@@ PROCEDURE EXECUTE of an allow-listed name (only CALL is accepted)
+@@ PROCEDURE EXECUTE of a once allow-listed name (no data channel runs a procedure call, gap 119)
 EXECUTE open_loan_count 'S01'
 
 @@ SET_OPERATION UNION
@@ -151,3 +151,6 @@ SELECT l.id, a.item_code FROM loan l CROSS APPLY (SELECT TOP 1 x.item_code FROM 
 
 @@ UNSUPPORTED a query hint
 SELECT i.code FROM item i OPTION (MAXDOP 1)
+
+@@ PROCEDURE CALL of a procedure: no data channel runs a procedure call (gap 119; BS6 admitted this one)
+CALL open_loan_count(?)

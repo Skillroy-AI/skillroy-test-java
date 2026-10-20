@@ -527,7 +527,7 @@ marked there; the design's table is design §2.6.
 | SPI | What it is for | When a layer needs it | Thread | Sample | Contract |
 |---|---|---|---|---|---|
 | `ReadinessSource` | "domain singletons may be touched now"; polled every 250 ms | always | agent worker; cheap, non-blocking | `LendingModule.Readiness` | P1 §4; design §2.2 step 3 |
-| `ThreadPolicyProvider` | the application thread a domain call must run on (`ThreadPolicy.APP`), and the threads the agent must never block or run on | whenever domain state is confined to an application thread | any agent thread; thread-safe | `LendingWorker` | P1 §4 (A19 `available()`) |
+| `ThreadPolicyProvider` | the application thread a domain call must run on (`ThreadPolicy.APP`), and the threads the agent must never block or run on; (Phase 8, built 2026-10-19, ET) `quiescentPoint()`: the point the application's idle callback drives, for `APP_QUIESCENT` | whenever domain state is confined to an application thread | any agent thread; thread-safe; `quiescentPoint()` cheap, non-blocking, the same instance each call | `LendingWorker` | P1 §4 (A19 `available()`); P8 §4.1 |
 | `AppStateProvider` | the `app{…}` section of a snapshot and `app.state`: state name, prompt, accepted inputs | always | `ThreadPolicy.APP` | `LendingModule.AppState` | P1 §4; design §2.5 |
 | `NameEnricher` | a stable name for a component whose accessible name is empty | image-only buttons, painted keys | EDT; fast | `LendingWidgets` | P1 §4 |
 | `LocatorResolver` | locators in the application's vocabulary (`{action: "DUE"}`), and `describe` for the hit-test | custom widgets without stable names | EDT | `LendingWidgets` | P1 §4; P7 §3.7 |
@@ -539,7 +539,7 @@ marked there; the design's table is design §2.6.
 | `InputVeto` | the components the agent must never deliver input to, on any route, `force` included; readers flag them `vetoed` | every control whose action ends the JVM or cannot be undone in a test (Phase 8, built 2026-10-19, EA) | EDT; fast, lock-free; never changes the tree | `LendingInputVeto` | P8 §3.2 |
 | `MaskPolicy` | masks values `data.query` returns, `CAPTURE` hook values and Byteman bindings, and (Phase 8) every event payload at publish, `event:<topic>` | personal or secret columns and event fields | agent workers, the hooked thread, or the thread that publishes an event; never blocks, never waits on the EDT | `PasswordMask` | P1 §4; P6 §4.3; P8 §5.1 |
 | `RedactionKeys` | the application's own secret-looking keys in JVM arguments, properties, options | always worth one | any; thread-safe | `LendingSecrets` | P1 §4 (A21) |
-| `DataSourceProvider` | an in-process, credential-free read channel (`data.query`) | resolvers and stored-row checks against the application's own data | agent workers | `LendingDataSource` | P1 §4, §6 |
+| `DataSourceProvider` | an in-process, credential-free read channel (`data.query`); (Phase 8, built 2026-10-19, ET) the five-argument `query()` with a `QueryControl`, `enforcesTimeout()`, `lane()`, `columns(table)` | resolvers and stored-row checks against the application's own data | agent workers, or the source's lane; `lane()`, `enforcesTimeout()`, `columns()` non-blocking | `LendingDataSource`; `LendingRowsSource` (positional, on a lane) | P1 §4, §6; P8 §4.2-§4.4 |
 | `DeviceAdapter` | peripherals as snapshot nodes and `device.*` actions | printers, scanners, readers, displays | `state`/`act` under `APP` | `PrinterDevice` | P1 §4; P3 §3.4 |
 | `ProductionMarker` | refuse to serve on production | always (§5.7) | agent worker, once | – (core tests: `ProductionGateTest`) | P1 §4, §5 |
 | `BrowserRegistryAdapter` | seeds for embedded browsers the Swing tree cannot see | cached, hidden or view-less browsers | agent workers; cheap | `WebHostModule` | P4 §3, §9.2 |
@@ -569,6 +569,22 @@ engine listener is attached"; `ListenerSlot`):
 - detaching makes the listener inert at once and removes it at the next quiescent point (bounded), under a JVM-wide
   monitor shared by every class-loader copy of the module, because a disabled agent and its successor can meet.
 
+**Running a task at the idle point (Phase 8, built 2026-10-19, ET; P8 §4.1).** When state is confined to the
+application's own thread and is consistent only between inputs (a pending quantity, a sub-step), a primitive declares
+`ThreadPolicy.APP_QUIESCENT` with a budget (`PrimitiveSpec.Builder.quiescentBudgetMs`, 1 to 1000 ms, default 50). The
+provider creates one `QuiescentPoint(allowanceMs, capacity)`, returns it from `quiescentPoint()`, calls
+`runOne(availableMs)` from the application's idle callback (an application listener, as the sample's
+`EngineEvents.idle`, or the `EventSink` of an `OBSERVE` hook on the idle method) and closes it in `uninstall`; the core
+closes it too on `agent.disable` and close, before any module's `uninstall`. A task runs exactly once or never: at the
+FIFO head, only when its budget fits both what the application says is free and what its caller has left; it is never
+interrupted, an overrun is counted, and a primitive whose task ran past twice its budget answers
+`CAPABILITY_UNAVAILABLE` until `agent.capabilities {reprobe: true}`. The thread rules for a quiescent task: it runs on
+the application's thread (not the EDT), touches no AWT, does not block, takes no application lock the idle point does
+not already hold, and never waits for agent work (`ThreadBroker.call*` and `QuiescentPoint.await` are refused
+`FORBIDDEN_THREAD`; `EventBus.await` is forbidden and not checked); `AgentLog` and `EventBus.publish` are fine; its
+result is JSON-able like any primitive's. The sample: `lending.engine.view` (budget 20 ms) reads `Engine.idleView()`.
+A layer that offers no point makes such a primitive `CAPABILITY_UNAVAILABLE`; it never falls back to another thread.
+
 ### 6.4 The thread rule
 
 `ThreadPolicy` (P1 §4) says where each primitive runs: `CALLER`, `EDT_SYNC` (a bounded `invokeAndWait`, for reads),
@@ -583,12 +599,17 @@ For the provider:
 - `callOnAppThread(task, timeoutMs)` runs a domain call where the application allows one and waits at most the bound.
   The sample runs domain calls on one daemon worker of its own (`skillroy-lending-worker`) because the application
   publishes immutable snapshots any thread may read; an application whose state may be read only on its own thread
-  needs a provider that posts to that thread and waits with the bound. (A policy that runs a bounded task at the
-  application's next idle point is not provided, gap 10.)
+  needs a provider that posts to that thread and waits with the bound, or (Phase 8, built 2026-10-19, ET) a
+  `QuiescentPoint` for `APP_QUIESCENT` (§6.3).
 - `available()` answers false while the application thread does not exist yet: read-only `APP` primitives then run on a
-  worker and mutating ones answer `NOT_READY` (A19).
-- One `APP` lane: a slow `data.query` provider on `APP` delays every other `APP` primitive (gap 9). Keep `APP` calls
-  short.
+  worker and mutating ones answer `NOT_READY` (A19); an `APP_QUIESCENT` primitive answers `NOT_READY` either way.
+- One `APP` lane: everything under `APP` queues behind the provider's thread, so keep `APP` calls short. **Corrected
+  (Phase 8, built 2026-10-19, ET; P8 §4.8 defect 3):** `data.query` itself runs on `WORKER`, not `APP` (P1 §6); the real
+  hazard is a provider that hops to `APP` itself for a slow read. Never hop to `APP` for a slow read: declare a lane
+  (`ThreadBroker.declareLane(name, threads, queue)`, by convention `<module id>.<word>`, 1 to 4 threads and a queue of
+  0 to 16, at most 8 lanes per agent, retired with the module) and name it in the source's `lane()`, or run a
+  primitive there with `PrimitiveSpec.Builder.lane(name)` (`ThreadPolicy.LANE`). A lane whose every thread is held by a
+  task whose caller gave up answers `BUSY "lane stuck"` at once; `APP` stays unbounded (gap 136).
 
 ### 6.5 The input seam and the sync topics
 
@@ -688,8 +709,24 @@ application's own data without credentials leaving the target (P1 §4, §6; desi
 
 Keep `exposesErrorText()` false unless the driver's messages cannot echo values. Add a `MaskPolicy` for personal
 columns: it runs on every value before it leaves the JVM. The statement guard is a safety net, not the boundary: the
-connection's account should be read-only (`SECURITY.md`). Not provided: query cancellation (gap 11) and a
-"prepared read" that runs a procedure and a select on one session (gap 13).
+connection's account should be read-only (`SECURITY.md`). Not provided: a "prepared read" that runs a procedure and a
+select on one session (gap 13).
+
+**(Phase 8, built 2026-10-19, ET; P8 §4.2-§4.4.)** `data.query` hands the provider's work to the source's lane
+(`lane()`) or a nested worker task and waits the call's remaining time less 250 ms. Override the five-argument
+`query(sql, params, maxRows, timeoutMs, QueryControl control)` to be stoppable: register the means with
+`control.onCancel(action)` (a statement's `cancel`, the application's own abort; at most 4, run once, off the
+dispatching worker, 2 s each), read `control.remainingMs()` and `control.cancelled()`. The JDBC form is cancelled by
+the agent itself while its statement is open. `enforcesTimeout()` says the read ends within its `timeoutMs` + 1 s
+whatever the source does. On expiry the module answers `TIMEOUT {source, lane, waitedMs, cancelled, cancelPending?,
+stillRunning, enforcesTimeout}`; without a lane a read that outlives its call makes the next read of that source
+`BUSY` until it ends, so one stuck source blocks only itself. `open()` still has no timeout: bound any pool wait in the
+provider. Columns the provider leaves unnamed take the labels of the statement's select list (the alias, or a bare
+column's name), and for `SELECT * FROM <table>` the provider's `columns(table)` (the table's columns in declared order,
+answering the same relation `query()` reads), so a positional source is read by name and its zero-row answers keep
+their width; the controller's allow-list check (D100) needs `columns(table)` from such a source. **Version skew:** a
+provider that overrides only the five-argument form needs a Phase 8 agent (on a 0.1.0 one the four-argument default
+answers null and the read falls to `open()`); mixed versions are unsupported (§4.4).
 
 ### 6.10 Devices
 
@@ -719,6 +756,11 @@ browser without a view is masked while any mask is registered (§6.8); release i
 What masking cannot do is in `SECURITY.md` ("Redaction hides a rectangle, not a value"; "A page's pixels are masked as a
 whole or not at all"): a mask blanks a rectangle, the layout stays visible, and a component no mask names reaches a
 model as rendered. An application's own Paste control is an ordinary click: mask it (threat model §7).
+
+**Parity of a name-keyed `MaskPolicy` (Phase 8, built 2026-10-19, ET; P8 §4.4).** A row policy keyed by column name
+sees the label the statement gives: a caller who renames a column (`password AS p`) defeats it on a JDBC source, and
+on a positional source too now that its columns take the statement's labels, no weaker. Cover every source id the
+module registers (the sample's `PasswordMask` covers `lending` and `lending-report`).
 
 ### 6.12 Capabilities and probes
 
@@ -1223,7 +1265,11 @@ contributed resolver `inference.sql`, behind `SqlGuard` (one `SELECT`, the pack'
 `REQUIRED` until approved) (P5 §5, §7.1). The pack declares `sqlAllowLists()`: per source and dialect, the tables and
 columns a model may read, each column marked `personal` and `sample` as it applies, with descriptions that become the
 model's catalogue. The allow-list is checked against the database at start (D100). The sample's scenario D is the
-worked example, with committed recordings so CI needs no key.
+worked example, with committed recordings so CI needs no key. **(Phase 8, built 2026-10-19, ET; P8 §4.4, §4.5)**
+Procedures are not served: `SqlGuard` refuses every `CALL` and `EXEC` ("no data channel runs a procedure call (gap
+119)"), and an allow-list that names procedures is refused at load and at the MCP server's start (`procedures` is
+reserved for gap 13 and must be empty). A source that answers by position needs its provider to answer
+`columns(table)` for the start check to pass.
 
 ### 11.4 Data policy: what may reach a model
 
@@ -1408,13 +1454,11 @@ Each step has an exit check. Steps 1-4 can be done in a throwaway spike module b
 
 ### 15.2 Open gaps a layer is likely to meet
 
-From TODO "Open SPI and DSL gaps" (read the row for the proposed shape):
+From TODO "Open SPI and DSL gaps" (read the row for the proposed shape). (Phase 8, built 2026-10-19, ET: gaps 9, 10
+and 11 are taken, P8 §4.1-§4.3, and their rows are removed here.)
 
 | Gap | In short |
 |---|---|
-| 9 | one `APP` lane: a slow provider call blocks every other `APP` primitive |
-| 10 | no thread policy that runs a bounded task at the application's next idle point |
-| 11 | a query's timeout is advisory; no cancellation |
 | 13 | no session-scoped data reads (a procedure call then a select on one connection) |
 | 18 | no standard result fields for "queued but not consumed" or "coerced" inputs |
 | 19 | plans are linear: no "only if the next ready event matches" step |

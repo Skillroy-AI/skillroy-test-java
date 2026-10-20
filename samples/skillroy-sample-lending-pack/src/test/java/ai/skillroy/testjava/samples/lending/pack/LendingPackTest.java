@@ -187,7 +187,10 @@ class LendingPackTest {
         assertEquals("<redacted>", mask.mask("lending", "password", 1111L));
         assertNull(mask.mask("lending", "password", null), "null stays null");
         assertEquals("1111", mask.mask("lending", "P", "1111"), "a renamed column is not masked");
-        assertEquals("1111", mask.mask("lending2", "password", "1111"), "only source lending");
+        assertEquals("1111", mask.mask("lending2", "password", "1111"), "only the module's own sources");
+        // phase8-contracts.md 12.3 (ET): the report reader's source too.
+        assertEquals("<redacted>", mask.mask("lending-report", "password", "1111"));
+        assertEquals("1111", mask.mask("lending-report", "code", "1111"));
         assertEquals("1111", mask.mask("LENDING", "password", "1111"), "the source id exactly");
         assertEquals("Alice", mask.mask("lending", "NAME", "Alice"));
     }

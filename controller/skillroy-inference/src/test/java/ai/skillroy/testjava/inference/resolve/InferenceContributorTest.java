@@ -168,6 +168,35 @@ class InferenceContributorTest {
         }
     }
 
+    @Test
+    void aListThatNamesAProcedureIsRefusedAtLoadNamingGap119() throws Exception {
+        // phase8-contracts.md 4.5, D533: refused where the list is put to use, never in the record's constructor.
+        final DeskPack desk = new DeskPack();
+        ai.skillroy.testjava.scenario.pack.DomainPack withProcedure =
+                new ai.skillroy.testjava.scenario.pack.DelegatingDomainPack(desk, "procedures", "1") {
+                    @Override
+                    @SuppressWarnings("deprecation")
+                    public List<ai.skillroy.testjava.scenario.resolve.SqlAllowList> sqlAllowLists() {
+                        List<ai.skillroy.testjava.scenario.resolve.SqlAllowList> out = new ArrayList<>();
+                        for (ai.skillroy.testjava.scenario.resolve.SqlAllowList list : desk.sqlAllowLists()) {
+                            ai.skillroy.testjava.scenario.resolve.SqlAllowList.Builder b =
+                                    ai.skillroy.testjava.scenario.resolve.SqlAllowList.builder(list.source(),
+                                            list.dialect());
+                            list.tables().forEach(b::table);
+                            list.functions().forEach(b::function);
+                            out.add(b.procedure("open_loan_count").build());
+                        }
+                        return out;
+                    }
+                };
+        try (InferenceContributor c = new InferenceContributor()) {
+            ContributionException e = assertThrows(ContributionException.class, () -> c.resolvers(withProcedure,
+                    settings("recorded", tmp, null), new CostLedger(), Clock.systemUTC()));
+            assertTrue(e.getMessage().contains("names procedures [open_loan_count]; no data channel runs a procedure"
+                    + " call (gap 119"), e.getMessage());
+        }
+    }
+
     /** An agent the bind never needs to call: the data is read over JDBC and the plan has no step. */
     private static final class QuietAgent implements AgentConnection {
         final List<String> calls = new ArrayList<>();

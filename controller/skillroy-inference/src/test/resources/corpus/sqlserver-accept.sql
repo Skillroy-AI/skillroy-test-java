@@ -140,7 +140,3 @@ SELECT i.code FROM item i ORDER BY i.code FETCH FIRST 3 ROWS ONLY
 @@ personal column in WHERE and ORDER BY only
 SELECT l.id FROM loan l WHERE l.borrower LIKE ? ORDER BY l.borrower
 => SELECT TOP 200 l.id FROM loan l WHERE l.borrower LIKE ? ORDER BY l.borrower, l.id
-
-@@ CALL of the allow-listed procedure (not T-SQL: the channel must run it as a JDBC {call …} escape)
-CALL open_loan_count(?)
-=> CALL open_loan_count (?)

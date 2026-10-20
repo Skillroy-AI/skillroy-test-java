@@ -23,7 +23,9 @@ import ai.skillroy.testjava.protocol.sql.StatementGuard;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -55,15 +57,69 @@ final class JdbcExecutor {
      */
     static Rows execute(Connection connection, String sql, List<Object> params, int maxRows, int timeoutSeconds,
                         final AgentLog log) throws SQLException, InterruptedException {
+        return execute(connection, sql, params, maxRows, timeoutSeconds, log, null);
+    }
+
+    /**
+     * {@link #execute(Connection, String, List, int, int, AgentLog)} under a read's {@link Control}
+     * (phase8-contracts.md 4.3, D530): the statement is registered through the read path's statement sink, so that
+     * when the agent gives up on the read its cancel action calls {@code Statement.cancel()} while, and only while, the
+     * statement is open (never a later statement of a pooled connection). A {@code SQLException} (or
+     * {@code SQLFeatureNotSupportedException}) from {@code cancel()} is logged by class name and counts as not
+     * cancelled.
+     *
+     * @param control the read's control, or null (no cancellation)
+     */
+    static Rows execute(Connection connection, String sql, List<Object> params, int maxRows, int timeoutSeconds,
+                        final AgentLog log, Control control) throws SQLException, InterruptedException {
         Consumer<String> warn = new Consumer<String>() {
             @Override
             public void accept(String line) {
                 log.warn("data: " + line);
             }
         };
+        final AtomicReference<Statement> current = new AtomicReference<Statement>();
+        AutoCloseable registration = null;
         try {
-            return ReadOnlyJdbc.executeLenient(connection, sql, params, maxRows, timeoutSeconds, warn);
+            if (control != null) {
+                registration = control.onCancelInternal(new Control.Action() {
+                    @Override
+                    public boolean cancel() {
+                        Statement statement = current.get();
+                        if (statement == null) {
+                            return false;
+                        }
+                        try {
+                            statement.cancel();
+                            return true;
+                        } catch (SQLException e) {
+                            log.warn("data: Statement.cancel() failed: " + e.getClass().getName());
+                            return false;
+                        }
+                    }
+
+                    @Override
+                    public String describe() {
+                        return "Statement.cancel";
+                    }
+                });
+            }
+            return ReadOnlyJdbc.executeLenient(connection, sql, params, maxRows, timeoutSeconds, warn,
+                    new Consumer<Statement>() {
+                        @Override
+                        public void accept(Statement statement) {
+                            current.set(statement);
+                        }
+                    });
         } finally {
+            current.set(null);
+            if (registration != null) {
+                try {
+                    registration.close();
+                } catch (Exception ignored) {
+                    // The control's handles do not throw.
+                }
+            }
             try {
                 connection.close();
             } catch (Exception e) {

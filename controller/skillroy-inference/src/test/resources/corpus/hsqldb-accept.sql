@@ -176,11 +176,6 @@ WHERE x.qty BETWEEN ? AND ? AND x.item_code IN ('DRL-01', 'GAR-02', 'SAW-01')
 ?? 1 | 2
 => SELECT x.loan_id, x.line_no, x.qty FROM loan_line x WHERE x.qty BETWEEN ? AND ? AND x.item_code IN ('DRL-01', 'GAR-02', 'SAW-01') ORDER BY x.loan_id, x.line_no LIMIT 200
 
-@@ CALL of the allow-listed procedure, parameters only
-CALL open_loan_count(?)
-?? 'S01'
-=> CALL open_loan_count (?)
-
 @@ ORDER BY an ordinal and a select-list alias that already cover the grouping column
 SELECT l.staff_code AS desk, COUNT(*) AS n FROM loan l GROUP BY l.staff_code ORDER BY 2 DESC, desk
 => SELECT l.staff_code AS desk, COUNT(*) AS n FROM loan l GROUP BY l.staff_code ORDER BY 2 DESC, desk LIMIT 200

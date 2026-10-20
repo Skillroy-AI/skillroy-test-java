@@ -139,7 +139,3 @@ SELECT i.code FROM item i ORDER BY i.code FETCH FIRST 300 ROWS ONLY
 SELECT l.id FROM loan l JOIN staff s ON s.code = l.staff_code AND s.email IS NOT NULL WHERE l.borrower <> s.name
 ORDER BY l.borrower
 => SELECT l.id FROM loan l JOIN staff s ON s.code = l.staff_code AND s.email IS NOT NULL WHERE l.borrower <> s.name ORDER BY l.borrower, l.id, s.code FETCH FIRST 200 ROWS ONLY
-
-@@ CALL of the allow-listed procedure
-CALL open_loan_count(?)
-=> CALL open_loan_count (?)

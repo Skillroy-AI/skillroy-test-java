@@ -71,6 +71,9 @@ import java.util.Map;
  *       ({@link LendingCaptureMask}) (Phase 7);</li>
  *   <li>an {@link InputVeto} for the "Desk tools" window's close panel ({@link LendingInputVeto}) (Phase 8);</li>
  *   <li>a {@link DataSourceProvider} {@code lending} and a {@link DeviceAdapter} {@code printer};</li>
+ *   <li>(Phase 8, phase8-contracts.md 12.2) a second {@link DataSourceProvider} {@code lending-report}, the desk's
+ *       report reader that answers by position ({@link LendingRowsSource}), on the lane {@code lending.reads} the
+ *       module declares, and the worker's quiescent point with the primitive {@code lending.engine.view};</li>
  *   <li>a {@link MaskPolicy} that hides the {@code password} column of source {@code lending}
  *       ({@link PasswordMask});</li>
  *   <li>a {@link RedactionKeys} for the desk's own secret keys ({@code lending.pin}, see {@link LendingSecrets});</li>
@@ -144,6 +147,7 @@ public final class LendingModule implements AgentModule {
         register(ActionFirer.class, widgets);
         register(DialogTextExtractor.class, widgets);
         register(DataSourceProvider.class, new LendingDataSource(access));
+        register(DataSourceProvider.class, rowsSource(context));
         register(MaskPolicy.class, new PasswordMask());
         register(DeviceAdapter.class, new PrinterDevice(access));
         register(RedactionKeys.class, new LendingSecrets());
@@ -155,7 +159,9 @@ public final class LendingModule implements AgentModule {
             primitiveNames.add(p.spec().name());
         }
         for (String name : LendingPrimitives.NAMES) {
-            declare(name, LendingPrimitives.INPUT.equals(name) ? new InputProbe() : new RunningProbe("snapshot"));
+            declare(name, LendingPrimitives.INPUT.equals(name) ? new InputProbe()
+                    : LendingPrimitives.ENGINE_VIEW.equals(name) ? new EngineViewProbe()
+                    : new RunningProbe("snapshot"));
         }
         declare(CAP_AUTHORISATIONS, new RunningProbe("loan snapshot"));
         declare(CAP_SQL, new SqlProbe());
@@ -180,6 +186,8 @@ public final class LendingModule implements AgentModule {
             }
             LendingWorker w = worker;
             if (w != null) {
+                // phase8-contracts.md 12.2: no module code on the engine thread once the module is going.
+                w.closePoint();
                 w.shutdown();
             }
             synchronized (registrations) {
@@ -213,6 +221,23 @@ public final class LendingModule implements AgentModule {
                 }
             }
         }
+    }
+
+    /**
+     * The report reader's source (phase8-contracts.md 12.2) with its lane {@value LendingRowsSource#LANE} declared
+     * (retired with the other registrations in {@link #uninstall}); on an agent that offers no lanes the source's
+     * reads run on a worker, as before Phase 8.
+     */
+    private LendingRowsSource rowsSource(AgentContext context) {
+        LendingRowsSource source = new LendingRowsSource(access);
+        try {
+            keep(context.threads().declareLane(LendingRowsSource.LANE, LendingRowsSource.LANE_THREADS,
+                    LendingRowsSource.LANE_QUEUE));
+            source.lane(LendingRowsSource.LANE);
+        } catch (UnsupportedOperationException e) {
+            context.log().info("lending: the agent offers no lanes; " + LendingRowsSource.ID + " reads on a worker");
+        }
+        return source;
     }
 
     private <T> void register(Class<T> type, T implementation) {
@@ -342,6 +367,23 @@ public final class LendingModule implements AgentModule {
                 return ProbeResult.unavailable("the desk engine is not running");
             }
             return ProbeResult.ok(strategy);
+        }
+    }
+
+    /**
+     * {@code lending.engine.view} (phase8-contracts.md 4.1, 12.2): OK while the desk runs and the module's quiescent
+     * point is offered.
+     */
+    private final class EngineViewProbe implements Probe {
+        @Override
+        public ProbeResult run(AgentContext context) {
+            ProbeResult running = new RunningProbe("quiescent point").run(context);
+            if (running.state() != CapabilityState.OK) {
+                return running;
+            }
+            LendingWorker w = worker;
+            return w == null || w.quiescentPoint().isClosed() ? ProbeResult.unavailable("no quiescent point offered")
+                    : running;
         }
     }
 

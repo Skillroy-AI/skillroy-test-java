@@ -102,7 +102,8 @@ class SchemaCatalogueTest {
         assertTrue(text.contains("  - role VARCHAR (its values: DESK, SUPERVISOR, VOLUNTEER)"), text);
         assertTrue(text.contains("  - status VARCHAR (its values: OPEN, OVERDUE, RETURNED)"));
         assertTrue(text.contains("  - category VARCHAR (its values: ACCESS, GARDEN, POWER)"));
-        assertTrue(text.contains("Procedures you may call, with ? parameters only: open_loan_count"));
+        // phase8-contracts.md 4.5 (gap 119): no procedures line, ever.
+        assertFalse(text.contains("Procedures"), text);
         assertTrue(text.contains("At most 200 rows"));
         assertTrue(text.contains("## The answer"));
         for (String hidden : List.of("Dana Reyes", "Ada Moss", "ada@example.org", "Cordless drill", "4006381333931",

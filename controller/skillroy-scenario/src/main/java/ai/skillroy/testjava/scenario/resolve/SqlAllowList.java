@@ -47,7 +47,10 @@ import java.util.regex.Pattern;
  * @param source the {@code DataChannel} source id the list is for
  * @param dialect how statements on the source are parsed and written
  * @param tables the tables a statement may read, in declaration order
- * @param procedures procedures a statement may call ({@code CALL p(?, …)}); empty: no {@code CALL}
+ * @param procedures reserved for gap 13's prepared reads; must be empty (phase8-contracts.md 4.5, gap 119, D533): no
+ *     data channel runs a procedure call, the guard refuses every {@code CALL}, and a non-empty list is refused where
+ *     the list is put to use (the inference contributor at load, the MCP server at start), not here, so that 0.1.0
+ *     code that builds a list keeps compiling
  * @param functions function names allowed beyond the guard's built-in set; empty: none
  */
 public record SqlAllowList(String source, SqlDialect dialect, List<AllowedTable> tables, List<String> procedures,
@@ -323,10 +326,15 @@ public record SqlAllowList(String source, SqlDialect dialect, List<AllowedTable>
         }
 
         /**
-         * Allows {@code CALL name(?, …)} with parameters only.
+         * Names a procedure in the reserved {@code procedures} list (phase8-contracts.md 4.5, gap 119): kept working for
+         * 0.1.0 source compatibility, but a list that names one is refused where it is put to use, since no data
+         * channel runs a procedure call.
          *
          * @throws IllegalArgumentException if the name is not an SQL identifier or was already added
+         * @deprecated no data channel runs a procedure call (gap 119); the field is reserved for a prepared read (gap
+         *     13)
          */
+        @Deprecated
         public Builder procedure(String name) {
             List<String> next = new ArrayList<>(procedures);
             next.add(name);

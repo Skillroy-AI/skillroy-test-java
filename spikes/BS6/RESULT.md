@@ -230,3 +230,13 @@ allow-list builder must refuse with "no BS6 corpus". Each can be served with §4
 
 `mvn -f spikes/BS6/pom.xml verify` (about 10 seconds; JDK 25+; the first run downloads JSqlParser 5.4). The findings
 are written to `spikes/BS6/target/bs6/`; `README.md` describes the layout and the corpus format.
+
+## Successor note (Phase 8, built 2026-10-19, ET; `docs/design/phase8-contracts.md` §4.5)
+
+This spike stays frozen as the record of what was found. One of its rules was later retired on purpose, so that no
+reader "restores" it from here: the spike admitted `CALL p(?, …)` of an allow-listed procedure (§3 item (d), "the
+channel runs it with `Connection.prepareCall`"), but no data channel ever ran a procedure call; both refuse it at
+`StatementGuard` rule 1. Since Phase 8 the base's guard (`…inference.sql.SqlGuard`) refuses every `CALL` and `EXEC`
+as `PROCEDURE` ("no data channel runs a procedure call (gap 119)"), `SqlAllowList.procedures` is reserved for gap 13's
+prepared reads and must be empty, and the base's corpora (`controller/skillroy-inference/src/test/resources/corpus/`)
+carry the spike's `CALL` accept entries as reject entries. The corpora here and there therefore diverge on `CALL`.

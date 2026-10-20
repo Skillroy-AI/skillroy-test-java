@@ -496,6 +496,23 @@ class ToolCallTest {
     }
 
     /**
+     * phase8-contracts.md 4.5 (gap 119, D533): an allow-list that names a procedure refuses the start, before any
+     * statement runs, naming the gap.
+     */
+    @Test
+    void anAllowListThatNamesAProcedureRefusesTheStart() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            SessionOpenException refused = assertThrows(SessionOpenException.class, () -> fx.start(fx.options(
+                    fx.desk.packWithProcedure()).build()));
+            assertEquals(FailureKind.ENVIRONMENT, refused.kind());
+            assertTrue(refused.getMessage().contains("names procedures [open_loan_count]; no data channel runs a"
+                    + " procedure call (gap 119"), refused.getMessage());
+            assertTrue(fx.desk.agent.callsTo("data.query").isEmpty(), "no statement ran, not even the check's");
+            assertTrue(fx.desk.agent.callsTo("trace.mark").isEmpty(), "the session never opened");
+        }
+    }
+
+    /**
      * Decision D100: a source the check cannot reach at the start (here the agent does not list it) is not read by
      * {@code data_query}, which says why; the server still starts.
      */

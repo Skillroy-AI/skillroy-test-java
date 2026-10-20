@@ -145,3 +145,6 @@ SELECT i.code FROM item i /*
 
 @@ UNSUPPORTED WITH RECURSIVE
 WITH RECURSIVE c (n) AS (SELECT l.id FROM loan l) SELECT c.n FROM c
+
+@@ PROCEDURE CALL of a procedure: no data channel runs a procedure call (gap 119; BS6 admitted this one)
+CALL open_loan_count(?)

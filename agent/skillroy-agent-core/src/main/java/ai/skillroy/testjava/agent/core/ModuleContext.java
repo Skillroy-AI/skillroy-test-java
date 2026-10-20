@@ -21,12 +21,15 @@ import ai.skillroy.testjava.agent.api.AgentLog;
 import ai.skillroy.testjava.agent.api.CapabilityRegistry;
 import ai.skillroy.testjava.agent.api.EventBus;
 import ai.skillroy.testjava.agent.api.HandleRegistry;
+import ai.skillroy.testjava.agent.api.Lane;
 import ai.skillroy.testjava.agent.api.Primitive;
 import ai.skillroy.testjava.agent.api.PrimitiveRegistry;
 import ai.skillroy.testjava.agent.api.PrimitiveSpec;
 import ai.skillroy.testjava.agent.api.Probe;
 import ai.skillroy.testjava.agent.api.SpiRegistry;
 import ai.skillroy.testjava.agent.api.ThreadBroker;
+import ai.skillroy.testjava.agent.api.ThreadPolicy;
+import ai.skillroy.testjava.agent.api.spi.ThreadPolicyProvider;
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.LoadMode;
@@ -37,6 +40,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
 /**
  * The context one module installs with: the core context, except that primitive, SPI and capability registrations
@@ -44,24 +48,49 @@ import java.util.Set;
  * capabilities are withdrawn, contract amendment A18). Each accessor returns the same
  * object for the module's lifetime.
  *
+ * <p>Phase 8 (phase8-contracts.md 4.1, 4.2): {@link #threads()} is a scoped broker that records the lanes the module
+ * declares, so that they are retired with the module (in {@link #rollback()}, after a failed install and after the
+ * module's {@code uninstall}); {@link #closeQuiescentPoints()} closes the quiescent point of every
+ * {@code ThreadPolicyProvider} the module registered, before its {@code uninstall} returns the thread to the host.
+ *
  * <p>Thread-safe.
  */
 final class ModuleContext implements AgentContext {
 
     private final CoreContext core;
+    private final String moduleId;
     private final Primitives primitives = new Primitives();
     private final Spi spi = new Spi();
     private final Capabilities capabilities = new Capabilities();
+    private final Threads threads = new Threads();
 
-    ModuleContext(CoreContext core) {
+    /** @param moduleId the module's id: the owner of the lanes it declares */
+    ModuleContext(CoreContext core, String moduleId) {
         this.core = core;
+        this.moduleId = moduleId;
     }
 
-    /** Removes everything the module registered through this context. */
+    /**
+     * Removes everything the module registered through this context: closes the quiescent points of its providers
+     * first, then retires its lanes and drops its primitives, SPIs and capabilities.
+     */
     void rollback() {
+        closeQuiescentPoints();
+        threads.retireAll();
         primitives.removeAll();
         spi.removeAll();
         capabilities.removeAll();
+    }
+
+    /**
+     * Closes the quiescent point of every {@code ThreadPolicyProvider} this module registered (idempotent with the
+     * module's own close), so that no module code runs on the application's thread once the module is going
+     * (phase8-contracts.md 4.1 "Lifecycle").
+     */
+    void closeQuiescentPoints() {
+        for (ThreadPolicyProvider provider : spi.providers()) {
+            core.threads.closePoint(provider);
+        }
     }
 
     @Override
@@ -106,7 +135,7 @@ final class ModuleContext implements AgentContext {
 
     @Override
     public ThreadBroker threads() {
-        return core.threads();
+        return threads;
     }
 
     @Override
@@ -185,16 +214,84 @@ final class ModuleContext implements AgentContext {
         }
     }
 
+    /**
+     * The module's view of the core's broker: every call goes to the core's, and a lane declared here is owned by
+     * this module and retired with it (phase8-contracts.md 4.2; the A18 pattern for capabilities).
+     */
+    private final class Threads implements ThreadBroker {
+        private final List<Lane> lanes = new ArrayList<Lane>();
+
+        @Override
+        public <T> T call(ThreadPolicy policy, Callable<T> task, long timeoutMs) throws Exception {
+            return core.threads.call(policy, task, timeoutMs);
+        }
+
+        @Override
+        public void post(ThreadPolicy policy, Runnable task) {
+            core.threads.post(policy, task);
+        }
+
+        @Override
+        public boolean isForbiddenThread(Thread thread) {
+            return core.threads.isForbiddenThread(thread);
+        }
+
+        @Override
+        public <T> T callQuiescent(Callable<T> task, long budgetMs, long timeoutMs) throws Exception {
+            return core.threads.callQuiescent(task, budgetMs, timeoutMs);
+        }
+
+        @Override
+        public Lane declareLane(String name, int threads, int queue) {
+            Lane lane = core.threads.declareLane(moduleId, name, threads, queue);
+            synchronized (lanes) {
+                lanes.add(lane);
+            }
+            return lane;
+        }
+
+        @Override
+        public <T> T callOnLane(String lane, Callable<T> task, long timeoutMs) throws Exception {
+            return core.threads.callOnLane(lane, task, timeoutMs);
+        }
+
+        void retireAll() {
+            List<Lane> copy;
+            synchronized (lanes) {
+                copy = new ArrayList<Lane>(lanes);
+                lanes.clear();
+            }
+            for (Lane lane : copy) {
+                try {
+                    lane.close();
+                } catch (RuntimeException e) {
+                    core.log.warn("retiring lane " + lane.name() + " failed: " + e.getClass().getName());
+                }
+            }
+        }
+    }
+
     private final class Spi implements SpiRegistry {
         private final List<AutoCloseable> handles = new ArrayList<AutoCloseable>();
+        /** The thread policy providers this module registered (their quiescent points close with it). */
+        private final List<ThreadPolicyProvider> providers = new ArrayList<ThreadPolicyProvider>();
 
         @Override
         public <T> AutoCloseable register(Class<T> type, T implementation) {
             AutoCloseable handle = core.spi.register(type, implementation);
             synchronized (handles) {
                 handles.add(handle);
+                if (type == ThreadPolicyProvider.class) {
+                    providers.add((ThreadPolicyProvider) implementation);
+                }
             }
             return handle;
+        }
+
+        List<ThreadPolicyProvider> providers() {
+            synchronized (handles) {
+                return new ArrayList<ThreadPolicyProvider>(providers);
+            }
         }
 
         @Override
@@ -212,6 +309,7 @@ final class ModuleContext implements AgentContext {
             synchronized (handles) {
                 copy = new ArrayList<AutoCloseable>(handles);
                 handles.clear();
+                providers.clear();
             }
             for (AutoCloseable handle : copy) {
                 try {

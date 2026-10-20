@@ -82,7 +82,8 @@ final class DataQueryLists {
         if (tables.isEmpty()) {
             return null;
         }
-        return new SqlAllowList(list.source(), list.dialect(), tables, list.procedures(), list.functions());
+        // phase8-contracts.md 4.5 (gap 119): the copy names no procedure; the start check refused a list that did.
+        return new SqlAllowList(list.source(), list.dialect(), tables, List.of(), list.functions());
     }
 
     /** True when a mask alters (or throws on) a sentinel value of this column under any of its spellings. */

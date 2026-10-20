@@ -151,7 +151,7 @@ SQL meets the real schema inside the test JVM (§14.1 item 8).
 |---|---|---|
 | `StatementGuard` | `skillroy-agent-data` `StatementGuard` | unchanged rules (P1 §6, "Statement guard, as built"). `static String check(String sql)` returns the statement without its trailing `;` or throws `RpcException(INVALID_PARAMS, data {param:"sql", reason})` |
 | `ValueConverter` | `skillroy-agent-data` `ValueConverter` | unchanged conversion (decimals as plain strings, ISO-8601 dates, 10000-character cap, `base64:` for binary, truncation marker) |
-| `ReadOnlyJdbc` | the JDBC part of `JdbcExecutor` | `static Rows execute(Connection c, String sql, List<Object> params, int maxRows, int timeoutSeconds, Consumer<String> warn) throws SQLException, InterruptedException`: `setReadOnly(true)`, forward-only read-only `PreparedStatement`, parameters bound with `setObject` after the check of §7.1, `setQueryTimeout`, `setMaxRows(maxRows + 1)`, conversion through `ValueConverter`; restores the connection's state as in Phase 1. Failures while closing or restoring go to `warn` (the agent passes its `AgentLog`, the controller its logger), as `JdbcExecutor` logged them in Phase 1. (Phase 6 security fix, pass 2, P2-L3-F1, P2-L3-S1, SD) Every statement in a transaction the read path rolls back: auto-commit off after `setReadOnly(true)`, then rollback, auto-commit back on, read-only restored, in that order (P1 §6) |
+| `ReadOnlyJdbc` | the JDBC part of `JdbcExecutor` | `static Rows execute(Connection c, String sql, List<Object> params, int maxRows, int timeoutSeconds, Consumer<String> warn) throws SQLException, InterruptedException`: `setReadOnly(true)`, forward-only read-only `PreparedStatement`, parameters bound with `setObject` after the check of §7.1, `setQueryTimeout`, `setMaxRows(maxRows + 1)`, conversion through `ValueConverter`; restores the connection's state as in Phase 1. Failures while closing or restoring go to `warn` (the agent passes its `AgentLog`, the controller its logger), as `JdbcExecutor` logged them in Phase 1. (Phase 6 security fix, pass 2, P2-L3-F1, P2-L3-S1, SD) Every statement in a transaction the read path rolls back: auto-commit off after `setReadOnly(true)`, then rollback, auto-commit back on, read-only restored, in that order (P1 §6). **(A74; Phase 8, built 2026-10-19, ET; P8 §4.3, D530)** `executeLenient(..., Consumer<String> warn, Consumer<Statement> statementSink)`: the sink receives the `PreparedStatement` right after `prepareStatement` and null once it is closed, so that the agent cancels a statement only while it is open; the six-argument form delegates with a null sink |
 | `Rows` | `skillroy-agent-data` `Table` | `columns:[{name,type}]`, `rows:[[…]]`, `rowCount`, `truncated`; `toJson()` / `fromJson(Map)` are the `data.query` result shape |
 
 ```java
@@ -1197,7 +1197,7 @@ least 1) for `setQueryTimeout`, the agent channel passes it in milliseconds as t
 | Guard | the agent's (`StatementGuard`, in the target) | the same `StatementGuard`, on the controller, before a connection is used |
 | Execution | `data.query {source, sql, params, maxRows}` | one connection per source, opened at first use and kept for the life of the channel (closed by `close()`); before each statement `isValid` with a 2 s limit, and one reconnect if it is not. `ReadOnlyJdbc.execute`. No pool; calls are serialised per source. Since 2026-10-03, when the call carries a timeout: the per-source lock is taken with `tryLock(timeout)` and a longer wait is `TIMEOUT`; the connect waits at most `min(loginTimeout, timeout)`, a late connection still closed; `isValid` gets `min(2 s, the timeout rounded up to seconds)`, never 0 |
 | Read-only | the provider's connection, set read-only by the agent; every statement in a transaction the read path rolls back before the connection goes back (pass 2, P2-L3-S1) | the account's role (the boundary), plus `setReadOnly(true)`; every statement in a transaction the read path rolls back, so the kept connection holds none between statements (pass 2, P2-L3-F1) |
-| Timeout | the call's `timeoutMs` | `setQueryTimeout(statementTimeout)`, or the call's timeout when one is given; connecting is bounded by `loginTimeout` (see below) and, since 2026-10-03, by the call's timeout |
+| Timeout | the call's `timeoutMs`; **(A74; Phase 8, built 2026-10-19, ET; P8 §4.2, §4.3)** the agent's module answers its own `TIMEOUT` 250 ms before the call's time, after cancelling the read (the provider's registered actions, or the JDBC statement while open): `data {primitive, timeoutMs, source, lane, waitedMs, cancelled, cancelPending?, stillRunning, enforcesTimeout}` (`primitive` and `timeoutMs` as `map` reads them); a later read of a source whose read still runs is `BUSY` (-> `OTHER`) | `setQueryTimeout(statementTimeout)`, or the call's timeout when one is given; connecting is bounded by `loginTimeout` (see below) and, since 2026-10-03, by the call's timeout |
 | Row cap | 200, `truncated` reported | 200, `truncated` reported |
 | Values | `ValueConverter` in the agent | `ValueConverter` on the controller: identical forms |
 | Masking | the agent's `MaskPolicy` list, in the target | the pack's `RowMask` list, on the controller |
@@ -1319,7 +1319,10 @@ is `ERROR` / `ENVIRONMENT`. A check with `capability` is guarded as P1 §8.4 gua
 
 Not in Phase 2: aggregates, comparisons other than equality in `where`, joins. Because columns are matched by
 position, a source that cannot name its columns can be checked; gap 12 remains open only for code that wants to
-read such a source by name.
+read such a source by name. **(A75; Phase 8, built 2026-10-19, ET; P8 §4.4, §4.8 defect 1)** Corrected: a positional
+source can be checked, its width taken from the statement when no row comes back (before Phase 8 a zero-row answer
+had no columns, so an absence check ended `ERROR` / `ENVIRONMENT` "returned 0 columns"); and such a source is now read
+by name too, the agent naming its columns from the statement's select list.
 
 ---
 
@@ -2842,10 +2845,10 @@ Numbers are those of the table "Open SPI and DSL gaps" in `../TODO.md`.
 | 25 | Expressions over slot values | **Decided**: no expression form; computed values are oracles, margins are query arguments (§3.2) |
 | 27 | Masking of rows read over the controller-side JDBC channel | **Closed**: `RowMask` (§7.3) |
 | 30 | `AgentConnection.await` cannot report a JSON-RPC error | already amendment A31 (1.x, built 2026-10-02) |
-| 9 | One application lane | deferred: scenario A's reads are short |
-| 10 | A thread policy for the engine thread at a quiescent point | deferred |
-| 11 | Query timeout is advisory, no cancellation | deferred; the JDBC channel does enforce `setQueryTimeout` |
-| 12 | Positional sources | **partly**: `db.*` checks match columns by position and no longer need names (§7.4); reading such a source by name stays deferred |
+| 9 | One application lane | deferred: scenario A's reads are short. **Taken by Phase 8 (P8 §4.2; built 2026-10-19, ET)**: named lanes, `DataSourceProvider.lane()` |
+| 10 | A thread policy for the engine thread at a quiescent point | deferred. **Taken by Phase 8 (P8 §4.1; built 2026-10-19, ET)**: `APP_QUIESCENT`, `QuiescentPoint` |
+| 11 | Query timeout is advisory, no cancellation | deferred; the JDBC channel does enforce `setQueryTimeout`. **Taken by Phase 8 (P8 §4.3; built 2026-10-19, ET)**: `QueryControl`, `enforcesTimeout()`, the statement sink |
+| 12 | Positional sources | **partly**: `db.*` checks match columns by position and no longer need names (§7.4); reading such a source by name stays deferred. **Taken by Phase 8 (P8 §4.4; built 2026-10-19, ET)**: labels from the statement, the zero-row width, `columns(table)` |
 | 13 | Session-scoped data reads | deferred; related limit recorded: verifiers run before sign-on (§6.4) |
 | 18 | Semantic-input result contract | deferred |
 | 19 | Conditional or optional planned calls | deferred; scenario A's prompt sequence is fixed |

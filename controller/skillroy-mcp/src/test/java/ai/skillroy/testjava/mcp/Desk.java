@@ -266,6 +266,59 @@ final class Desk {
     }
 
     /**
+     * The desk's pack whose allow-list names a procedure (phase8-contracts.md 4.5, gap 119: refused where the list is
+     * put to use, the server's start included).
+     */
+    DomainPack packWithProcedure() {
+        DomainPack base = pack;
+        return new DomainPack() {
+            @Override
+            public String id() {
+                return base.id();
+            }
+
+            @Override
+            public String version() {
+                return base.version();
+            }
+
+            @Override
+            public StepLibrary steps() {
+                return base.steps();
+            }
+
+            @Override
+            public SyncPolicy syncPolicy() {
+                return base.syncPolicy();
+            }
+
+            @Override
+            public List<FactProvider> facts() {
+                return base.facts();
+            }
+
+            @Override
+            public void recover(AgentConnection connection) throws Exception {
+                base.recover(connection);
+            }
+
+            @Override
+            public ResolutionCatalogue resolution() {
+                return base.resolution();
+            }
+
+            @Override
+            @SuppressWarnings("deprecation")
+            public List<SqlAllowList> sqlAllowLists() {
+                SqlAllowList list = base.sqlAllowLists().get(0);
+                SqlAllowList.Builder b = SqlAllowList.builder(list.source(), list.dialect());
+                list.tables().forEach(b::table);
+                return List.of(b.procedure("open_loan_count").build());
+            }
+        };
+    }
+
+    /**
      * The desk's pack whose verb {@code lend} declares this argument schema (phase6 security fix S49: a schema with a
      * secret-looking property and data in it).
      */

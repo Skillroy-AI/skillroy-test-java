@@ -183,6 +183,12 @@ class PartsTest {
         assertEquals(List.of("code", "title"), item.columns().stream().map(AllowedColumn::name).toList());
         assertEquals(List.of("borrower_email", "shelf_note"), item.otherColumns(), "a mask that alters the upper-case"
                 + " label is found too");
+        @SuppressWarnings("deprecation")
+        SqlAllowList named = SqlAllowList.builder("desk", SqlDialect.HSQLDB)
+                .table("item", List.of("code"), AllowedColumn.of("code", "VARCHAR")).procedure("open_loan_count")
+                .build();
+        assertEquals(List.of(), DataQueryLists.forDataQuery(named, List.of()).procedures(),
+                "phase8-contracts.md 4.5: the copy names no procedure");
         assertEquals(null, DataQueryLists.forDataQuery(SqlAllowList.builder("hr", SqlDialect.HSQLDB)
                 .table("staff", List.of("code"), AllowedColumn.personal("code", "VARCHAR")).build(), List.of()));
         assertTrue(DataQueryLists.masked("desk", "x", List.of((source, column, value) -> {

@@ -17,6 +17,8 @@
 package ai.skillroy.testjava.samples.lending.agent;
 
 import ai.skillroy.testjava.agent.api.AgentContext;
+import ai.skillroy.testjava.agent.api.QuiescentPoint;
+import ai.skillroy.testjava.agent.api.spi.ThreadPolicyProvider;
 import ai.skillroy.testjava.protocol.Topics;
 import ai.skillroy.testjava.samples.lending.Deposits;
 import ai.skillroy.testjava.samples.lending.Engine;
@@ -85,6 +87,8 @@ final class EngineEvents implements EngineListener {
     private final AgentContext ctx;
     private final Engine engine;
     private volatile boolean active = true;
+    /** The module's quiescent point, once found (phase8-contracts.md 4.1). */
+    private volatile QuiescentPoint point;
     /** Inputs offered by lending.input, by identity: the engine hands the very same object to inputAccepted. */
     private final Map<LendingInput, AckWait> pending = new IdentityHashMap<LendingInput, AckWait>();
     private final Object requestedLock = new Object();
@@ -226,6 +230,40 @@ final class EngineEvents implements EngineListener {
                 swallow("inputRequested", t);
             }
         }
+    }
+
+    /**
+     * The engine's idle point (phase8-contracts.md 4.1, 12.2): runs at most one queued quiescent task of the
+     * module's point, when its budget fits {@code availableMs}; inert after {@link #deactivate()}. On the engine
+     * thread; never blocks (the point holds no lock while the task runs) and never throws.
+     */
+    @Override
+    public void idle(LendingState state, long availableMs) {
+        try {
+            if (active) {
+                QuiescentPoint p = quiescentPoint();
+                if (p != null) {
+                    p.runOne(availableMs);
+                }
+            }
+        } catch (Throwable t) {
+            swallow("idle", t);
+        }
+    }
+
+    /** The module's quiescent point: the one its {@link LendingWorker} offers, looked up once. */
+    private QuiescentPoint quiescentPoint() {
+        QuiescentPoint p = point;
+        if (p == null) {
+            for (ThreadPolicyProvider provider : ctx.spi().all(ThreadPolicyProvider.class)) {
+                if (provider instanceof LendingWorker) {
+                    p = ((LendingWorker) provider).quiescentPoint();
+                    point = p;
+                    break;
+                }
+            }
+        }
+        return p;
     }
 
     @Override

@@ -32,13 +32,16 @@ public final class GuardViolation extends Exception {
     public enum Reason {
         /** Rule 1: the text does not parse as exactly one statement in the dialect, or was only captured. */
         PARSE,
-        /** Rule 2: a statement other than a SELECT or an allow-listed CALL. */
+        /** Rule 2: a statement other than a SELECT. */
         NOT_SELECT,
         /** Rule 2: a statement or a CTE body that writes, or {@code INTO} of any kind. */
         DML,
         /** Rule 2: a statement that changes the schema. */
         DDL,
-        /** Rule 2: a CALL or EXEC that is not {@code CALL p(?, …)} of an allow-listed procedure, a procedural block. */
+        /**
+         * Rule 2: every CALL or EXEC (no data channel runs a procedure call, gap 119, phase8-contracts.md 4.5), and a
+         * procedural block.
+         */
         PROCEDURE,
         /** Rule 2: UNION, INTERSECT, EXCEPT, MINUS. */
         SET_OPERATION,

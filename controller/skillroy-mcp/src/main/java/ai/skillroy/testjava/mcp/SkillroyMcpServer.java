@@ -429,12 +429,20 @@ public final class SkillroyMcpServer implements AutoCloseable {
      * @return the sources whose list could not be checked (the source not served, a timeout, the statement refused
      *     before it ran, a channel that failed otherwise): {@code data_query} reads none of them (logged)
      * @throws SessionOpenException ENVIRONMENT for a list the check refuses, naming the table and the columns, never a
-     *     value
+     *     value; and for a list that names procedures (phase8-contracts.md 4.5, gap 119), whatever the target offers
      * @throws AgentLostException if the agent is gone
      * @throws InterruptedException if the thread is interrupted
      */
     private Set<String> checkAllowLists(Collection<SqlAllowList> lists, SessionOptions given)
             throws SessionOpenException, AgentLostException, InterruptedException {
+        for (SqlAllowList list : lists) {
+            // phase8-contracts.md 4.5 (gap 119): a list that names procedures is refused before any statement runs.
+            String procedures = AllowListCheck.proceduresRefusal(list);
+            if (procedures != null) {
+                throw new SessionOpenException(FailureKind.ENVIRONMENT, given.bind().credentials().mask()
+                        .apply("pack " + pack.id() + ": " + procedures), null);
+            }
+        }
         if (lists.isEmpty() || !primitives.containsKey(DATA_QUERY)) {
             return Set.of();
         }

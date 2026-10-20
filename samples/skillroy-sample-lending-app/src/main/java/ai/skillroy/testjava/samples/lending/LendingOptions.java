@@ -38,6 +38,9 @@ import java.util.concurrent.TimeUnit;
  *       {@code branch} ({@link Edition}; phase6-contracts.md 11.3)</td></tr>
  *   <tr><td>{@value #PROP_PLUGINS}</td><td>none</td><td>comma-separated {@link LendingPlugin} class names</td></tr>
  *   <tr><td>{@value #PROP_IDLE_LOCK}</td><td>0</td><td>idle seconds before the desk locks; 0 = never</td></tr>
+ *   <tr><td>{@value #PROP_IDLE_TICK}</td><td>100</td><td>ms between the engine's idle callbacks while it waits
+ *       ({@link EngineListener#idle}); 0 = only the call right after {@code inputRequested} (phase8-contracts.md
+ *       12.1)</td></tr>
  *   <tr><td>{@value #PROP_TITLE}</td><td>{@value LendingFrame#DEFAULT_TITLE}</td><td>main window title</td></tr>
  *   <tr><td>{@value #PROP_DB_PORT}</td><td>none</td><td>also serve the database on
  *       {@code 127.0.0.1:<port>} to the read-only account {@value LendingDb#READER_USER} (see
@@ -58,6 +61,8 @@ public final class LendingOptions {
     public static final String PROP_EDITION = "lending.edition";
     public static final String PROP_PLUGINS = "lending.plugins";
     public static final String PROP_IDLE_LOCK = "lending.idleLockSeconds";
+    /** The engine's idle tick in ms (phase8-contracts.md 12.1, D535); default 100. */
+    public static final String PROP_IDLE_TICK = "lending.idleTickMillis";
     public static final String PROP_TITLE = "lending.title";
     public static final String PROP_DB_PORT = "lending.dbPort";
     public static final String PROP_DB_PASSWORD = "lending.dbPassword";
@@ -70,6 +75,7 @@ public final class LendingOptions {
     private Edition edition = Edition.STANDARD;
     private List<String> plugins = Collections.emptyList();
     private long idleLockMillis;
+    private long idleTickMillis = Engine.DEFAULT_IDLE_TICK_MILLIS;
     private String title = LendingFrame.DEFAULT_TITLE;
     private String dbName = LendingDb.DEFAULT_NAME;
     private int dbPort = NO_DB_PORT;
@@ -119,6 +125,17 @@ public final class LendingOptions {
                 throw new IllegalArgumentException(PROP_IDLE_LOCK + " must be a whole number of seconds: " + idle);
             }
             o.idleLockSeconds(seconds);
+        }
+        String tick = props.getProperty(PROP_IDLE_TICK);
+        if (tick != null && !tick.trim().isEmpty()) {
+            long millis;
+            try {
+                millis = Long.parseLong(tick.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(PROP_IDLE_TICK + " must be a whole number of milliseconds: "
+                        + tick);
+            }
+            o.idleTickMillis(millis);
         }
         String title = props.getProperty(PROP_TITLE);
         if (title != null && !title.trim().isEmpty()) {
@@ -176,6 +193,15 @@ public final class LendingOptions {
             throw new IllegalArgumentException("idle lock must not be negative");
         }
         this.idleLockMillis = millis;
+        return this;
+    }
+
+    /** @param millis ms between the engine's idle callbacks while it waits; 0 = only the first (phase8 12.1) */
+    public LendingOptions idleTickMillis(long millis) {
+        if (millis < 0) {
+            throw new IllegalArgumentException(PROP_IDLE_TICK + " must not be negative");
+        }
+        this.idleTickMillis = millis;
         return this;
     }
 
@@ -247,6 +273,11 @@ public final class LendingOptions {
 
     public long idleLockMillis() {
         return idleLockMillis;
+    }
+
+    /** @return ms between the engine's idle callbacks; 0 = only the call right after {@code inputRequested} */
+    public long idleTickMillis() {
+        return idleTickMillis;
     }
 
     public String title() {

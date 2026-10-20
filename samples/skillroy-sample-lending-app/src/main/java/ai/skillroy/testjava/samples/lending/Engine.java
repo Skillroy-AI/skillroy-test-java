@@ -31,6 +31,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -73,11 +74,20 @@ import java.util.logging.Logger;
  *       sub-step pending) locks the desk; the signed-on staff member's password unlocks it to the same state;
  *       SIGN_OFF from LOCKED abandons any open loan.</li>
  * </ul>
+ *
+ * <p><b>The idle tick</b> (phase8-contracts.md 12.1, D535). While it waits for input the engine polls the inbox in
+ * steps of at most {@link #idleTickMillis()} (default {@value #DEFAULT_IDLE_TICK_MILLIS} ms) and calls
+ * {@link EngineListener#idle} right after {@code inputRequested} and then once per step until an input is taken (with a
+ * tick of 0: only the call right after {@code inputRequested}); never while an input is processed or a prompt is
+ * open. The idle-lock timing is as before: the lock deadline is set when a wait starts and again after a dropped
+ * input. Inside an {@code idle} callback, and only there, {@link #idleView()} reads the engine-confined state.
  */
 public final class Engine {
 
     /** Name of the engine thread. */
     public static final String THREAD_NAME = "LendingEngine";
+    /** The idle tick when none is set (phase8-contracts.md 12.1). */
+    public static final long DEFAULT_IDLE_TICK_MILLIS = 100L;
     /** Kind of the authorisation recorded for a return above the staff member's limit. */
     public static final String AUTH_RETURN_OVERRIDE = "RETURN_OVERRIDE";
 
@@ -165,6 +175,7 @@ public final class Engine {
     };
 
     private final Object lifecycle = new Object();
+    private volatile long idleTickMillis = DEFAULT_IDLE_TICK_MILLIS;
     private volatile Thread thread;
     private volatile boolean running;
     private volatile EngineStatus status;
@@ -186,6 +197,10 @@ public final class Engine {
     private boolean authorised;
     private BigDecimal authorisedLimit;
     private Loan loan;
+    /** True while an {@code idle} callback runs (engine thread only); {@link #idleView()} needs it. */
+    private boolean inIdle;
+    /** What the running {@code idle} callback was told is free ({@code Long.MAX_VALUE}: no lock applies). */
+    private long idleAvailableMs;
 
     /**
      * @param db the database; the engine writes through {@link LendingDb#connection()}
@@ -361,26 +376,71 @@ public final class Engine {
     /**
      * Adds a listener. The list is a plain {@link ArrayList} that the engine thread iterates whenever it reports
      * something: add listeners before {@link #start()}, or from another thread only while the engine is blocked
-     * waiting for input ({@link #isAwaitingInput()}), never from inside a callback.
+     * waiting for input ({@link #isAwaitingInput()}), never from inside a callback. While it waits the engine still
+     * reads the list for its idle callbacks (phase8-contracts.md 12.1), so additions, removals and the engine's
+     * snapshot of the list hold the list's monitor; the rule above stands.
      */
     public void addListener(EngineListener listener) {
         if (listener != null) {
-            listeners.add(listener);
+            synchronized (listeners) {
+                listeners.add(listener);
+            }
         }
     }
 
     /** Removes a listener; the same rule as {@link #addListener} applies. */
     public void removeListener(EngineListener listener) {
-        listeners.remove(listener);
+        synchronized (listeners) {
+            listeners.remove(listener);
+        }
     }
 
     /** @return how many listeners are registered */
     public int listenerCount() {
-        return listeners.size();
+        synchronized (listeners) {
+            return listeners.size();
+        }
     }
 
     public long idleLockMillis() {
         return idleLockMillis;
+    }
+
+    /**
+     * Sets the idle tick (phase8-contracts.md 12.1): the engine calls {@link EngineListener#idle} right after
+     * {@code inputRequested} and then every {@code millis} while it waits; 0 = only the call right after
+     * {@code inputRequested}. Set it before {@link #start()}.
+     *
+     * @throws IllegalArgumentException for a negative value
+     */
+    public Engine idleTickMillis(long millis) {
+        if (millis < 0) {
+            throw new IllegalArgumentException("idleTickMillis must not be negative");
+        }
+        this.idleTickMillis = millis;
+        return this;
+    }
+
+    /** @return the idle tick in ms; 0 = only the call right after {@code inputRequested} */
+    public long idleTickMillis() {
+        return idleTickMillis;
+    }
+
+    /**
+     * The engine-confined state at an idle point (phase8-contracts.md 12.1): only on the engine thread, inside an
+     * {@link EngineListener#idle} callback, which is where a quiescent task of the agent runs. {@code step} and
+     * {@code pendingQty} are in no published snapshot, so a correct answer shows that the read ran there.
+     *
+     * @throws IllegalStateException on another thread, or on the engine thread outside an {@code idle} callback
+     */
+    public IdleView idleView() {
+        if (Thread.currentThread() != thread || !inIdle) {
+            throw new IllegalStateException("idleView() is read on the engine thread inside an idle callback only");
+        }
+        Loan open = loan;
+        return new IdleView(state, step.name(), pendingQty, returnMode, lockedFrom,
+            open == null ? 0 : open.lines().size(),
+            idleAvailableMs == Long.MAX_VALUE ? null : Long.valueOf(idleAvailableMs));
     }
 
     public Clock clock() {
@@ -441,20 +501,38 @@ public final class Engine {
         }
     }
 
-    /** Waits for the next input the current state accepts; locks on idle timeout. Null when stopping. */
+    /**
+     * Waits for the next input the current state accepts; locks on idle timeout. Null when stopping. Polls in steps of
+     * at most the idle tick and calls {@code idle} right after {@code inputRequested} and once per step (D535); the
+     * lock deadline is set when the wait starts and again after a dropped input, as before.
+     */
     private LendingInput nextInput() throws InterruptedException {
+        long lockDeadline = lockDeadline();
+        boolean idleDue = true;
         while (running) {
+            long tick = idleTickMillis;
+            boolean lockApplies = lockDeadline != Long.MIN_VALUE;
+            if (idleDue || tick > 0) {
+                idleDue = false;
+                fireIdle(lockApplies ? Math.max(0L, millisUntil(lockDeadline)) : Long.MAX_VALUE);
+            }
             LendingInput input;
-            if (idleLockApplies()) {
-                input = inbox.poll(idleLockMillis);
-                if (input == null) {
+            if (lockApplies) {
+                long left = millisUntil(lockDeadline);
+                input = left <= 0 ? null : inbox.poll(tick > 0 ? Math.min(tick, left) : left);
+                if (input == null && millisUntil(lockDeadline) <= 0) {
                     lockedFrom = state;
                     setState(LendingState.LOCKED);
                     enterWait();
+                    lockDeadline = lockDeadline();
+                    idleDue = true;
                     continue;
                 }
             } else {
-                input = inbox.take();
+                input = tick > 0 ? inbox.poll(tick) : inbox.take();
+            }
+            if (input == null) {
+                continue;   // a tick: the next idle point
             }
             if (status.validInputs().contains(input.source())) {
                 return input;
@@ -462,8 +540,30 @@ public final class Engine {
             if (LOG.isLoggable(Level.FINE)) {
                 LOG.fine("dropped input " + input.source() + " in state " + state);
             }
+            lockDeadline = lockDeadline();
         }
         return null;
+    }
+
+    /** The idle lock's deadline ({@code System.nanoTime()}) for a wait starting now, or Long.MIN_VALUE for none. */
+    private long lockDeadline() {
+        return idleLockApplies() ? System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(idleLockMillis) : Long.MIN_VALUE;
+    }
+
+    private static long millisUntil(long deadlineNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
+    }
+
+    /** Calls {@code idle} on every listener with {@link #idleView()} allowed for the duration. */
+    private void fireIdle(final long availableMs) {
+        final LendingState s = state;
+        inIdle = true;
+        idleAvailableMs = availableMs;
+        try {
+            fire(l -> l.idle(s, availableMs));
+        } finally {
+            inIdle = false;
+        }
     }
 
     private boolean idleLockApplies() {
@@ -495,7 +595,10 @@ public final class Engine {
     }
 
     private void fire(Consumer<EngineListener> event) {
-        Object[] snapshot = listeners.toArray();
+        Object[] snapshot;
+        synchronized (listeners) {
+            snapshot = listeners.toArray();
+        }
         for (Object o : snapshot) {
             if (o == null) {
                 continue;

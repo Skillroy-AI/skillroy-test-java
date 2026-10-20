@@ -240,7 +240,8 @@ public final class AgentRuntime implements AutoCloseable {
         // Every payload passes every registered MaskPolicy and the key rule before it is stored (P8 5.1, D539).
         RingEventBus bus = new RingEventBus(Integer.parseInt(options.get("eventRing")),
                 Long.parseLong(options.get("eventRingChars")), log, new EventMasks(spi, redactor, log));
-        CoreThreadBroker broker = new CoreThreadBroker(workers, spi, log);
+        // Phase 8 (phase8-contracts.md 4.2): the modules' lanes, threads in the agent's group with the host loader.
+        CoreThreadBroker broker = new CoreThreadBroker(workers, spi, log, new Lanes(group, hostLoader, log));
         CoreCapabilityRegistry capabilities = new CoreCapabilityRegistry(log);
         this.ctx = new CoreContext(this, inst, loadMode, options, hostLoader, hostContext,
                 new CorePrimitiveRegistry(), bus, new WeakHandleRegistry(), broker, capabilities, spi, log,
@@ -664,12 +665,14 @@ public final class AgentRuntime implements AutoCloseable {
             record.fail("the agent closed during start");
             return;
         }
-        ModuleContext moduleContext = new ModuleContext(ctx);
+        ModuleContext moduleContext = new ModuleContext(ctx, record.id);
         try {
             record.module.install(moduleContext);
         } catch (Throwable t) {
             record.fail("install failed: " + ModuleLoader.describe(t));
             log.warn("module " + record.id + " install failed", t);
+            // phase8-contracts.md 4.1: no module code on the application's thread once the module is going.
+            moduleContext.closeQuiescentPoints();
             try {
                 record.module.uninstall();
             } catch (Throwable u) {
@@ -1121,6 +1124,10 @@ public final class AgentRuntime implements AutoCloseable {
             readinessReason = "agent is stopping";
             closeSignal.countDown();
             log.info("stopping: " + reason);
+            // phase8-contracts.md 4.1, 4.2: no lane is declared from now on, and the first provider's quiescent point
+            // is closed before any module's uninstall returns the application's thread to the host.
+            ctx.threads.startClosingLanes();
+            ctx.threads.closeQuiescentPoint();
             List<ModuleLoader.Record> installed = new ArrayList<ModuleLoader.Record>(installOrder);
             Collections.reverse(installed);
             for (ModuleLoader.Record record : installed) {
@@ -1128,6 +1135,8 @@ public final class AgentRuntime implements AutoCloseable {
                     uninstall(record);
                 }
             }
+            // Every lane is retired after the modules' uninstall and before the pools shut down.
+            ctx.threads.retireLanes();
             Map<String, Object> payload = new LinkedHashMap<String, Object>();
             payload.put("reason", reason);
             ctx.events.publish(Topics.AGENT_STOPPING, "core", payload);
@@ -1240,6 +1249,10 @@ public final class AgentRuntime implements AutoCloseable {
                 return;
             }
             record.state = "UNINSTALLED";
+            ModuleContext context = record.context;
+            if (context != null) {
+                context.closeQuiescentPoints();
+            }
             try {
                 record.module.uninstall();
             } catch (Throwable t) {
@@ -1358,8 +1371,12 @@ public final class AgentRuntime implements AutoCloseable {
     }
 
     /**
-     * {@code {workers:{active,max}, callers:{active,max}, abandoned:{<primitive>:n}}} for {@code agent.info}
-     * (finding S30): how busy the bounded pools are and which primitives have a timed-out call still running.
+     * {@code {workers:{active,max}, callers:{active,max}, abandoned:{<primitive>:n}, quiescent, lanes}} for
+     * {@code agent.info} (finding S30): how busy the bounded pools are and which primitives have a timed-out call
+     * still running; Phase 8 (phase8-contracts.md 4.1, 4.2): the first provider's quiescent point
+     * ({@code {provider, allowanceMs, capacity, queued, ran, notReady, refused, overruns, lastOverrun, penalised}}, or
+     * null when none is offered) and the declared lanes ({@code {<name>: {owner, threads, queue, active, queued,
+     * abandoned}}}).
      */
     Map<String, Object> threadsJson() {
         Map<String, Object> out = new LinkedHashMap<String, Object>();
@@ -1367,6 +1384,8 @@ public final class AgentRuntime implements AutoCloseable {
         out.put("callers", poolJson(calls));
         Dispatcher d = dispatcher;
         out.put("abandoned", d == null ? new LinkedHashMap<String, Object>() : d.abandonedJson());
+        out.put("quiescent", ctx.threads.quiescentJson());
+        out.put("lanes", ctx.threads.lanesJson());
         return out;
     }
 

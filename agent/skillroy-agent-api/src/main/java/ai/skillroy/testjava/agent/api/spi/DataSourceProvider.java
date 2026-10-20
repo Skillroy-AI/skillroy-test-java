@@ -26,7 +26,8 @@ import java.util.List;
  * {@link #query} for sources that only expose their own statement API (possibly without column names).
  * {@code data.query} tries {@code query()} first and falls back to {@code open()} when it returns null.
  *
- * <p>Called on agent worker threads, possibly concurrently; implementations must be thread-safe.
+ * <p>Called on agent worker threads, or on the lane {@link #lane()} names, possibly concurrently; implementations must
+ * be thread-safe.
  *
  * <p>Agent threads carry the host's class loader as context class loader and are daemon threads in the agent's
  * thread group, which threads created on them inherit: do not lazily start host infrastructure that spawns threads
@@ -45,7 +46,9 @@ public interface DataSourceProvider {
      * means this provider does not offer the JDBC form. The connection may come from a pool (the application's own,
      * for example): the agent runs the query in a transaction it rolls back itself, and switches auto-commit and the
      * read-only flag back to what they were, before it closes the connection (phase1-contracts.md 6; Phase 6 security
-     * fix, pass 2, P2-L3-S1).
+     * fix, pass 2, P2-L3-S1). {@code open()} has no timeout: the provider bounds any wait of its own (the wait
+     * for a free pooled connection, for example); the statement it serves runs with a query timeout and is cancelled while open when the
+     * caller's time runs out (phase8-contracts.md 4.3).
      */
     default java.sql.Connection open() throws java.sql.SQLException {
         return null;
