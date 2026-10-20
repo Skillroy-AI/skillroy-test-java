@@ -17,7 +17,9 @@
 package ai.skillroy.testjava.scenario.hooks;
 
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.hook.ClassPattern;
 import ai.skillroy.testjava.protocol.hook.HookSpec;
+import ai.skillroy.testjava.protocol.hook.HookTarget;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -41,6 +43,14 @@ import java.util.regex.Pattern;
  * change of any entry, of the version or of an {@code enabled} flag changes it. Nothing of a catalogue enters
  * {@code plan.json} or the environment fingerprint (decisions D127, D128).
  *
+ * <p>Phase 8 (phase8-contracts.md 6.8): a {@code packages} rule may carry a code-source qualifier
+ * ({@link PackageRule}); an entry's effective {@code target.codeSource} is its own, else the qualifier of the longest
+ * package rule its class is under, else none, and {@link Builder#build()} bakes it into the entry's target (so the spec
+ * the agent receives, the entry hash and the catalogue hash agree; D558). {@link #deny()} is the catalogue's class
+ * deny-list ({@link ClassPattern}s, at most {@value #MAX_DENY}): an enabled entry on a denied class is refused, a
+ * disabled one is a warning. The hash gains {@code deny: [sorted]} only when the list is non-empty, so every
+ * catalogue that uses neither key keeps its hash byte for byte (D571).
+ *
  * <p>Immutable; safe to share between threads.
  */
 public final class HookCatalogue {
@@ -51,25 +61,48 @@ public final class HookCatalogue {
     /** The most hooks a catalogue holds: the ceiling of the agent's {@code hooks.maxClasses}. */
     public static final int MAX_HOOKS = 64;
 
+    /** The most deny patterns a catalogue holds (phase8-contracts.md 6.8; {@link ClassPattern#MAX_PER_SOURCE}). */
+    public static final int MAX_DENY = ClassPattern.MAX_PER_SOURCE;
+
     /** No hook: what a pack without a catalogue answers. Its id is empty and its version 0. */
-    public static final HookCatalogue EMPTY = new HookCatalogue("", 0, null, List.of(), List.of());
+    public static final HookCatalogue EMPTY = new HookCatalogue("", 0, null, List.of(), List.of(), List.of());
+
+    /**
+     * One {@code packages} rule (phase8-contracts.md 6.8): a package name and the code-source qualifier every entry
+     * under it inherits unless it carries its own.
+     *
+     * @param name the package name
+     * @param codeSource a regular expression on the whole code-source name, or null for the plain form
+     */
+    public record PackageRule(String name, String codeSource) {
+
+        /** @throws NullPointerException if {@code name} is null */
+        public PackageRule {
+            Objects.requireNonNull(name, "name");
+        }
+    }
 
     private final String id;
     private final int version;
     private final String application;
     private final List<HookEntry> hooks;
+    private final List<PackageRule> rules;
     private final List<String> packages;
+    private final List<String> deny;
     private final List<String> warnings;
     private final String hash;
 
-    private HookCatalogue(String id, int version, String application, List<HookEntry> hooks, List<String> packages) {
+    private HookCatalogue(String id, int version, String application, List<HookEntry> hooks, List<PackageRule> rules,
+                          List<String> deny) {
         this.id = id;
         this.version = version;
         this.application = application;
         this.hooks = List.copyOf(hooks);
-        this.packages = List.copyOf(packages);
-        this.warnings = List.copyOf(warnings(this.hooks, this.packages));
-        this.hash = hash(id, version, this.hooks);
+        this.rules = List.copyOf(rules);
+        this.packages = this.rules.stream().map(PackageRule::name).toList();
+        this.deny = List.copyOf(deny);
+        this.warnings = List.copyOf(warnings(this.hooks, this.packages, this.deny));
+        this.hash = hash(id, version, this.hooks, this.deny);
     }
 
     /** The catalogue id (empty for {@link #EMPTY}). */
@@ -92,9 +125,24 @@ public final class HookCatalogue {
         return hooks;
     }
 
-    /** The application's own packages, which decide the default of {@code enabled}. */
+    /** The application's own packages (the rules' names), which decide the default of {@code enabled}. */
     public List<String> packages() {
         return packages;
+    }
+
+    /** The package rules with their code-source qualifiers, in order (phase8-contracts.md 6.8). */
+    public List<PackageRule> packageRules() {
+        return rules;
+    }
+
+    /** The class deny-list ({@link ClassPattern}s), distinct, in order (phase8-contracts.md 6.8). */
+    public List<String> deny() {
+        return deny;
+    }
+
+    /** The first deny pattern that matches the binary name {@code className}, or null. */
+    public String denied(String className) {
+        return ClassPattern.firstMatch(deny, className);
     }
 
     /** The entries with {@code enabled: true}, in order. */
@@ -124,19 +172,26 @@ public final class HookCatalogue {
 
     /**
      * What the reader accepted but a reviewer should see (phase6-contracts.md 4.3, 5.1), one sentence each, printed by
-     * {@code skillroy hooks status}: an entry enabled on a class outside {@link #packages()}, and a {@code CAPTURE} hook
-     * whose method name suggests a secret without {@code secretArgs} or {@code secretResult}.
+     * {@code skillroy hooks status}: an entry enabled on a class outside {@link #packages()}, a {@code CAPTURE} hook
+     * whose method name suggests a secret without {@code secretArgs} or {@code secretResult}, and a disabled entry on a
+     * class the catalogue denies (phase8-contracts.md 6.8: it can never be enabled).
      */
     public List<String> warnings() {
         return warnings;
     }
 
-    /** {@code sha256:} over {@code {id, version, hooks: [{hash, enabled}…]}} sorted by hash (see the class comment). */
+    /**
+     * {@code sha256:} over {@code {id, version, hooks: [{hash, enabled}…], deny?: [sorted]}}, the entries sorted by
+     * hash (see the class comment); {@code deny} only when non-empty.
+     */
     public String hash() {
         return hash;
     }
 
-    /** {@code {id, version, hash, application?}}: what {@code hook.install}'s {@code catalogue} parameter carries. */
+    /**
+     * {@code {id, version, hash, application?, deny?}}: what {@code hook.install}'s {@code catalogue} parameter
+     * carries ({@code deny} only when non-empty, phase8-contracts.md 6.6).
+     */
     public Map<String, Object> descriptor() {
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("id", id);
@@ -144,6 +199,9 @@ public final class HookCatalogue {
         json.put("hash", hash);
         if (application != null) {
             json.put("application", application);
+        }
+        if (!deny.isEmpty()) {
+            json.put("deny", new ArrayList<Object>(deny));
         }
         return json;
     }
@@ -168,9 +226,29 @@ public final class HookCatalogue {
         return false;
     }
 
-    private static List<String> warnings(List<HookEntry> hooks, List<String> packages) {
+    /**
+     * The qualifier of the longest package rule {@code className} is under (the {@link #inPackages} rule), or null:
+     * the inheritance of phase8-contracts.md 6.8.
+     */
+    static String qualifierFor(String className, List<PackageRule> rules) {
+        PackageRule longest = null;
+        for (PackageRule rule : rules) {
+            if (className.startsWith(rule.name() + ".")
+                    && (longest == null || rule.name().length() > longest.name().length())) {
+                longest = rule;
+            }
+        }
+        return longest == null ? null : longest.codeSource();
+    }
+
+    private static List<String> warnings(List<HookEntry> hooks, List<String> packages, List<String> deny) {
         List<String> out = new ArrayList<>();
         for (HookEntry entry : hooks) {
+            String denied = entry.enabled() ? null : ClassPattern.firstMatch(deny, entry.target().className());
+            if (denied != null) {
+                out.add("hook " + entry.id() + " is off and its class " + entry.target().className() + " is denied by"
+                        + " the catalogue (" + denied + "): it can never be enabled");
+            }
             if (entry.enabled() && !inPackages(entry.target().className(), packages)) {
                 out.add("hook " + entry.id() + " is enabled on " + entry.target().className() + ", a class outside"
                         + " the catalogue's packages " + packages + " (a third-party target: the author's licence"
@@ -184,7 +262,7 @@ public final class HookCatalogue {
         return out;
     }
 
-    private static String hash(String id, int version, List<HookEntry> hooks) {
+    private static String hash(String id, int version, List<HookEntry> hooks, List<String> deny) {
         List<Map<String, Object>> entries = new ArrayList<>();
         for (HookEntry entry : hooks) {
             Map<String, Object> element = new LinkedHashMap<>();
@@ -198,6 +276,11 @@ public final class HookCatalogue {
         json.put("id", id);
         json.put("version", (long) version);
         json.put("hooks", entries);
+        if (!deny.isEmpty()) {
+            List<String> sorted = new ArrayList<>(deny);
+            sorted.sort(null);
+            json.put("deny", sorted);
+        }
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(Json.writeCanonical(json)
                     .getBytes(StandardCharsets.UTF_8));
@@ -211,12 +294,12 @@ public final class HookCatalogue {
     public boolean equals(Object o) {
         return o instanceof HookCatalogue other && id.equals(other.id) && version == other.version
                 && Objects.equals(application, other.application) && hooks.equals(other.hooks)
-                && packages.equals(other.packages);
+                && rules.equals(other.rules) && deny.equals(other.deny);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, version, application, hooks, packages);
+        return Objects.hash(id, version, application, hooks, rules, deny);
     }
 
     @Override
@@ -226,7 +309,9 @@ public final class HookCatalogue {
 
     /**
      * Builds a catalogue from another (phase6-contracts.md 5.1, 11.2): an overlay replaces entries by id, adds new
-     * ones and turns entries off or on. Not thread-safe; the catalogue it builds is.
+     * ones and turns entries off or on. The base's entries keep the qualifier baked when the base was built; an entry
+     * added or replaced here inherits from the rules at {@link #build()} (phase8-contracts.md 6.8, D570). Not
+     * thread-safe; the catalogue it builds is.
      */
     public static final class Builder {
 
@@ -234,14 +319,21 @@ public final class HookCatalogue {
         private int version;
         private String application;
         private final List<HookEntry> hooks;
-        private final List<String> packages;
+        private final List<PackageRule> rules;
+        private final List<String> deny;
+        /** The ids of the entries taken from the base: baked already, never baked again. */
+        private final java.util.Set<String> baked = new java.util.HashSet<>();
 
         private Builder(HookCatalogue base) {
             this.id = base.id;
             this.version = base.version;
             this.application = base.application;
             this.hooks = new ArrayList<>(base.hooks);
-            this.packages = new ArrayList<>(base.packages);
+            this.rules = new ArrayList<>(base.rules);
+            this.deny = new ArrayList<>(base.deny);
+            for (HookEntry entry : base.hooks) {
+                baked.add(entry.id());
+            }
         }
 
         /** Another catalogue id. */
@@ -262,14 +354,50 @@ public final class HookCatalogue {
             return this;
         }
 
-        /** Adds packages to those that decide the default of {@code enabled} (duplicates ignored). */
+        /**
+         * Adds packages to those that decide the default of {@code enabled}, as rules without a qualifier (a name
+         * already there is kept as it is, its qualifier included).
+         */
         public Builder packages(List<String> more) {
             for (String pkg : more) {
-                if (!packages.contains(pkg)) {
-                    packages.add(Objects.requireNonNull(pkg, "package"));
+                Objects.requireNonNull(pkg, "package");
+                if (indexOfRule(pkg) < 0) {
+                    rules.add(new PackageRule(pkg, null));
                 }
             }
             return this;
+        }
+
+        /** Adds package rules; a rule with the name of one already there replaces its qualifier, in its place. */
+        public Builder packageRules(List<PackageRule> more) {
+            for (PackageRule rule : more) {
+                int i = indexOfRule(Objects.requireNonNull(rule, "rule").name());
+                if (i < 0) {
+                    rules.add(rule);
+                } else {
+                    rules.set(i, rule);
+                }
+            }
+            return this;
+        }
+
+        /** Adds deny patterns (duplicates ignored); checked at {@link #build()}. */
+        public Builder deny(List<String> more) {
+            for (String pattern : more) {
+                if (!deny.contains(Objects.requireNonNull(pattern, "pattern"))) {
+                    deny.add(pattern);
+                }
+            }
+            return this;
+        }
+
+        private int indexOfRule(String name) {
+            for (int i = 0; i < rules.size(); i++) {
+                if (rules.get(i).name().equals(name)) {
+                    return i;
+                }
+            }
+            return -1;
         }
 
         /**
@@ -283,6 +411,7 @@ public final class HookCatalogue {
                 throw new IllegalStateException("no hook " + entry.id() + " to replace in catalogue " + id);
             }
             hooks.set(i, entry);
+            baked.remove(entry.id());
             return this;
         }
 
@@ -296,6 +425,7 @@ public final class HookCatalogue {
                 throw new IllegalStateException("hook " + entry.id() + " is already in catalogue " + id);
             }
             hooks.add(entry);
+            baked.remove(entry.id());
             return this;
         }
 
@@ -338,11 +468,17 @@ public final class HookCatalogue {
         /**
          * The catalogue.
          *
+         * <p>Phase 8 (phase8-contracts.md 6.8): every deny pattern is checked, an entry without its own qualifier that
+         * was not taken from the base inherits the qualifier of the longest package rule its class is under, and an
+         * enabled entry on a denied class is refused.
+         *
          * @throws IllegalStateException when the id is malformed, the version is not positive, there are more than
-         *     {@value HookCatalogue#MAX_HOOKS} entries, or an entry breaks a name rule of its spec
+         *     {@value HookCatalogue#MAX_HOOKS} entries or {@value HookCatalogue#MAX_DENY} deny patterns, a deny pattern
+         *     or a package rule's qualifier is malformed, an entry breaks a name rule of its spec, or an enabled entry
+         *     targets a denied class
          */
         public HookCatalogue build() {
-            if (hooks.isEmpty() && id.isEmpty()) {
+            if (hooks.isEmpty() && id.isEmpty() && rules.isEmpty() && deny.isEmpty()) {
                 return EMPTY;
             }
             if (!ID.matcher(id).matches()) {
@@ -355,13 +491,45 @@ public final class HookCatalogue {
                 throw new IllegalStateException("catalogue " + id + " has " + hooks.size() + " hooks, at most "
                         + MAX_HOOKS + " are allowed");
             }
+            if (deny.size() > MAX_DENY) {
+                throw new IllegalStateException("catalogue " + id + " has " + deny.size() + " deny patterns, at most "
+                        + MAX_DENY + " are allowed");
+            }
+            for (String pattern : deny) {
+                String violation = ClassPattern.violation(pattern);
+                if (violation != null) {
+                    throw new IllegalStateException("catalogue " + id + ": deny pattern '" + pattern + "': "
+                            + violation);
+                }
+            }
+            for (PackageRule rule : rules) {
+                String violation = HookTarget.codeSourceViolation(rule.codeSource());
+                if (violation != null) {
+                    throw new IllegalStateException("catalogue " + id + ", package " + rule.name() + ": " + violation);
+                }
+            }
+            List<HookEntry> out = new ArrayList<>();
             for (HookEntry entry : hooks) {
-                HookSpec.Violation violation = entry.toSpec().violation();
+                HookEntry effective = entry;
+                if (entry.target().codeSource() == null && !baked.contains(entry.id())) {
+                    String inherited = qualifierFor(entry.target().className(), rules);
+                    if (inherited != null) {
+                        effective = entry.withTarget(entry.target().withCodeSource(inherited));
+                    }
+                }
+                HookSpec.Violation violation = effective.toSpec().violation();
                 if (violation != null) {
                     throw new IllegalStateException("catalogue " + id + ", hook " + entry.id() + ": " + violation);
                 }
+                String denied = effective.enabled() ? ClassPattern.firstMatch(deny, effective.target().className())
+                        : null;
+                if (denied != null) {
+                    throw new IllegalStateException("hook " + entry.id() + " targets " + effective.target().className()
+                            + ", which the catalogue denies (" + denied + ")");
+                }
+                out.add(effective);
             }
-            return new HookCatalogue(id, version, application, hooks, packages);
+            return new HookCatalogue(id, version, application, out, rules, deny);
         }
     }
 }

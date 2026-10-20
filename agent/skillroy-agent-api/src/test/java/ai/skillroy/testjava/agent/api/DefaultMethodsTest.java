@@ -179,6 +179,9 @@ class DefaultMethodsTest {
             }
         };
         assertSame(engine, context(Collections.<String, String>emptyMap(), spi).hooks());
+        assertTrue(engine.deny().isEmpty(), "HookEngine.deny() holds nothing by default (phase8-contracts.md 6.6)");
+        assertThrows(UnsupportedOperationException.class, () -> engine.deny().add("a.B"),
+                "the default list is read-only");
     }
 
     @Test

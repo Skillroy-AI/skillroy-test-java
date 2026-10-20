@@ -17,16 +17,25 @@
 
 package ai.skillroy.testjava.agent.hooks;
 
+import ai.skillroy.testjava.agent.api.instrument.CodeSources;
+import ai.skillroy.testjava.agent.api.spi.hook.ClassDeny;
 import ai.skillroy.testjava.fixture.hooks.ChildFirstLoader;
 import ai.skillroy.testjava.fixture.hooks.DepositRule;
 import ai.skillroy.testjava.fixture.hooks.Refusals;
+import ai.skillroy.testjava.fixture.hooks.TwoJars;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.hook.HookMode;
 import ai.skillroy.testjava.protocol.hook.HookSpec;
+import ai.skillroy.testjava.protocol.hook.HookTarget;
+import ai.skillroy.testjava.protocol.text.BoundedRegex;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -34,12 +43,16 @@ import java.lang.reflect.Proxy;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 
 import static ai.skillroy.testjava.agent.hooks.FakeHookContext.map;
 import static ai.skillroy.testjava.agent.hooks.Harness.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -47,11 +60,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The probe of a spec, item by item (phase6-contracts.md section 3.3, section 13.1 item 3), through {@code hook.probe}.
  * The strict-delegation loader's refusal needs the append first and runs in a JVM of its own
- * ({@link StrictLoaderFreshJvmTest}).
+ * ({@link StrictLoaderFreshJvmTest}). Phase 8 (phase8-contracts.md section 6.4, section 13.1 row 24): item 2b's class
+ * deny before "loaded?", and item 3's code-source filter with {@code codeSources} in every answer that found copies.
  */
 class ProbeItemsTest {
 
     private Harness harness;
+
+    @TempDir
+    File tmp;
 
     @AfterEach
     void close() {
@@ -84,6 +101,8 @@ class ProbeItemsTest {
         assertEquals("advice", p.get("strategy"));
         assertEquals(1L, ((Number) p.get("loaders")).longValue());
         assertEquals(Collections.singletonList("system"), p.get("loaderIds"));
+        assertEquals(Collections.singletonList("test-classes"), p.get("codeSources"),
+                "the copy's code source, its directory's last segment only (phase8-contracts.md 6.2)");
         assertTrue(((Number) p.get("sizeBytes")).longValue() > 0);
         assertTrue(((Number) p.get("methods")).longValue() >= 7);
         Map<String, Object> spy = (Map<String, Object>) answer.get("spy");
@@ -226,6 +245,14 @@ class ProbeItemsTest {
                 "OBSERVE", "target", map("class", "a.B", "method", "m", "descriptors",
                         Collections.singletonList("()V")), "capture", map("result", true)))));
         assertEquals("specs[0].capture", capture.error().data().get("param"));
+        // phase8-contracts.md 6.3: a qualifier that is not a regular expression is the spec's name-rule violation
+        RpcException qualifier = harness.ctx.error("hook.probe", map("specs", Arrays.asList(map("id", "a", "mode",
+                "OBSERVE", "target", map("class", "a.B", "method", "m", "descriptors",
+                        Collections.singletonList("()V"), "codeSource", "desk(")))));
+        assertEquals(ErrorCodes.INVALID_PARAMS, qualifier.error().code());
+        assertEquals("specs[0].target.codeSource", qualifier.error().data().get("param"));
+        assertTrue(qualifier.error().message().startsWith("not a regular expression: "),
+                qualifier.error().message());
     }
 
     /**
@@ -312,5 +339,178 @@ class ProbeItemsTest {
             System.setProperty("skillroy.agent.hooks.spyJar", saved);
         }
         assertNotNull(saved);
+    }
+
+    // ---- Phase 8 (phase8-contracts.md sections 6.4 and 6.5) ----
+
+    /** A jar holding the class files of {@code type}, for a copy from another code source. */
+    private File jarOf(Class<?> type, String name) throws Exception {
+        File jar = new File(tmp, name);
+        String entry = type.getName().replace('.', '/') + ".class";
+        try (JarOutputStream out = new JarOutputStream(new FileOutputStream(jar));
+             InputStream in = type.getClassLoader().getResourceAsStream(entry)) {
+            out.putNextEntry(new JarEntry(entry));
+            byte[] buffer = new byte[4096];
+            for (int n = in.read(buffer); n >= 0; n = in.read(buffer)) {
+                out.write(buffer, 0, n);
+            }
+            out.closeEntry();
+        }
+        return jar;
+    }
+
+    private static HookSpec qualified(String id, Class<?> type, String method, String codeSource) {
+        return new HookSpec(id, HookMode.OBSERVE, new HookTarget(type.getName(), method,
+                Collections.singletonList(Harness.descriptor(type, method)), null, codeSource), null, null, null,
+                false, null);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aClassFromAnotherCodeSource() throws Exception {
+        new TwoJars().lend();
+        File jar = jarOf(TwoJars.class, "two-jars-1.4.jar");
+        ChildFirstLoader loader = new ChildFirstLoader(new URL[] {jar.toURI().toURL()},
+                ProbeItemsTest.class.getClassLoader(), TwoJars.class.getName());
+        Class<?> copy = loader.loadClass(TwoJars.class.getName());
+        assertEquals(loader, copy.getClassLoader());
+        assertEquals("two-jars-1.4.jar", CodeSources.of(copy));
+        harness = new Harness();
+
+        Map<String, Object> plain = probe(qualified("lend.counted", TwoJars.class, "lend", null));
+        assertEquals("OK", plain.get("state"), String.valueOf(plain));
+        assertEquals(2L, ((Number) plain.get("loaders")).longValue());
+        assertEquals(new HashSet<Object>(Arrays.asList("test-classes", "two-jars-1.4.jar")),
+                new HashSet<Object>((List<Object>) plain.get("codeSources")), "both copies, without a qualifier");
+
+        Map<String, Object> mine = probe(qualified("lend.counted", TwoJars.class, "lend", "two-jars(-[^/]*)?\\.jar"));
+        assertEquals("OK", mine.get("state"), String.valueOf(mine));
+        assertEquals(2L, ((Number) mine.get("loaders")).longValue(), "loaders keeps the count");
+        assertEquals(new HashSet<Object>(Arrays.asList("test-classes", "two-jars-1.4.jar")),
+                new HashSet<Object>((List<Object>) mine.get("codeSources")), "codeSources lists both");
+        List<Object> loaderIds = (List<Object>) mine.get("loaderIds");
+        List<Object> codeSources = (List<Object>) mine.get("codeSources");
+        assertEquals(Integer.toHexString(System.identityHashCode(loader)),
+                loaderIds.get(codeSources.indexOf("two-jars-1.4.jar")), "aligned with loaderIds");
+
+        Map<String, Object> neither = probe(qualified("lend.counted", TwoJars.class, "lend", "lending-app\\.jar"));
+        assertEquals("UNAVAILABLE", neither.get("state"));
+        assertEquals("class from another code source: test-classes, two-jars-1.4.jar", neither.get("reason"));
+        Map<String, Object> anchored = probe(qualified("lend.counted", TwoJars.class, "lend", "two-jars"));
+        assertEquals("UNAVAILABLE", anchored.get("state"), "the whole name must match: " + anchored);
+
+        Map<String, Object> installed = harness.install("toys", qualified("lend.counted", TwoJars.class, "lend",
+                "two-jars(-[^/]*)?\\.jar"));
+        List<Object> touched = (List<Object>) installed.get("touched");
+        assertEquals(1, touched.size(), "only the jar's copy is hooked: " + touched);
+        assertEquals("two-jars-1.4.jar", ((Map<String, Object>) touched.get(0)).get("codeSource"));
+        harness.ctx.call("hook.remove", map());
+        loader.close();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void anUnreadableCodeSource() throws Exception {
+        new DepositRule();
+        harness = new Harness();
+        harness.engine().probes().reader = new Probes.CodeSourceReader() {
+            @Override
+            public String of(Class<?> type) {
+                return type == DepositRule.class ? CodeSources.UNREADABLE : CodeSources.of(type);
+            }
+        };
+        Map<String, Object> qualifiedAnswer = probe(qualified("deposit.computed", DepositRule.class, "depositFor",
+                ".*"));
+        assertEquals("UNAVAILABLE", qualifiedAnswer.get("state"));
+        assertEquals("the class's code source cannot be read: SecurityException", qualifiedAnswer.get("reason"));
+        assertEquals(Collections.singletonList("(unreadable)"), qualifiedAnswer.get("codeSources"));
+        Map<String, Object> without = probe(qualified("deposit.computed", DepositRule.class, "depositFor", null));
+        assertEquals("OK", without.get("state"), "without a qualifier only the report changes: " + without);
+        assertEquals(Collections.singletonList("(unreadable)"), without.get("codeSources"));
+        Map<String, Object> none = probe(qualified("deposit.computed", DepositRule.class, "depositFor",
+                "\\(unreadable\\)"));
+        assertEquals("UNAVAILABLE", none.get("state"), "UNREADABLE never matches");
+    }
+
+    @Test
+    void aPathologicalQualifierIsStoppedWithinTheBudget() throws Exception {
+        new DepositRule();
+        harness = new Harness();
+        final StringBuilder name = new StringBuilder();
+        while (name.length() < CodeSources.MAX_LENGTH - 1) {
+            name.append('a');
+        }
+        name.append('!');
+        harness.engine().probes().reader = new Probes.CodeSourceReader() {
+            @Override
+            public String of(Class<?> type) {
+                return type == DepositRule.class ? name.toString() : CodeSources.of(type);
+            }
+        };
+        long start = System.nanoTime();
+        Map<String, Object> p = probe(qualified("deposit.computed", DepositRule.class, "depositFor", "(.*a){20}"));
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        assertEquals("UNAVAILABLE", p.get("state"));
+        assertEquals("codeSource regex too slow", p.get("reason"));
+        assertTrue(ms < BoundedRegex.BUDGET_MS + 2000, "stopped near the budget: " + ms + " ms");
+    }
+
+    @Test
+    void aDeniedClassIsRefusedByNameBeforeLoaded() throws Exception {
+        String never = "ai.skillroy.testjava.fixture.hooks.Refusals$NeverLoaded";
+        HookSpec spec = Harness.spec("never", HookMode.OBSERVE, never, "x", "()I", null, null, null, false);
+
+        FakeHookContext optioned = new FakeHookContext();
+        optioned.options.put(HookOptions.DENY, " ai.skillroy.testjava.fixture.hooks.Refusals , ,x.Y");
+        harness = new Harness(optioned);
+        assertEquals(Arrays.asList("ai.skillroy.testjava.fixture.hooks.Refusals", "x.Y"),
+                harness.engine().options.deny, "trimmed, empty items dropped");
+        assertRefused(spec, "denied by the agent option hooks.deny: ai.skillroy.testjava.fixture.hooks.Refusals");
+        // the option first when a module would refuse too
+        harness.ctx.spi.register(ClassDeny.class, new ClassDeny() {
+            @Override
+            public String refuse(String className) {
+                return className.endsWith("NeverLoaded") ? "the lending module denies it" : null;
+            }
+        });
+        assertRefused(spec, "denied by the agent option hooks.deny: ");
+        harness.close();
+
+        harness = new Harness();
+        assertRefused(spec, "class not loaded");
+        harness.ctx.spi.register(ClassDeny.class, new ClassDeny() {
+            @Override
+            public String refuse(String className) {
+                return className.endsWith("NeverLoaded") ? "the lending module denies it" : null;
+            }
+        });
+        assertEquals("denied by a module: the lending module denies it", probe(spec).get("reason"));
+        harness.close();
+
+        harness = new Harness();
+        ClassDeny throwing = new ClassDeny() {
+            @Override
+            public String refuse(String className) {
+                throw new IllegalStateException("broken policy");
+            }
+        };
+        harness.ctx.spi.register(ClassDeny.class, throwing);
+        String reason = String.valueOf(probe(spec).get("reason"));
+        assertEquals("denied by a module: the deny policy " + throwing.getClass().getName()
+                + " threw java.lang.IllegalStateException", reason);
+        probe(spec);
+        int warned = 0;
+        for (String line : harness.ctx.log.all()) {
+            if (line.startsWith("WARN hooks: the deny policy " + throwing.getClass().getName())) {
+                warned++;
+            }
+        }
+        assertEquals(1, warned, "logged once: " + harness.ctx.log.all());
+        DepositRule loaded = new DepositRule();
+        assertRefused(spec("deposit.computed", HookMode.OBSERVE, loaded.getClass(), "depositFor"),
+                "denied by a module: the deny policy");
+        for (Class<?> c : Harness.inst().getAllLoadedClasses()) {
+            assertFalse(c.getName().equals(never), "the probe loaded the class");
+        }
     }
 }

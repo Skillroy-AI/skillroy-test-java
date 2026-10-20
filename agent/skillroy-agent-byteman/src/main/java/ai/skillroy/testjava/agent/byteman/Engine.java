@@ -20,9 +20,12 @@ import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.ProbeResult;
 import ai.skillroy.testjava.agent.api.instrument.ByteVerification;
 import ai.skillroy.testjava.agent.api.instrument.RetransformBatches;
+import ai.skillroy.testjava.agent.api.spi.hook.ClassDeny;
+import ai.skillroy.testjava.agent.api.spi.hook.HookEngine;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.Topics;
+import ai.skillroy.testjava.protocol.hook.ClassPattern;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -57,6 +60,12 @@ import java.util.jar.JarFile;
  * installed, the type check through {@code RuleCheck}, the restore and its verification, and the handler that turns a
  * firing into {@code rule.fired}. Every Byteman, {@code RuleManager} and {@code RuleHelper} type is reached by
  * reflection through the system class loader; nothing here names one in a signature or a field.
+ *
+ * <p>The class deny (phase8-contracts.md sections 6.5 and 6.7): per call, under the lock, the engine builds the
+ * {@link ClassBound.Deny} view from the agent option {@code hooks.deny} (first), the hooks module's held catalogue list
+ * (the {@link ClassDeny} that is a {@link HookEngine}) and every other registered {@link ClassDeny}; the first
+ * refusal wins and a throw refuses. {@code rule.check} reports a denied rule class in {@code errors},
+ * {@code rule.submit} refuses it before the count and before the load, and {@code rule.list} shows the deny in force.
  *
  * <p>Guarded by its own lock: one submit, unload, list or check at a time (they run on agent workers). The firing
  * path ({@link #fired}) runs on the application's thread and takes no lock. The {@code uninstall} waits for the
@@ -127,6 +136,10 @@ final class Engine implements FiredSink {
     /** The names of the rules installed or being installed; read without the lock by a cut-short uninstall. */
     private final Set<String> liveNames = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
     private final BindingEncoder encoder;
+    /** The option's patterns, compiled once. */
+    private final List<ClassPattern> optionDeny;
+    /** The classes of the module {@link ClassDeny}s that threw, each logged once. */
+    private final Set<String> denyThrows = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
     // Written under the lock; volatile so that a cut-short uninstall may read them without it.
     private volatile Object retransformer;
@@ -152,6 +165,98 @@ final class Engine implements FiredSink {
         this.system = system;
         this.agentLoaders = agentLoaders;
         this.encoder = new BindingEncoder(ctx, settings.captureMaxBytes);
+        List<ClassPattern> compiled = new ArrayList<ClassPattern>();
+        for (String p : settings.deny) {
+            compiled.add(ClassPattern.compile(p));
+        }
+        this.optionDeny = Collections.unmodifiableList(compiled);
+    }
+
+    // ------------------------------------------------------------------------------------------- the class deny
+
+    static final int MAX_DENY_REASON = 200;
+    static final String DENIED_BY_OPTION = "denied by the agent option " + Settings.DENY + ": ";
+    static final String DENIED_BY_MODULE = "denied by a module: ";
+
+    /**
+     * The class deny view of one call (phase8-contracts.md 6.5, 6.7): the registry read now, so that the hooks module's
+     * catalogue registration counts when that module is loaded, and a domain module's too.
+     */
+    ClassBound.Deny denyView() {
+        final List<ClassDeny> registered = ctx.spi() == null ? Collections.<ClassDeny>emptyList()
+                : ctx.spi().all(ClassDeny.class);
+        return new ClassBound.Deny() {
+            @Override
+            public String refuse(String className) {
+                return deniedBy(className, registered);
+            }
+        };
+    }
+
+    /** The option first, then the catalogue's held list (a hook engine's), then the other modules'; null to allow. */
+    String deniedBy(String className, List<ClassDeny> registered) {
+        for (ClassPattern p : optionDeny) {
+            if (p.matches(className)) {
+                return DENIED_BY_OPTION + p.pattern();
+            }
+        }
+        for (int pass = 0; pass < 2; pass++) {
+            for (ClassDeny d : registered) {
+                boolean catalogue = d instanceof HookEngine;
+                if (catalogue != (pass == 0)) {
+                    continue;
+                }
+                String reason;
+                try {
+                    reason = d.refuse(className);
+                } catch (VirtualMachineError e) {
+                    throw e;
+                } catch (Throwable t) {
+                    String type = d.getClass().getName();
+                    if (denyThrows.add(type)) {
+                        ctx.log().warn("byteman: the deny policy " + type + " threw " + t.getClass().getName()
+                                + "; every class it is asked about is refused");
+                    }
+                    return DENIED_BY_MODULE + "the deny policy " + type + " threw " + t.getClass().getName();
+                }
+                if (reason != null) {
+                    String cut = reason.length() > MAX_DENY_REASON ? reason.substring(0, MAX_DENY_REASON) : reason;
+                    // the hooks module's catalogue source answers its own "denied by the catalogue <id>: <p>"
+                    return catalogue ? cut : DENIED_BY_MODULE + cut;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@code rule.list.deny} (phase8-contracts.md 6.6): {@code option}, {@code modules} (the registered
+     * {@link ClassDeny}s other than a hook engine's) and, when the hooks module is loaded, {@code catalogue} (its held
+     * list, through {@link HookEngine#deny()}).
+     */
+    Map<String, Object> denyInfo() {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        List<ClassDeny> registered = ctx.spi() == null ? Collections.<ClassDeny>emptyList()
+                : ctx.spi().all(ClassDeny.class);
+        HookEngine hooks = ctx.spi() == null ? null : ctx.spi().first(HookEngine.class);
+        if (hooks != null) {
+            List<Object> held = new ArrayList<Object>();
+            try {
+                held.addAll(hooks.deny());
+            } catch (RuntimeException e) {
+                ctx.log().warn("byteman: the hook engine's deny list could not be read: " + e.getClass().getName());
+            }
+            out.put("catalogue", held);
+        }
+        out.put("option", new ArrayList<Object>(settings.deny));
+        long modules = 0;
+        for (ClassDeny d : registered) {
+            if (!(d instanceof HookEngine)) {
+                modules++;
+            }
+        }
+        out.put("modules", Long.valueOf(modules));
+        return out;
     }
 
     // ------------------------------------------------------------------------------------------- the capability
@@ -233,7 +338,11 @@ final class Engine implements FiredSink {
         if (lint.ok()) {
             enter();
             try {
-                if (retransformer == null) {
+                // the class deny by name (phase8-contracts.md 6.7): an error, never a load, never a class read
+                String denied = denyView().refuse(lint.className());
+                if (denied != null) {
+                    errors.add(lint.className() + ": " + denied);
+                } else if (retransformer == null) {
                     warnings.add("type check skipped: Byteman is not loaded (the first rule.submit loads it)");
                 } else if (!loadedBySystem(lint.className())) {
                     warnings.add("type check skipped: class not loaded");
@@ -275,7 +384,8 @@ final class Engine implements FiredSink {
         enter();
         try {
             Class<?>[] loaded = inst.getAllLoadedClasses();
-            ClassBound.Result bound = new ClassBound(jvm(inst, loaded), settings, agentLoaders).check(lint);
+            ClassBound.Result bound = new ClassBound(jvm(inst, loaded), settings, agentLoaders, denyView())
+                    .check(lint);
             if (!bound.ok()) {
                 throw rejected(bound.errors);
             }
@@ -428,6 +538,7 @@ final class Engine implements FiredSink {
             out.put("rules", list);
             out.put("loaded", retransformer != null);
             out.put("reused", reused);
+            out.put("deny", denyInfo());
             return out;
         } finally {
             lock.unlock();

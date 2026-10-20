@@ -54,7 +54,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Hooks on the controller side (phase6-contracts.md 5.3, 6.1, 6.3, 6.4, 13.1 item 5): {@link HookInstaller} against
  * the fake agent for every branch of 5.3, step 0b inside a run, the run-scoped base fact root {@code hooks}, the
  * archived {@code capabilities.json} and its record, the session's install at open, and {@link RunOptions}' new
- * component.
+ * component. Phase 8 (phase8-contracts.md 6.9, section 13.1 row 26): the deny sent, the echo required on both paths,
+ * {@code denyNotDelivered} on a skip with the agent option read from {@code rule.list}, a deny-only catalogue sent as a
+ * zero-spec install, {@code deniedNow} recorded, and the {@code codeSource} upgrade hint.
  */
 class HooksTest {
 
@@ -326,6 +328,165 @@ class HooksTest {
             assertTrue(e.getMessage().startsWith("hook.install failed: " + ErrorCodes.name(code)), e.getMessage());
             assertEquals(code, ((Number) ((Map<?, ?>) e.detail().get("error")).get("code")).intValue());
         }
+    }
+
+    // ------------------------------------------------------------------------------------------ Phase 8 (P8 6.9)
+
+    static final String DENIED = "org.example.toy.Inbox";
+
+    static HookCatalogue denying(HookCatalogue base, String... patterns) {
+        return HookCatalogue.builder(base).deny(List.of(patterns)).build();
+    }
+
+    /** The fake engine echoes the deny it was sent (a Phase 8 agent), or nothing at all (a 0.1.0 agent). */
+    private void echoingEngine(boolean echo) {
+        agent.on("hook.install", params -> {
+            installs.add(params);
+            Map<?, ?> catalogue = (Map<?, ?>) params.get("catalogue");
+            List<?> specs = (List<?>) params.get("specs");
+            if (!specs.isEmpty()) {
+                installed = Map.of("id", catalogue.get("id"), "hash", catalogue.get("hash"), "installedAt", 1L);
+            }
+            Map<String, Object> cat = new LinkedHashMap<>();
+            cat.put("id", catalogue.get("id"));
+            cat.put("hash", catalogue.get("hash"));
+            cat.put("alreadyInstalled", false);
+            if (echo) {
+                cat.put("deny", catalogue.get("deny") == null ? List.of() : catalogue.get("deny"));
+            }
+            List<Object> hooks = new ArrayList<>();
+            for (Object spec : specs) {
+                hooks.add(Map.of("id", ((Map<?, ?>) spec).get("id"), "state", "OK", "strategy", "advice",
+                        "capability", "hook." + ((Map<?, ?>) spec).get("id")));
+            }
+            return Map.of("catalogue", cat, "hooks", hooks, "touched", List.of(), "otherAgents", List.of());
+        });
+    }
+
+    @Test
+    void theDenyIsSentAndItsEchoRecorded() throws Exception {
+        pack.hooks = denying(catalogue("toy", 1), DENIED);
+        echoingEngine(true);
+        HookInstaller.Result result = install(HooksMode.AUTO, true);
+        assertEquals(List.of(DENIED), ((Map<?, ?>) installs.get(0).get("catalogue")).get("deny"),
+                "catalogue.deny sent");
+        assertEquals(List.of(DENIED), result.record().get("deny"));
+        assertEquals(List.of("mode", "catalogue", "installed", "unavailable", "armed", "touched", "ms",
+                "otherAgents", "deny"), List.copyOf(result.record().keySet()));
+        pack.hooks = catalogue("toy", 1);
+        installed = null;
+        assertFalse(install(HooksMode.AUTO, true).record().containsKey("deny"), "no deny: no key");
+    }
+
+    @Test
+    void aMissingEchoIsEnvironmentOnTheInstallPathAndOnTheAlreadyInstalledPath() throws Exception {
+        pack.hooks = denying(catalogue("toy", 1), DENIED, "org.example.toy.Clock");
+        echoingEngine(false);
+        HookInstaller.Refused old = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.AUTO, true));
+        assertEquals(FailureKind.ENVIRONMENT, old.kind());
+        assertEquals("the agent does not honour the catalogue's deny list (" + DENIED + ", org.example.toy.Clock);"
+                + " upgrade the agent", old.getMessage());
+        assertEquals(List.of(DENIED, "org.example.toy.Clock"), old.detail().get("missing"));
+        assertNull(old.detail().get("answered"));
+        assertEquals(false, old.record().get("ok"));
+        // a partial echo is a refusal too
+        agent.on("hook.install", params -> {
+            installs.add(params);
+            return Map.of("catalogue", Map.of("id", "toy", "hash", "h", "deny", List.of(DENIED)), "hooks", List.of(),
+                    "touched", List.of(), "otherAgents", List.of());
+        });
+        installed = null;
+        HookInstaller.Refused partial = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.AUTO, true));
+        assertEquals(List.of("org.example.toy.Clock"), partial.detail().get("missing"));
+        assertEquals(List.of(DENIED), partial.detail().get("answered"));
+        // the alreadyInstalled path: step 0's hook.health must carry deny.catalogue
+        installed = Map.of("id", "toy", "hash", pack.hooks.hash(), "installedAt", 1L);
+        HookInstaller.Refused already = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.AUTO,
+                true));
+        assertEquals(FailureKind.ENVIRONMENT, already.kind());
+        assertTrue(already.getMessage().startsWith("the agent does not honour the catalogue's deny list"),
+                already.getMessage());
+        assertEquals(true, already.record().get("alreadyInstalled"));
+        agent.on("hook.health", params -> Map.of("hooks", Map.of(), "stubs", List.of(), "catalogue", installed,
+                "deny", Map.of("catalogue", List.of(DENIED, "org.example.toy.Clock", "x.Y"), "from", List.of("toy"),
+                        "option", List.of(), "modules", 0L)));
+        HookInstaller.Result ok = install(HooksMode.AUTO, true);
+        assertTrue(ok.alreadyInstalled());
+        assertEquals(List.of(DENIED, "org.example.toy.Clock"), ok.record().get("deny"));
+    }
+
+    @Test
+    void aSkipOfACatalogueWithADenyRecordsItAsNotDelivered() throws Exception {
+        pack.hooks = denying(catalogue("toy", 1), DENIED);
+        agent.capability(HookInstaller.ENGINE, CapabilityState.UNAVAILABLE, "no Instrumentation in EMBEDDED mode");
+        Map<String, Object> noRules = install(HooksMode.AUTO, true).record();
+        assertEquals(Map.of("patterns", List.of(DENIED), "agentOption", "unknown"), noRules.get("denyNotDelivered"));
+        assertTrue(agent.callsTo("rule.list").isEmpty(), "no rule.* capability: no rule.list call");
+        agent.capability("rule.engine", CapabilityState.OK, "in-process");
+        agent.on("rule.list", params -> Map.of("rules", List.of(), "loaded", false, "deny", Map.of("option",
+                List.of(DENIED), "modules", 0L)));
+        Map<String, Object> withRules = install(HooksMode.AUTO, true).record();
+        assertEquals(Map.of("patterns", List.of(DENIED), "agentOption", List.of(DENIED)),
+                withRules.get("denyNotDelivered"));
+        assertEquals(1, agent.callsTo("rule.list").size());
+        agent.on("rule.list", params -> Map.of("rules", List.of(), "loaded", false));
+        assertEquals("unknown", ((Map<?, ?>) install(HooksMode.AUTO, true).record().get("denyNotDelivered"))
+                .get("agentOption"), "a 0.1.0 agent answers no deny key");
+        agent.error("rule.list", ErrorCodes.CAPABILITY_UNAVAILABLE, "no byteman.jar");
+        assertEquals("unknown", ((Map<?, ?>) install(HooksMode.OFF, true).record().get("denyNotDelivered"))
+                .get("agentOption"), "off is a skip too; a failed read is unknown");
+        HookInstaller.Refused on = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.ON, true));
+        assertEquals(FailureKind.PRECONDITION_FAILED, on.kind(), "ON without an engine as today");
+        pack.hooks = catalogue("toy", 1);
+        assertFalse(install(HooksMode.AUTO, true).record().containsKey("denyNotDelivered"));
+        assertTrue(agent.callsTo("hook.install").isEmpty());
+    }
+
+    @Test
+    void aDenyOnlyCatalogueIsSentAsAZeroSpecInstall() throws Exception {
+        echoingEngine(true);
+        pack.hooks = denying(HookCatalogue.builder(catalogue("toy", 1)).disable("toy.applied").disable("toy.missing")
+                .build(), DENIED);
+        for (HooksMode mode : new HooksMode[] {HooksMode.AUTO, HooksMode.ON}) {
+            HookInstaller.Result result = install(mode, true);
+            assertFalse(result.skipped(), mode.label());
+            Map<String, Object> params = installs.get(installs.size() - 1);
+            assertEquals(List.of(), params.get("specs"), "a zero-spec install");
+            assertEquals(List.of(DENIED), ((Map<?, ?>) params.get("catalogue")).get("deny"));
+            assertEquals(List.of(), result.record().get("installed"));
+            assertEquals(List.of(DENIED), result.record().get("deny"));
+        }
+        assertEquals(2, installs.size(), "sent each time: nothing is recorded as installed");
+    }
+
+    @Test
+    void theHooksStepZeroMarksDeniedNowAreRecorded() throws Exception {
+        install(HooksMode.AUTO, true);
+        agent.on("hook.health", params -> Map.of("hooks", Map.of("toy.applied", Map.of("state", "FIRING", "count",
+                3L, "deniedNow", true), "toy.other", Map.of("state", "INSTALLED", "count", 0L)), "stubs", List.of(),
+                "catalogue", installed));
+        HookInstaller.Result again = install(HooksMode.AUTO, true);
+        assertTrue(again.alreadyInstalled());
+        assertEquals(List.of("toy.applied"), again.record().get("deniedNow"));
+    }
+
+    @Test
+    void anOldAgentRefusingAQualifiedSpecGetsTheUpgradeHint() throws Exception {
+        HookEntry qualified = entry("toy.applied", "org.example.toy.Desk", "toy.limits");
+        pack.hooks = HookCatalogue.builder("toy", 1).add(qualified.withTarget(qualified.target()
+                .withCodeSource("toy-desk\\.jar"))).build();
+        agent.on("hook.install", params -> {
+            throw new AgentRpcException("hook.install", new RpcError(ErrorCodes.INVALID_PARAMS,
+                    "HookTarget: unknown field \"codeSource\"", Map.of("param", "specs[0]")));
+        });
+        HookInstaller.Refused e = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.AUTO, true));
+        assertEquals(FailureKind.ENVIRONMENT, e.kind());
+        assertEquals("hook.install failed: INVALID_PARAMS: HookTarget: unknown field \"codeSource\"; the catalogue"
+                + " uses target.codeSource, which this agent does not know: upgrade the agent", e.getMessage());
+        assertEquals(e.getMessage(), e.record().get("error"));
+        pack.hooks = catalogue("toy", 1);
+        HookInstaller.Refused plain = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.AUTO, true));
+        assertFalse(plain.getMessage().contains("upgrade"), "no qualifier, no hint: " + plain.getMessage());
     }
 
     // ------------------------------------------------------------------------------------------ step 0b in a run

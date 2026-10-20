@@ -821,6 +821,19 @@ fallbacks (§5.3).
   result of a non-void method and no receiver of an instance method (the contract's case included); such a hook is
   installed and its `hook.<id>` is `DEGRADED` with that reason.
 
+**(Phase 8, built 2026-10-19, EH; P8 §6.4.)** Between item 2 and item 3 a new **item 2b, the class deny**: the agent
+option `hooks.deny` first, then the catalogue deny-list the engine holds, then every other registered `ClassDeny` in
+registration order; the first refusal wins and the spec is `UNAVAILABLE` with `denied by the agent option hooks.deny:
+<p>`, `denied by the catalogue <id>: <p>` or `denied by a module: <text>` (a throwing `ClassDeny` refuses: `denied by
+a module: the deny policy <class> threw <exception>`, logged once). Before "loaded?" on purpose: a denied class answers
+the same whether or not it is loaded, and nothing of it is read. Item 3 is amended by **the code-source filter**: every
+copy's code-source name (`CodeSources.of`) is reported in `codeSources`, aligned with `loaderIds`, qualifier or not;
+under `target.codeSource` a copy whose code source cannot be read refuses the spec (`the class's code source cannot be
+read: SecurityException`), the qualifier is matched as a whole (`^(?:…)$`) through `BoundedRegex` under one
+`BUDGET_MS` per spec (`codeSource regex too slow` refuses), and only the matching copies are kept, a filter like
+`loader`; none kept is `class from another code source: <names>` (sorted, at most four, then "and n more"). D178's
+"all or none" applies to the kept copies.
+
 ### 3.4 The three modes and the advice
 
 One advice pair is inlined per hooked method, chosen by the method's return type: `ValueAdvice` (methods with a
@@ -1087,6 +1100,14 @@ message is (§4.3). The build passed the exception's class and message through u
 layer hands a failed retransformation's `ClassFormatError` or `UnsupportedOperationException` without the JVM's
 message; Byte Buddy's and the pre-filter's messages name types.)
 
+**(Phase 8, built 2026-10-19, EH; P8 §6.5, §6.6.)** `HookEngine` gains `default List<String> deny()`, the catalogue
+patterns the engine holds (empty by default; the hooks engine answers its held list, sorted); the four-argument
+`install` carries no deny (D575). `HooksModule.install` registers the engine a second time, as the catalogue's
+`ClassDeny` in the shared registry, so that the Byteman module asks the held list and tells it apart from a domain
+module's by `instanceof HookEngine`. `hook.health` gains `classes` (the ledger's classes with their code sources and
+hook ids, `deniedNow` with the reason when the class is denied now) and `deny`; a hook installed before its class was
+denied keeps firing and its health carries `deniedNow: true` (D568).
+
 ### 3.7 Options
 
 Agent options (P1 §2.4's table gains these rows; unknown keys were already kept, so no core change is needed for
@@ -1113,6 +1134,12 @@ record naming the key, §3.2):
 Fix wave (Phase 6 review, FB, 2026-10-09): the Byteman module, which reads the same five keys as the bounds of one
 rule (§7.3), accepted `hooks.maxClasses` from 1 to 4096; it now has the ranges above for all five (`Settings`,
 `SettingsTest`), so one key has one range and the bound a rule may reach is the one D176 fixed (findings L1-F4, L2-F4).
+
+**(Phase 8, built 2026-10-19, EH; P8 §6.5.)** A new key, `hooks.deny` (A81): comma-separated class patterns
+(`ClassPattern`), trimmed, empty items dropped, at most 64, read at install by `HookOptions.read` and by the Byteman
+`Settings.read` alike, so one key rules whichever module is loaded; an invalid pattern or more than 64 is
+`IllegalArgumentException("option hooks.deny: pattern <i> <violation>")` (or "more than 64 patterns"), the module's
+`FAILED` record naming the key.
 
 ---
 
@@ -1171,6 +1198,14 @@ from `hook.remove`, `OK` for a hook removed and restored, `DEGRADED` with the ve
 with `"not installed"` for an id that was not installed or `"residue after remove"` for a class left `FAILED`, and
 `capability` the withdrawn id.
 
+**(Phase 8, built 2026-10-19, EH; P8 §6.3.)** `HookTarget` gains `codeSource?` (a Java regular expression matched
+against the whole code-source name; the five-argument constructor beside the kept four-argument one, `withCodeSource`,
+`codeSourceViolation`, `MAX_CODE_SOURCE_LENGTH` 200); `toJson` writes the key only when set, so every spec without it
+keeps its hash, and `fromJson` stays strict on every other key (a 0.1.0 agent refuses a qualified spec, D560).
+`HookSpec.violation()` gains the field `target.codeSource` (longer than 200 characters, or not compilable).
+`HookProbe` gains `codeSources?` (at most 16, aligned with `loaderIds`; the eleven-argument constructor beside the kept
+ten-argument one; read leniently). The new `ClassPattern` is the deny grammar both sides apply (P8 §6.3).
+
 ### 4.2 Primitives (module `hooks`)
 
 `hook.probe`, `hook.install`, `hook.stub` and `hook.events` name the capability `hook.engine`, so each answers
@@ -1223,6 +1258,17 @@ worst of its classes), and the new version is installed as before (its own refus
 D236). The controller's `HookInstaller` maps `replaced.verified: FAILED` to ERROR / ENVIRONMENT as it maps the
 remove's error (§5.3 step 5). The SPI's `HookEngine.install(…, replace)` answers the statuses only, as before; a
 residue it leaves is in `health`. D119 and D236 are unchanged.
+
+**(Phase 8, built 2026-10-19, EH; P8 §6.4, §6.6.)** `hook.install`'s `catalogue` gains `deny?: [pattern…]`: checked
+before the lock (a list of at most 64 class patterns; `INVALID_PARAMS` with `data.param` `catalogue.deny[i]` or
+`catalogue.deny`), merged under the lock **before the conflict check** into the engine's held list (add-only for the
+engine instance's life, kept across `hook.remove {}` and `replace: true`, at most 256: beyond, `INVALID_PARAMS` "the
+engine holds 256 deny patterns; restart the target"), and echoed in every answer, `alreadyInstalled` included, as
+`catalogue.deny` (the held patterns sorted; an empty list when none is held). A zero-spec install delivers a deny and
+installs nothing. `touched` lines gain `codeSource`; `hook.probe`'s answers carry `codeSources`; `hook.health` gains
+`classes: [{class, loader, codeSource, bytes, methods, hooks, deniedNow?}]` (sorted by class and loader, at most
+`hooks.maxClasses`) and `deny: {catalogue, from, option, modules}`, and a hook's health map `deniedNow: true` when one
+of its classes is denied now (`HookHealth` is untouched).
 
 ### 4.3 Events, the value encoding and the masking
 
@@ -1433,6 +1479,15 @@ disabled entries too (the sample's `sign.on.checked` has it: it captures `passwo
 `{id, version, hash, application?}` that `hook.install` takes; `HookCatalogues.overlayResource` and `resourceName` serve
 an overlay's resource. (D184)
 
+**(Phase 8, built 2026-10-19, EH; P8 §6.8.)** The catalogue gains `deny:` (at most 64 class patterns, distinct; an
+**enabled** entry on a denied class is an error at its `class` line, a disabled one a warning: "it can never be
+enabled") and a map form of a `packages` item, `{name, codeSource?}`, whose qualifier every entry under it inherits
+(the longest name wins; an entry's own `target.codeSource` wins over it), baked into the entry's `HookTarget` by
+`HookCatalogue.Builder.build()` so that the spec, the entry hash and the catalogue hash agree. `packages()` stays the
+names; `packageRules()`, `deny()`, `denied(className)`, `MAX_DENY` and `Builder.packageRules`/`deny` are new, and
+`HookEntry.withTarget`. The hash gains `deny: [sorted]` only when it is non-empty, so every catalogue that uses
+neither key keeps its hash byte for byte; `descriptor()` carries `deny` when non-empty.
+
 ### 5.2 The pack side
 
 `DomainPack` gains one member with a default:
@@ -1518,6 +1573,17 @@ loaded holds no stub, and a stub is armed only through an engine that is `OK` (`
 `hook.engine`; §3.2's probe keeps an engine `OK` while the slot is held by its own handler). The cost is one bounded
 read per run, and only when the hooks module is loaded with a usable engine.
 
+**(Phase 8, built 2026-10-19, EH; P8 §6.9.)** A catalogue with a non-empty `deny` is something to install even
+without an enabled entry: it is sent as a zero-spec `hook.install`, under `AUTO` and `ON` alike. When the pack's
+catalogue has a deny, the install answer's `catalogue.deny` (and on the `alreadyInstalled` path step 0's
+`hook.health.deny.catalogue`) must hold every pack pattern, else ERROR / ENVIRONMENT "the agent does not honour the
+catalogue's deny list (<missing>); upgrade the agent" with the detail `{missing, answered}` (the echo rule, D565). An
+`INVALID_PARAMS` on `specs[…]` while a spec carries `target.codeSource` gets "; the catalogue uses target.codeSource,
+which this agent does not know: upgrade the agent" appended (D560). Every skip of a pack whose catalogue has a deny
+records `denyNotDelivered: {patterns, agentOption}`, `agentOption` read from `rule.list.deny.option` when the matrix
+shows a `rule.*` capability (else, or when the answer has no `deny`, `unknown`; D566). The record gains `deny` (the
+pack's patterns) and `deniedNow` (the hooks step 0's health marks so), after its other keys.
+
 ---
 
 ## 6. Hooks on and off: the switch, the sample's catalogue, scenario E, the archived matrix
@@ -1567,6 +1633,14 @@ As built (Phase 6, CP): `status` reads `otherAgents` from `hook.health`'s answer
 `hook.health` (no `hook.probe`). A refused `install` is exit 1 for
 PRECONDITION_FAILED and ENVIRONMENT alike (another catalogue on the target is refused by the installer before
 `HOOK_CONFLICT` could be).
+
+**(Phase 8, built 2026-10-19, EH; P8 §6.10.)** `status` prints, after "other agents", `deny (target): option <p, q |
+none>; catalogue <from ids> <p | none>; modules <n>` (from `hook.health.deny`; `unknown (the agent reports no deny
+list)` against an agent without it) and `deny (pack catalogue <id>): <p | none>`; after the hook table the table
+`CLASS LOADER CODE SOURCE HOOKS` from `health.classes` ("no class touched" when empty; `DENIED: <reason>` in `HOOKS`
+for `deniedNow`; nothing when the agent reports no classes); the pack table gains `CODE SOURCE` (`-` without a
+qualifier). `--json`: `health` raw; `catalogue` gains `deny` and `packages: [{name, codeSource}]`. Exit codes
+unchanged.
 
 ### 6.3 The base fact root `hooks`, the sample's catalogue and scenario E
 
@@ -1987,6 +2061,16 @@ As built (Phase 6, BW, 2026-10-09):
   a map's value or key text) passes `ctx.redactText` after its cut and before the policies, as §4.3 now says for a
   captured string.
 
+**(Phase 8, built 2026-10-19, EH; P8 §6.7.)** The class bound takes the class deny as a view the engine builds per call
+from `hooks.deny` (first), the hooks module's held list (the registered `ClassDeny` that is a `HookEngine`) and every
+other registered `ClassDeny`: the rule's `CLASS`/`INTERFACE` name the view refuses is an error **before the count and
+before the load** (a confirmed `rule.submit` is `RULE_REJECTED("the rule was refused: <name>: denied by …")`, appends
+nothing and runs no `premain`); a matched loaded class it refuses (a `^` or `INTERFACE` rule reaching a denied subtype)
+is an error of its own; `rule.check` reports a denied rule class in `errors` and then skips the type check;
+`rule.list` gains `deny: {option, modules, catalogue?}` (`catalogue` when the hooks module is loaded, through
+`HookEngine.deny()`). **Residual** (gap 140): a denied subtype loaded after a `^` or `INTERFACE` submit receives
+Byteman's trigger at its load; closing it needs a guard transformer behind Byteman's, a cost on every class load.
+
 ### 7.4 Loading Byteman
 
 **Only under `rule.submit`**, after the dispatcher's read-only and confirm gates have passed, on an agent worker,
@@ -2155,6 +2239,9 @@ As built (Phase 6, BW, 2026-10-09):
 - **Never on the wire**: the rule text appears in `rule.submit`'s params, and so in `run.jsonl`'s `call` record and
   the agent's log line for the call; a rule that names a secret value is the author's mistake, and `_meta.secretParams:
   ["rule"]` is honoured as for any call (A34).
+- **(Phase 8, built 2026-10-19, EH; P8 §6.7.) Targets** gain the class deny: a class `hooks.deny`, the hooks module's
+  held catalogue list or a domain module's `ClassDeny` refuses is never handed to Byteman (§7.3's bound, before the
+  load); the later-loaded denied subtype is the residual recorded there.
 
 ### 7.6 Tests
 
@@ -3013,6 +3100,13 @@ target that carries the base catalogue is replaced under §5.3 step 3's "same id
 base's catalogue id; the sample's overlay uses its own id (`lending-branch`), so a desk that still holds the base's
 catalogue makes the installer stop with `ENVIRONMENT` and the remedy, which is the right answer for a mixed-up
 environment (and why §11.4's acceptance launches a fresh desk for each half).
+
+**(Phase 8, built 2026-10-19, EH; P8 §6.8, D570.)** An overlay unions the package rules by name (an overlay's
+qualifier for a name replaces the base's for the overlay's own entries; a plain name never drops a base qualifier) and
+the deny lists (an overlay can never lift a base deny); the base's entries keep the qualifier baked when the base was
+read, and the overlay's own and replaced entries inherit from the merged rules (the sample's `lending-branch.yaml`
+replaces `limit.applied` on `ReturnCeilings` and so inherits `lending.yaml`'s qualifier). An enabled base entry the
+overlay's deny matches is an error at the overlay's `deny` line unless the overlay disables it ("add it to disable").
 
 ### 11.3 The branch edition of the sample lending desk (D146)
 
@@ -3968,7 +4062,7 @@ channel) are marked **(owner's knowledge)**: nine of the twenty-two.
 | Q3 | **A second project jar on the system class path.** B4 says only the bootstrap jar goes on the target's class path, with Byteman as the one exception (B8). The curated helper and the manager class need a project jar (`skillroy-agent-byteman-sys.jar`, Apache-2.0, two classes, compiled against Byteman at `provided` scope) on the **system** class path for the JVM's life, because Byteman loads a helper through the trigger class's loader. Acceptable inside the B8 exception? | Yes (D132): without it `rule.fired` events cannot reach the agent's bus and Byteman's default `Helper` with its `killJVM` and blocking built-ins would be the only helper | §7.3, §7.4 | `B26 Q3 veto`: no project jar on the system class path; the module keeps `rule.check/list/unload`, `rule.submit` accepts rules whose `DO` is empty or `traceln`-free assignments only, no `rule.fired` events, and Byteman's default helper is denied by the lint entirely |
 | Q4 | **How the private layers consume an overlay.** As a second jar beside the base pack's jar on one class path (`--pack base.jar --pack overlay.jar`, or two dependencies), through `DomainPackOverlay`, or do they already wrap the base pack in a class of their own and register that instead? **(owner's knowledge)** | The second jar through `DomainPackOverlay` (D144); a layer that wraps today moves its wrapper into `overlay(base)` | §11.1 | `B26 Q4 veto`: `DomainPacks` prefers a `DomainPack` with the base's id that implements a marker interface `Overlays` over the base, and the `ServiceLoader<DomainPackOverlay>` SPI is dropped |
 | Q5 | **An existing private catalogue shape.** Does a hook catalogue already exist in a private layer whose shape (ids, descriptors, fallbacks, versioning per application release) the base format must carry unchanged? **(owner's knowledge)** | The §5.1 format is the first catalogue anyone writes (D121) | §5.1 | `B26 Q5 veto`, naming the fields the format must add or rename (`… <field>`), or `… versions` for several catalogues per pack selected by application version (today a non-goal) |
-| Q6 | **Third-party hook targets.** The catalogue defaults `enabled` to false for a class outside the pack's `packages` and accepts `enabled: true` there with a warning; the sample demonstrates `enabled: false` only. Does any tenant layer need a hook on a third-party class in Phase 6 **(owner's knowledge)**, and is a warning the right strength? | No third-party target in Phase 6; the warning stands (D121, D124) | §5.1 | `B26 Q6 veto`: the reader refuses `enabled: true` on a class outside `packages` (an error, not a warning) |
+| Q6 | **Third-party hook targets.** The catalogue defaults `enabled` to false for a class outside the pack's `packages` and accepts `enabled: true` there with a warning; the sample demonstrates `enabled: false` only. Does any tenant layer need a hook on a third-party class in Phase 6 **(owner's knowledge)**, and is a warning the right strength? | No third-party target in Phase 6; the warning stands (D121, D124). (Phase 8, built 2026-10-19, EH; P8 §6.8) The warning stands; a qualified `packages` rule (`target.codeSource` inherited by every entry under it) is the mechanism that makes "our own classes only" sayable for a package a third-party jar shares | §5.1 | `B26 Q6 veto`: the reader refuses `enabled: true` on a class outside `packages` (an error, not a warning) |
 | Q7 | **The Windows host.** Which JDK 8 and JDK 25 builds will it carry (vendor, 64-bit only?), and may tests run in an interactive logon session there (the Windows items need real windows)? **(owner's knowledge)** | Assumed: Temurin 25 and Temurin 8, 64-bit only, an interactive session of the logged-on user; `ci/run-on-windows.cmd` is written for that (D137) | §9.5, §13.3 | `B26 Q7 veto`, naming the JDKs or the session constraint (`… no interactive session`: the display items are then not verifiable and the criterion is split again) |
 | Q8 | **`ATTACH` on Windows.** In scope for Phase 6 (then the host procedure's `ATTACH` leg is part of the exit), or only `JAVAAGENT` plus the documented exclusion? | Best effort only (D139): the TODO item reads as the latter | §9.4, §9.5 | `B26 Q8 veto`: `ATTACH` on Windows joins the exit criterion when the host exists; the 5 s margin and the session rule are then measured and decided there |
 | Q9 | **The `.bat` shipped unverified.** Carry `bin/skillroy.bat` in the distribution from the next commit, marked unverified in `README.md`, or only after the host has run it? | Ship it (D137): a static test proves the text, the host proves the run | §9.1, §2.6 | `B26 Q9 veto`: the assembly leaves it out until the host run; `BatLauncherTest` and the source file stay |

@@ -23,5 +23,10 @@
  * ({@link ai.skillroy.testjava.protocol.hook.HookStatus}) and how an installed hook is doing
  * ({@link ai.skillroy.testjava.protocol.hook.HookHealth}). JDK only; every type is immutable and reads and writes the
  * project's JSON normal form ({@code toJson} and {@code fromJson}).
+ *
+ * <p>Phase 8 (phase8-contracts.md section 6.3): a target's optional {@code codeSource} qualifier, a probe's
+ * {@code codeSources}, and {@link ai.skillroy.testjava.protocol.hook.ClassPattern}, the one grammar of the class
+ * deny-list that the catalogue reader, the agent option {@code hooks.deny}, {@code hook.install}'s
+ * {@code catalogue.deny} and the Byteman module apply.
  */
 package ai.skillroy.testjava.protocol.hook;

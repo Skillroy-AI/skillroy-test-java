@@ -68,6 +68,14 @@ import java.util.Objects;
  *       remove's {@code HOOK_VERIFY_FAILED}; Phase 6 security fix, pass 2, P2-L2-F3).</li>
  * </ol>
  *
+ * <p>Phase 8 (phase8-contracts.md 6.9): a catalogue with a non-empty {@code deny} is something to install even without
+ * an enabled entry (a zero-spec {@code hook.install} delivers it); the install answer's {@code catalogue.deny}, and on
+ * the {@code alreadyInstalled} path step 0's {@code hook.health.deny.catalogue}, must hold every pack pattern, else
+ * ERROR / ENVIRONMENT "upgrade the agent" (the echo rule, D565); an {@code INVALID_PARAMS} on a spec while the catalogue
+ * uses {@code target.codeSource} carries the upgrade hint (D560); a skip of a pack whose catalogue has a deny records
+ * {@code denyNotDelivered: {patterns, agentOption}}, {@code agentOption} read from {@code rule.list.deny.option} when a
+ * {@code rule.*} capability exists (D566); the record gains {@code deny} and {@code deniedNow}.
+ *
  * <p>Hooks stay installed after the run: the next run of the same pack finds them ({@code alreadyInstalled}); they go
  * with {@code skillroy hooks remove}, a detach or the target's exit. The caller re-reads the matrix when
  * {@link Result#skipped()} is false (it then holds the {@code hook.<id>} capabilities).
@@ -87,6 +95,16 @@ public final class HookInstaller {
 
     /** {@code hook.health}'s budget, its primitive's default. */
     public static final long HEALTH_TIMEOUT_MS = 10_000L;
+
+    /** {@code rule.list}'s budget, its primitive's default (the {@code agentOption} read of a skip). */
+    public static final long RULE_LIST_TIMEOUT_MS = 10_000L;
+
+    /** {@code denyNotDelivered.agentOption} when the agent's option cannot be read (phase8-contracts.md 6.9). */
+    public static final String UNKNOWN = "unknown";
+
+    /** The hint appended to a spec's {@code INVALID_PARAMS} when the catalogue uses {@code target.codeSource}. */
+    static final String CODE_SOURCE_HINT = "; the catalogue uses target.codeSource, which this agent does not know:"
+            + " upgrade the agent";
 
     private HookInstaller() {
     }
@@ -160,7 +178,13 @@ public final class HookInstaller {
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("mode", effective.label());
         if (effective == HooksMode.OFF) {
-            return skip(record, "off", agent, caps, refuseArmedStubs);
+            HookCatalogue off;
+            try {
+                off = pack.hooks();
+            } catch (RuntimeException e) {
+                off = null; // hooks off: a catalogue that cannot be read is not this run's concern
+            }
+            return skip(record, "off", agent, caps, refuseArmedStubs, off);
         }
         HookCatalogue catalogue;
         try {
@@ -169,13 +193,13 @@ public final class HookInstaller {
             throw refused(FailureKind.ENVIRONMENT, record, "pack " + pack.id() + ": its hook catalogue cannot be read: "
                     + (e.getMessage() == null ? e.toString() : e.getMessage()), null);
         }
-        if (catalogue == null || catalogue.enabled().isEmpty()) {
+        if (catalogue == null || (catalogue.enabled().isEmpty() && catalogue.deny().isEmpty())) {
             if (effective == HooksMode.ON) {
                 throw refused(FailureKind.PRECONDITION_FAILED, record, "hooks ON, but pack " + pack.id() + " has no"
                         + (catalogue == null || catalogue.isEmpty() ? " hook catalogue" : " enabled hook in its"
                         + " catalogue " + catalogue.id()), null);
             }
-            return skip(record, "no catalogue", agent, caps, refuseArmedStubs);
+            return skip(record, "no catalogue", agent, caps, refuseArmedStubs, null);
         }
         String engineProblem = engineProblem(caps);
         if (engineProblem != null) {
@@ -183,10 +207,11 @@ public final class HookInstaller {
                 throw refused(FailureKind.PRECONDITION_FAILED, record, "hooks ON, but " + engineProblem, null);
             }
             // Step 0 reads nothing without hook.engine OK: no stub can be armed through an engine that is not.
-            return skip(record, engineProblem, agent, caps, refuseArmedStubs);
+            return skip(record, engineProblem, agent, caps, refuseArmedStubs, catalogue);
         }
         Map<?, ?> health = health(agent, caps, record, refuseArmedStubs, false);
         List<String> armed = strings(health.get("stubs"));
+        List<String> deniedNow = deniedNow(health);
         boolean replace = false;
         if (health.get("catalogue") instanceof Map<?, ?> installed && installed.get("id") != null) {
             String installedId = String.valueOf(installed.get("id"));
@@ -195,6 +220,9 @@ public final class HookInstaller {
                 record.put("alreadyInstalled", true);
                 record.put("catalogue", catalogueRef(catalogue, false));
                 record.put("armed", armed);
+                denyKeys(record, catalogue, deniedNow);
+                Object held = health.get("deny") instanceof Map<?, ?> deny ? deny.get("catalogue") : null;
+                requireEcho(catalogue, held, record);
                 return new Result(record, false, true);
             }
             if (!installedId.equals(catalogue.id())) {
@@ -217,7 +245,12 @@ public final class HookInstaller {
             params.put("replace", true);
         }
         long t0 = clock.millis();
-        Map<?, ?> answer = call(agent, "hook.install", params, INSTALL_TIMEOUT_MS, record);
+        Map<?, ?> answer;
+        try {
+            answer = call(agent, "hook.install", params, INSTALL_TIMEOUT_MS, record);
+        } catch (Refused e) {
+            throw withCodeSourceHint(e, catalogue);
+        }
         long ms = Math.max(0, clock.millis() - t0);
         if (replace && answer.get("replaced") instanceof Map<?, ?> replaced
                 && "FAILED".equals(String.valueOf(replaced.get("verified")))) {
@@ -238,6 +271,11 @@ public final class HookInstaller {
                     + ErrorCodes.name(ErrorCodes.HOOK_VERIFY_FAILED) + ": " + error.get("message")
                     + "; `skillroy hooks status`, then `skillroy hooks remove`", detail);
         }
+        Map<String, Object> echoRecord = new LinkedHashMap<>(record);
+        echoRecord.put("catalogue", catalogueRef(catalogue, true));
+        denyKeys(echoRecord, catalogue, deniedNow);
+        requireEcho(catalogue, answer.get("catalogue") instanceof Map<?, ?> echoed ? echoed.get("deny") : null,
+                echoRecord);
         List<String> installed = new ArrayList<>();
         List<Object> unavailable = new ArrayList<>();
         Map<String, PrimitiveDescriptor> schema = null;
@@ -273,22 +311,137 @@ public final class HookInstaller {
         record.put("touched", answer.get("touched") instanceof List<?> touched ? (long) touched.size() : 0L);
         record.put("ms", ms);
         record.put("otherAgents", strings(answer.get("otherAgents")));
+        denyKeys(record, catalogue, deniedNow);
         return new Result(record, false, false);
+    }
+
+    /** The record's {@code deny} (the pack's patterns, when it has some) and {@code deniedNow} (when not empty). */
+    private static void denyKeys(Map<String, Object> record, HookCatalogue catalogue, List<String> deniedNow) {
+        if (!catalogue.deny().isEmpty()) {
+            record.put("deny", new ArrayList<>(catalogue.deny()));
+        }
+        if (!deniedNow.isEmpty()) {
+            record.put("deniedNow", deniedNow);
+        }
     }
 
     /**
      * A skip of steps 1 and 2: step 0's read first, then the record {@code {mode, skipped: reason}} with
-     * {@code armed} when a stub is armed (and not refused).
+     * {@code armed} when a stub is armed (and not refused), and {@code denyNotDelivered} when the pack's catalogue has
+     * a deny the skip does not deliver (phase8-contracts.md 6.9).
+     *
+     * @param catalogue the pack's catalogue when it was read, else null
      */
     private static Result skip(Map<String, Object> record, String reason, AgentConnection agent, CapabilityMatrix caps,
-                               boolean refuseArmedStubs) throws Refused, AgentLostException {
+                               boolean refuseArmedStubs, HookCatalogue catalogue)
+            throws Refused, AgentLostException {
         Map<?, ?> health = health(agent, caps, record, refuseArmedStubs, true);
         record.put("skipped", reason);
         List<String> armed = health == null ? List.of() : strings(health.get("stubs"));
         if (!armed.isEmpty()) {
             record.put("armed", armed);
         }
+        if (catalogue != null && !catalogue.deny().isEmpty()) {
+            Map<String, Object> notDelivered = new LinkedHashMap<>();
+            notDelivered.put("patterns", new ArrayList<>(catalogue.deny()));
+            notDelivered.put("agentOption", agentOption(agent, caps));
+            record.put("denyNotDelivered", notDelivered);
+        }
         return new Result(record, true, false);
+    }
+
+    /**
+     * {@code denyNotDelivered.agentOption} (phase8-contracts.md 6.9, D566): the agent option {@code hooks.deny} as
+     * {@code rule.list.deny.option} answers it, read once when the matrix shows a {@code rule.*} capability;
+     * {@value #UNKNOWN} without one (and then nothing is called), when the answer has no {@code deny} key (an agent
+     * that predates the option ignores it silently), or when the read fails.
+     */
+    static Object agentOption(AgentConnection agent, CapabilityMatrix caps) throws AgentLostException {
+        boolean rules = false;
+        if (caps != null) {
+            for (String id : caps.all().keySet()) {
+                rules |= id.startsWith("rule.");
+            }
+        }
+        if (!rules) {
+            return UNKNOWN;
+        }
+        Object value;
+        try {
+            value = agent.call("rule.list", Map.of(), CallOptions.defaults().withTimeoutMs(RULE_LIST_TIMEOUT_MS))
+                    .value();
+        } catch (AgentRpcException e) {
+            return UNKNOWN;
+        }
+        if (value instanceof Map<?, ?> list && list.get("deny") instanceof Map<?, ?> deny
+                && deny.get("option") instanceof List<?>) {
+            return strings(deny.get("option"));
+        }
+        return UNKNOWN;
+    }
+
+    /**
+     * The echo rule (phase8-contracts.md 2.1, 6.9, D565): a pack catalogue with a non-empty deny needs {@code answered}
+     * (the install answer's {@code catalogue.deny}, or step 0's {@code hook.health.deny.catalogue}) to be a list
+     * holding every pack pattern; else ERROR / ENVIRONMENT, detail {@code {missing, answered}}.
+     */
+    private static void requireEcho(HookCatalogue catalogue, Object answered, Map<String, Object> record)
+            throws Refused {
+        if (catalogue.deny().isEmpty()) {
+            return;
+        }
+        List<String> held = answered instanceof List<?> ? strings(answered) : null;
+        List<String> missing = new ArrayList<>();
+        for (String pattern : catalogue.deny()) {
+            if (held == null || !held.contains(pattern)) {
+                missing.add(pattern);
+            }
+        }
+        if (missing.isEmpty()) {
+            return;
+        }
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("missing", missing);
+        detail.put("answered", held);
+        throw refused(FailureKind.ENVIRONMENT, record, "the agent does not honour the catalogue's deny list ("
+                + String.join(", ", missing) + "); upgrade the agent", detail);
+    }
+
+    /** The ids of the hooks step 0's {@code hook.health} marks {@code deniedNow: true}, sorted. */
+    private static List<String> deniedNow(Map<?, ?> health) {
+        List<String> out = new ArrayList<>();
+        if (health != null && health.get("hooks") instanceof Map<?, ?> hooks) {
+            for (Map.Entry<?, ?> e : hooks.entrySet()) {
+                if (e.getValue() instanceof Map<?, ?> h && Boolean.TRUE.equals(h.get("deniedNow"))) {
+                    out.add(String.valueOf(e.getKey()));
+                }
+            }
+        }
+        out.sort(null);
+        return out;
+    }
+
+    /**
+     * The old-agent hint (phase8-contracts.md 6.9, D560): an {@code INVALID_PARAMS} from {@code hook.install} whose
+     * {@code data.param} starts with {@code specs[} while a sent spec carries {@code codeSource}, with the upgrade hint
+     * appended; any other refusal as it is.
+     */
+    private static Refused withCodeSourceHint(Refused e, HookCatalogue catalogue) {
+        boolean qualified = catalogue.toSpecs().stream().anyMatch(spec -> spec.target().codeSource() != null);
+        Object error = e.detail().get("error");
+        if (!qualified || !(error instanceof Map<?, ?> rpc)) {
+            return e;
+        }
+        Object code = rpc.get("code");
+        Object param = rpc.get("data") instanceof Map<?, ?> data ? data.get("param") : null;
+        if (!(code instanceof Number n) || n.intValue() != ErrorCodes.INVALID_PARAMS
+                || !String.valueOf(param).startsWith("specs[")) {
+            return e;
+        }
+        Map<String, Object> record = e.record();
+        String message = e.getMessage() + CODE_SOURCE_HINT;
+        record.put("error", message);
+        return new Refused(e.kind(), message, record, e.detail());
     }
 
     /**

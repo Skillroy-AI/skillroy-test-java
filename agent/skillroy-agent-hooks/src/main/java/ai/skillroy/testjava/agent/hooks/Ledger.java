@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The touched-class ledger (phase6-contracts.md section 3.2): per class the engine has retransformed, its name, its
- * loader (weakly), the bytes the recorder saw at the first transform (what the restore is compared with), the sites
+ * loader (weakly), its code-source name (phase8-contracts.md section 6.2), the bytes the recorder saw at the first transform (what the restore is compared with), the sites
  * hooked, the engine's own retransform count, the recorder's event count and the last error. At most
  * {@code hooks.maxClasses} entries. The transformers read it on any thread through an immutable index by name; the
  * engine changes it under its own lock and republishes the index.
@@ -60,11 +60,17 @@ final class Ledger {
         volatile boolean failed;
         final long sizeBytes;
         final int methods;
+        /**
+         * The class's code-source name ({@code CodeSources}, phase8-contracts.md section 6.2), read once by the probe
+         * on the worker when the entry was created; never re-read, never at transform time.
+         */
+        final String codeSource;
 
-        Entry(Class<?> type, String loaderId, long sizeBytes, int methods) {
+        Entry(Class<?> type, String loaderId, long sizeBytes, int methods, String codeSource) {
             this.name = type.getName();
             this.internalName = name.replace('.', '/');
             this.loaderId = loaderId;
+            this.codeSource = codeSource;
             this.type = new WeakReference<Class<?>>(type);
             this.loader = new WeakReference<ClassLoader>(type.getClassLoader());
             this.sizeBytes = sizeBytes;

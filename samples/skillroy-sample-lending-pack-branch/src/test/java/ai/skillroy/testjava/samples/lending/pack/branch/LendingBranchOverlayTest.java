@@ -80,6 +80,12 @@ class LendingBranchOverlayTest {
         assertEquals(base.hooks().hooks().stream().map(HookEntry::id).toList(),
                 hooks.hooks().stream().map(HookEntry::id).toList(), "every base entry, limit.applied replaced");
         assertEquals(base.hooks().entry("access.checked"), hooks.entry("access.checked"));
+        // catalogue version 2 (phase8-contracts.md 6.8, 12.3): the replaced entry inherits the qualifier from the
+        // merged package rules, and the overlay's deny is the base's
+        assertEquals(base.hooks().packageRules().get(0).codeSource(), limit.target().codeSource(),
+                "the replaced entry inherits the qualifier");
+        assertEquals(base.hooks().deny(), hooks.deny());
+        assertEquals(base.hooks().packageRules(), hooks.packageRules());
         assertEquals(base.hooks().enabled().stream().map(HookEntry::id).toList(),
                 hooks.enabled().stream().map(HookEntry::id).toList());
         assertNotEquals(base.hooks().hash(), hooks.hash());

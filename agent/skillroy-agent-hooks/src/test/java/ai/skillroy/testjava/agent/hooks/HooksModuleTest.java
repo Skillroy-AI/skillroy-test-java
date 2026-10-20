@@ -19,6 +19,7 @@ package ai.skillroy.testjava.agent.hooks;
 
 import ai.skillroy.testjava.agent.api.PrimitiveSpec;
 import ai.skillroy.testjava.agent.api.ThreadPolicy;
+import ai.skillroy.testjava.agent.api.spi.hook.ClassDeny;
 import ai.skillroy.testjava.agent.api.spi.hook.HookEngine;
 import ai.skillroy.testjava.fixture.hooks.DepositRule;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,8 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -49,7 +52,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The module itself (phase6-contracts.md sections 3.2, 3.7, 4.2): its id and version, the six primitives' flags,
  * timeouts and capability, a {@code hooks.*} option out of range failing the install, the SPI's registration, the
- * spy jar's content check of section 3.2 step 3, and the {@code Spy} version the engine expects.
+ * spy jar's content check of section 3.2 step 3, and the {@code Spy} version the engine expects. Phase 8
+ * (phase8-contracts.md sections 6.5, 13.1 row 24): {@code hooks.deny} read and refused naming the key, and the
+ * engine registered as the catalogue's {@code ClassDeny}.
  */
 class HooksModuleTest {
 
@@ -113,6 +118,45 @@ class HooksModuleTest {
         module.install(ok);
         assertEquals(9000, module.engine().options.detachBudgetMs);
         module.uninstall();
+    }
+
+    @Test
+    void anInvalidDenyOptionFailsTheInstallNamingTheKey() {
+        String[] bad = {"a..b", "a.b-c.D", "a.**.C"};
+        for (String value : bad) {
+            FakeHookContext ctx = new FakeHookContext();
+            ctx.options.put(HookOptions.DENY, "x.Y," + value);
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> new HooksModule().install(ctx), value);
+            assertTrue(e.getMessage().startsWith("option hooks.deny: pattern 1 "), e.getMessage());
+            assertTrue(ctx.primitives.list().isEmpty(), "nothing registered before the check");
+        }
+        StringBuilder many = new StringBuilder();
+        for (int i = 0; i < 65; i++) {
+            many.append(i == 0 ? "" : ",").append("a.b.C").append(i);
+        }
+        FakeHookContext tooMany = new FakeHookContext();
+        tooMany.options.put(HookOptions.DENY, many.toString());
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> new HooksModule().install(tooMany));
+        assertTrue(e.getMessage().contains("hooks.deny") && e.getMessage().contains("64"), e.getMessage());
+    }
+
+    @Test
+    void theEngineIsRegisteredAsTheCataloguesClassDeny() {
+        FakeHookContext ctx = new FakeHookContext();
+        ctx.options.put(HookOptions.DENY, "a.b.*");
+        HooksModule module = new HooksModule();
+        module.install(ctx);
+        assertEquals(Collections.singletonList(module.engine()), ctx.spi.all(ClassDeny.class),
+                "registered beside the HookEngine at install");
+        assertSame(ctx.spi.first(HookEngine.class), ctx.spi.first(ClassDeny.class));
+        assertEquals(Arrays.asList("a.b.*"), module.engine().options.deny);
+        assertNull(module.engine().refuse("a.b.C"), "the catalogue's source holds nothing yet; the option is apart");
+        assertEquals("denied by the agent option hooks.deny: a.b.*", module.engine().deniedBy("a.b.C"));
+        assertNull(module.engine().deniedBy("a.b.c.D"));
+        module.uninstall();
+        ctx.rollback();
     }
 
     @Test

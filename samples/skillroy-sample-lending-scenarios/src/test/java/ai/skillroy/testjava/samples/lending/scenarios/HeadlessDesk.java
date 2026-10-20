@@ -344,13 +344,19 @@ final class HeadlessDesk implements AgentConnection {
         returnedLinesSeen = returned;
     }
 
-    /** {@code hook.health} of the scripted module: the pack's catalogue installed, {@code limit.applied} only. */
+    /**
+     * {@code hook.health} of the scripted module: the pack's catalogue installed, {@code limit.applied} only, and the
+     * pack's deny held (phase8-contracts.md 6.6, 12.3: the echo the installer requires on the {@code alreadyInstalled}
+     * path), no class reported.
+     */
     private synchronized Map<String, Object> hookHealth() {
         long fired = bus.stream().filter(e -> e.topic().equals("hook.limit.applied")).count();
         Map<String, Object> limit = map("state", fired == 0 ? "INSTALLED" : "FIRING", "count", fired, "armed", false);
         HookCatalogueRef catalogue = HookCatalogueRef.of();
         return map("hooks", map("limit.applied", limit), "stubs", List.of(), "spy", map("version", 1L),
-                "catalogue", map("id", catalogue.id(), "hash", catalogue.hash(), "installedAt", NOW.toEpochMilli()));
+                "catalogue", map("id", catalogue.id(), "hash", catalogue.hash(), "installedAt", NOW.toEpochMilli()),
+                "classes", List.of(), "deny", map("catalogue", Runs.PACK.hooks().deny(), "from", List.of("lending"),
+                        "option", List.of(), "modules", 0L));
     }
 
     /** {@code hook.events}: the bus's events of the hook's topic after {@code since}, oldest first. */

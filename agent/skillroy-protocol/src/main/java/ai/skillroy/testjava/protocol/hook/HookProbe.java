@@ -29,11 +29,13 @@ import java.util.Objects;
 
 /**
  * What the engine's probe found for one {@link HookSpec} (phase6-contracts.md sections 3.3 and 4.1): JSON
- * {@code {id, state: OK|DEGRADED|UNAVAILABLE, reason?, strategy?, loaders?, loaderIds?[], declared?[], sizeBytes?,
- * methods?, spyVisibility: VISIBLE|NOT_VISIBLE|UNCHECKED}}. {@code loaders} is how many loaders define the class,
- * {@code loaderIds} the identities a later {@link HookTarget#loader()} may name, {@code declared} the descriptors the
- * class does declare under the method's name when a pinned one matches nothing, {@code sizeBytes} and
- * {@code methods} the two bounds of section 3.7.
+ * {@code {id, state: OK|DEGRADED|UNAVAILABLE, reason?, strategy?, loaders?, loaderIds?[], codeSources?[], declared?[],
+ * sizeBytes?, methods?, spyVisibility: VISIBLE|NOT_VISIBLE|UNCHECKED}}. {@code loaders} is how many loaders define the
+ * class, {@code loaderIds} the identities a later {@link HookTarget#loader()} may name, {@code codeSources} the
+ * code-source name of each copy found, aligned with {@code loaderIds} (at most {@link #MAX_CODE_SOURCES}; never a
+ * directory; phase8-contracts.md section 6.4), {@code declared} the descriptors the class does declare under the
+ * method's name when a pinned one matches nothing, {@code sizeBytes} and {@code methods} the two bounds of section
+ * 3.7.
  *
  * <p>Read leniently (an unknown key is ignored, as for the other answer types). Immutable; safe to share between
  * threads.
@@ -50,6 +52,9 @@ public final class HookProbe {
         UNCHECKED
     }
 
+    /** The most code-source names a probe answer carries (phase8-contracts.md section 6.4). */
+    public static final int MAX_CODE_SOURCES = 16;
+
     private static final String TYPE = "HookProbe";
 
     private final String id;
@@ -58,6 +63,7 @@ public final class HookProbe {
     private final String strategy;
     private final Integer loaders;
     private final List<String> loaderIds;
+    private final List<String> codeSources;
     private final List<String> declared;
     private final Long sizeBytes;
     private final Integer methods;
@@ -78,12 +84,34 @@ public final class HookProbe {
     public HookProbe(String id, CapabilityState state, String reason, String strategy, Integer loaders,
                      List<String> loaderIds, List<String> declared, Long sizeBytes, Integer methods,
                      SpyVisibility spyVisibility) {
+        this(id, state, reason, strategy, loaders, loaderIds, null, declared, sizeBytes, methods, spyVisibility);
+    }
+
+    /**
+     * @param id the hook id, not null
+     * @param state not null
+     * @param reason why the state is not OK, may be null
+     * @param strategy {@code advice} when OK, may be null
+     * @param loaders how many loaders define the class, may be null
+     * @param loaderIds the identities of those loaders, may be null
+     * @param codeSources the code-source name of each copy, aligned with {@code loaderIds}, may be null; the first
+     *     {@link #MAX_CODE_SOURCES} are kept
+     * @param declared the descriptors the class declares under the method's name, may be null
+     * @param sizeBytes the class file's size, may be null
+     * @param methods the class's declared methods and constructors, may be null
+     * @param spyVisibility null means {@link SpyVisibility#UNCHECKED}
+     */
+    public HookProbe(String id, CapabilityState state, String reason, String strategy, Integer loaders,
+                     List<String> loaderIds, List<String> codeSources, List<String> declared, Long sizeBytes,
+                     Integer methods, SpyVisibility spyVisibility) {
         this.id = Objects.requireNonNull(id, "id");
         this.state = Objects.requireNonNull(state, "state");
         this.reason = reason;
         this.strategy = strategy;
         this.loaders = loaders;
         this.loaderIds = loaderIds == null ? null : Collections.unmodifiableList(new ArrayList<String>(loaderIds));
+        this.codeSources = codeSources == null ? null : Collections.unmodifiableList(new ArrayList<String>(
+                codeSources.size() > MAX_CODE_SOURCES ? codeSources.subList(0, MAX_CODE_SOURCES) : codeSources));
         this.declared = declared == null ? null : Collections.unmodifiableList(new ArrayList<String>(declared));
         this.sizeBytes = sizeBytes;
         this.methods = methods;
@@ -116,6 +144,11 @@ public final class HookProbe {
     /** Unmodifiable, or null. */
     public List<String> loaderIds() {
         return loaderIds;
+    }
+
+    /** The code-source name of each copy found, aligned with {@link #loaderIds()}; unmodifiable, or null. */
+    public List<String> codeSources() {
+        return codeSources;
     }
 
     /** Unmodifiable, or null. */
@@ -155,6 +188,9 @@ public final class HookProbe {
         if (loaderIds != null) {
             json.put("loaderIds", new ArrayList<Object>(loaderIds));
         }
+        if (codeSources != null) {
+            json.put("codeSources", new ArrayList<Object>(codeSources));
+        }
         if (declared != null) {
             json.put("declared", new ArrayList<Object>(declared));
         }
@@ -183,7 +219,8 @@ public final class HookProbe {
                 HookFields.requireEnum(json, "state", CapabilityState.class, TYPE),
                 HookFields.optString(json, "reason", TYPE), HookFields.optString(json, "strategy", TYPE),
                 loaders == null ? null : Integer.valueOf(loaders.intValue()),
-                HookFields.optStrings(json, "loaderIds", TYPE), HookFields.optStrings(json, "declared", TYPE),
+                HookFields.optStrings(json, "loaderIds", TYPE), HookFields.optStrings(json, "codeSources", TYPE),
+                HookFields.optStrings(json, "declared", TYPE),
                 HookFields.optLong(json, "sizeBytes", TYPE),
                 methods == null ? null : Integer.valueOf(methods.intValue()), visibility);
     }
@@ -199,15 +236,16 @@ public final class HookProbe {
         HookProbe other = (HookProbe) o;
         return id.equals(other.id) && state == other.state && Objects.equals(reason, other.reason)
                 && Objects.equals(strategy, other.strategy) && Objects.equals(loaders, other.loaders)
-                && Objects.equals(loaderIds, other.loaderIds) && Objects.equals(declared, other.declared)
+                && Objects.equals(loaderIds, other.loaderIds) && Objects.equals(codeSources, other.codeSources)
+                && Objects.equals(declared, other.declared)
                 && Objects.equals(sizeBytes, other.sizeBytes) && Objects.equals(methods, other.methods)
                 && spyVisibility == other.spyVisibility;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, state, reason, strategy, loaders, loaderIds, declared, sizeBytes, methods,
-                spyVisibility);
+        return Objects.hash(id, state, reason, strategy, loaders, loaderIds, codeSources, declared, sizeBytes,
+                methods, spyVisibility);
     }
 
     @Override

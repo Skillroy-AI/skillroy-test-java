@@ -18,6 +18,7 @@ package ai.skillroy.testjava.scenario.hooks;
 
 import ai.skillroy.testjava.data.yaml.StrictYaml;
 import ai.skillroy.testjava.data.yaml.YamlException;
+import ai.skillroy.testjava.protocol.hook.ClassPattern;
 import ai.skillroy.testjava.protocol.hook.HookCapture;
 import ai.skillroy.testjava.protocol.hook.HookMode;
 import ai.skillroy.testjava.protocol.hook.HookSpec;
@@ -56,6 +57,13 @@ import java.util.regex.Pattern;
  * whose method name suggests a secret without the secret marks, are accepted with a warning
  * ({@link HookCatalogue#warnings()}).
  *
+ * <p>Phase 8 (phase8-contracts.md 6.8): {@code deny:} is a list of at most {@value HookCatalogue#MAX_DENY}
+ * {@link ClassPattern}s, an enabled entry whose class a pattern matches is an error at its {@code class} line and a
+ * disabled one a warning; a {@code packages} item is a package name or a map {@code {name, codeSource?}}, whose
+ * qualifier every entry under it inherits (the longest name wins) unless it carries {@code target.codeSource} of its
+ * own; an overlay unions the package rules and the deny, and an enabled base entry its deny matches is an error at the
+ * overlay's {@code deny} line unless the overlay disables it.
+ *
  * <p>Stateless apart from the per-pack cache of {@link #ofPack}; safe from any thread.
  */
 public final class HookCatalogues {
@@ -66,12 +74,14 @@ public final class HookCatalogues {
     /** {@code PrimitiveSpec}'s name pattern: what a {@code seam} fallback must name. */
     static final Pattern PRIMITIVE = Pattern.compile("[a-z][a-zA-Z0-9]*(\\.[a-z][a-zA-Z0-9]*)+");
 
-    private static final Set<String> TOP_KEYS = Set.of("catalogue", "version", "application", "hooks", "packages");
+    private static final Set<String> TOP_KEYS = Set.of("catalogue", "version", "application", "hooks", "packages",
+            "deny");
     private static final Set<String> OVERLAY_KEYS = Set.of("catalogue", "version", "application", "hooks", "packages",
-            "disable");
+            "disable", "deny");
     private static final Set<String> ENTRY_KEYS = Set.of("id", "mode", "enabled", "target", "capture", "secretArgs",
             "secretResult", "emits", "fallbacks", "note");
-    private static final Set<String> TARGET_KEYS = Set.of("class", "method", "descriptors", "loader");
+    private static final Set<String> TARGET_KEYS = Set.of("class", "method", "descriptors", "loader", "codeSource");
+    private static final Set<String> PACKAGE_KEYS = Set.of("name", "codeSource");
     private static final Set<String> CAPTURE_KEYS = Set.of("args", "self", "result");
     private static final Pattern PACKAGE = Pattern.compile("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)*");
 
@@ -98,16 +108,20 @@ public final class HookCatalogues {
         StrictYaml.Doc doc = parse(reader, source);
         Parser parser = new Parser(doc, source);
         Map<?, ?> root = parser.root(TOP_KEYS);
-        List<String> packages = parser.packages(root);
+        List<HookCatalogue.PackageRule> rules = parser.packages(root);
+        List<String> packages = names(rules);
+        List<String> deny = parser.deny(root);
         HookCatalogue.Builder builder = HookCatalogue.builder(parser.catalogueId(root), parser.version(root))
                 .application(parser.optString(root, "application"))
-                .packages(packages);
+                .packageRules(rules)
+                .deny(deny);
         Set<String> ids = new HashSet<>();
         for (Map<?, ?> entry : parser.entries(root)) {
             HookEntry hook = parser.entry(entry, packages);
             if (!ids.add(hook.id())) {
                 throw parser.error(parser.keyLine(entry, "id"), "duplicate hook id " + hook.id());
             }
+            parser.checkDenied(hook, entry, deny, "the catalogue denies");
             builder.add(hook);
         }
         if (ids.size() > HookCatalogue.MAX_HOOKS) {
@@ -133,14 +147,38 @@ public final class HookCatalogues {
         StrictYaml.Doc doc = parse(reader, source);
         Parser parser = new Parser(doc, source);
         Map<?, ?> root = parser.root(OVERLAY_KEYS);
+        HookCatalogue.Builder builder = HookCatalogue.builder(base).id(parser.catalogueId(root))
+                .version(parser.version(root));
+        // Package rules are unioned by name; an overlay's qualifier for a name replaces the base's for the overlay's
+        // own entries (the base's entries keep the value baked when the base was read; D570). A plain name adds a rule
+        // only when the name is new, so that an overlay never drops a base qualifier by writing the plain form.
+        List<HookCatalogue.PackageRule> overlayRules = parser.packages(root);
+        for (HookCatalogue.PackageRule rule : overlayRules) {
+            if (rule.codeSource() != null) {
+                builder.packageRules(List.of(rule));
+            } else {
+                builder.packages(List.of(rule.name()));
+            }
+        }
         List<String> packages = new ArrayList<>(base.packages());
-        for (String pkg : parser.packages(root)) {
+        for (String pkg : names(overlayRules)) {
             if (!packages.contains(pkg)) {
                 packages.add(pkg);
             }
         }
-        HookCatalogue.Builder builder = HookCatalogue.builder(base).id(parser.catalogueId(root))
-                .version(parser.version(root)).packages(packages);
+        // the deny is the union of the base's and the overlay's: an overlay never lifts a base deny
+        List<String> overlayDeny = parser.deny(root);
+        List<String> deny = new ArrayList<>(base.deny());
+        for (String pattern : overlayDeny) {
+            if (!deny.contains(pattern)) {
+                deny.add(pattern);
+            }
+        }
+        if (deny.size() > HookCatalogue.MAX_DENY) {
+            throw parser.error(parser.keyLine(root, "deny"), "the catalogue and its overlay have " + deny.size()
+                    + " deny patterns, at most " + HookCatalogue.MAX_DENY + " are allowed");
+        }
+        builder.deny(overlayDeny);
         if (root.containsKey("application")) {
             builder.application(parser.optString(root, "application"));
         }
@@ -150,18 +188,31 @@ public final class HookCatalogues {
             if (!ids.add(hook.id())) {
                 throw parser.error(parser.keyLine(entry, "id"), "duplicate hook id " + hook.id());
             }
+            parser.checkDenied(hook, entry, deny, "the catalogue denies");
             if (base.entry(hook.id()) != null) {
                 builder.replace(hook);
             } else {
                 builder.add(hook);
             }
         }
-        for (Map.Entry<String, Integer> disabled : parser.disable(root).entrySet()) {
+        Map<String, Integer> disable = parser.disable(root);
+        for (Map.Entry<String, Integer> disabled : disable.entrySet()) {
             if (base.entry(disabled.getKey()) == null && !ids.contains(disabled.getKey())) {
                 throw parser.error(disabled.getValue(), "disable names hook " + disabled.getKey() + ", which catalogue "
                         + base.id() + " does not have");
             }
             builder.disable(disabled.getKey());
+        }
+        for (HookEntry entry : base.hooks()) {
+            if (!entry.enabled() || ids.contains(entry.id()) || disable.containsKey(entry.id())) {
+                continue;
+            }
+            String denied = ClassPattern.firstMatch(overlayDeny, entry.target().className());
+            if (denied != null) {
+                throw parser.error(parser.keyLine(root, "deny"), "hook " + entry.id() + " of catalogue " + base.id()
+                        + " targets " + entry.target().className() + ", which this overlay denies (" + denied + ");"
+                        + " add it to disable");
+            }
         }
         return parser.build(builder, root);
     }
@@ -239,6 +290,14 @@ public final class HookCatalogues {
         }
     }
 
+    private static List<String> names(List<HookCatalogue.PackageRule> rules) {
+        List<String> out = new ArrayList<>();
+        for (HookCatalogue.PackageRule rule : rules) {
+            out.add(rule.name());
+        }
+        return out;
+    }
+
     private static URL resource(Class<?> type, String name) {
         ClassLoader loader = type.getClassLoader();
         return loader == null ? ClassLoader.getSystemResource(name) : loader.getResource(name);
@@ -309,8 +368,12 @@ public final class HookCatalogues {
             return number.intValue();
         }
 
-        List<String> packages(Map<?, ?> root) throws ScenarioException {
-            List<String> out = new ArrayList<>();
+        /**
+         * The package rules: a package name, or a map {@code {name, codeSource?}} (phase8-contracts.md 6.8); the same
+         * name twice keeps the first.
+         */
+        List<HookCatalogue.PackageRule> packages(Map<?, ?> root) throws ScenarioException {
+            List<HookCatalogue.PackageRule> out = new ArrayList<>();
             if (!root.containsKey("packages")) {
                 return out;
             }
@@ -318,16 +381,77 @@ public final class HookCatalogues {
             if (!(value instanceof List<?> list)) {
                 throw error(keyLine(root, "packages"), "packages must be a list of package names");
             }
+            Set<String> seen = new HashSet<>();
             for (Object item : list) {
-                if (!(item instanceof String pkg) || !PACKAGE.matcher(pkg).matches()) {
+                HookCatalogue.PackageRule rule;
+                if (item instanceof Map<?, ?> map) {
+                    int at = lineOf(map, root, "packages");
+                    unknownKeys(map, PACKAGE_KEYS, "a packages entry");
+                    Object name = map.get("name");
+                    if (!(name instanceof String pkg) || !PACKAGE.matcher(pkg).matches()) {
+                        throw error(name == null ? at : keyLine(map, "name"), "a packages entry needs a name, a"
+                                + " package name" + (name == null ? "" : ", found " + name));
+                    }
+                    String codeSource = optString(map, "codeSource");
+                    String violation = HookTarget.codeSourceViolation(codeSource);
+                    if (violation != null) {
+                        throw error(keyLine(map, "codeSource"), "package " + pkg + ": " + violation);
+                    }
+                    rule = new HookCatalogue.PackageRule(pkg, codeSource);
+                } else if (item instanceof String pkg && PACKAGE.matcher(pkg).matches()) {
+                    rule = new HookCatalogue.PackageRule(pkg, null);
+                } else {
                     throw error(lineOf(value, root, "packages"), "packages must be a list of package names, found "
                             + item);
                 }
-                if (!out.contains(pkg)) {
-                    out.add(pkg);
+                if (seen.add(rule.name())) {
+                    out.add(rule);
                 }
             }
             return out;
+        }
+
+        /** {@code deny:}: at most {@value HookCatalogue#MAX_DENY} class patterns, distinct (phase8-contracts.md 6.8). */
+        List<String> deny(Map<?, ?> root) throws ScenarioException {
+            List<String> out = new ArrayList<>();
+            if (!root.containsKey("deny")) {
+                return out;
+            }
+            Object value = root.get("deny");
+            if (!(value instanceof List<?> list)) {
+                throw error(keyLine(root, "deny"), "deny must be a list of class patterns");
+            }
+            for (Object item : list) {
+                if (!(item instanceof String pattern)) {
+                    throw error(keyLine(root, "deny"), "deny must be a list of class patterns");
+                }
+                String violation = ClassPattern.violation(pattern);
+                if (violation != null) {
+                    throw error(keyLine(root, "deny"), "deny pattern '" + pattern + "': " + violation);
+                }
+                if (!out.contains(pattern)) {
+                    out.add(pattern);
+                }
+            }
+            if (out.size() > HookCatalogue.MAX_DENY) {
+                throw error(keyLine(root, "deny"), "the catalogue has " + out.size() + " deny patterns, at most "
+                        + HookCatalogue.MAX_DENY + " are allowed");
+            }
+            return out;
+        }
+
+        /** An enabled entry on a class {@code deny} matches: an error at the entry's {@code class} line. */
+        void checkDenied(HookEntry hook, Map<?, ?> entry, List<String> deny, String verb) throws ScenarioException {
+            if (!hook.enabled()) {
+                return;
+            }
+            String denied = ClassPattern.firstMatch(deny, hook.target().className());
+            if (denied != null) {
+                int line = entry.get("target") instanceof Map<?, ?> target ? keyLine(target, "class")
+                        : doc.lineOf(entry);
+                throw error(line, "hook " + hook.id() + " targets " + hook.target().className() + ", which " + verb
+                        + " (" + denied + ")");
+            }
         }
 
         List<Map<?, ?>> entries(Map<?, ?> root) throws ScenarioException {
@@ -402,6 +526,7 @@ public final class HookCatalogues {
                 descriptors.add(descriptor);
             }
             String loader = optString(target, "loader");
+            String codeSource = optString(target, "codeSource");
             HookCapture capture = null;
             if (entry.containsKey("capture")) {
                 if (mode != HookMode.CAPTURE) {
@@ -425,8 +550,8 @@ public final class HookCatalogues {
                     : HookCatalogue.inPackages(className, packages);
             HookEntry hook;
             try {
-                hook = new HookEntry(id, mode, enabled, new HookTarget(className, method, descriptors, loader), capture,
-                        secretArgs, secretResult, emits, fallbacks, note);
+                hook = new HookEntry(id, mode, enabled, new HookTarget(className, method, descriptors, loader,
+                        codeSource), capture, secretArgs, secretResult, emits, fallbacks, note);
             } catch (RuntimeException e) {
                 throw error(line, where + e.getMessage());
             }

@@ -35,7 +35,8 @@ import java.util.Objects;
  * @param id the hook id ({@link HookSpec#ID_REGEX}); the capability is {@code hook.<id>}
  * @param mode {@code OBSERVE}, {@code CAPTURE} or {@code STUB}
  * @param enabled whether the controller sends the entry to the agent
- * @param target the class, method and descriptors hooked, and the loader the hook is limited to (null: every loader)
+ * @param target the class, method and descriptors hooked, the loader the hook is limited to (null: every loader) and
+ *     the code-source qualifier (null: every code source; phase8-contracts.md 6.3)
  * @param capture what a {@code CAPTURE} hook copies, or null (and always null for another mode)
  * @param secretArgs argument indexes whose values are never captured; never null
  * @param secretResult true: the return value is never captured
@@ -98,6 +99,11 @@ public record HookEntry(String id, HookMode mode, boolean enabled, HookTarget ta
     /** This entry with {@code enabled} set as given. */
     public HookEntry withEnabled(boolean on) {
         return new HookEntry(id, mode, on, target, capture, secretArgs, secretResult, emits, fallbacks, note);
+    }
+
+    /** This entry with another target (phase8-contracts.md 6.8: the catalogue bakes an inherited qualifier). */
+    public HookEntry withTarget(HookTarget newTarget) {
+        return new HookEntry(id, mode, enabled, newTarget, capture, secretArgs, secretResult, emits, fallbacks, note);
     }
 
     /**

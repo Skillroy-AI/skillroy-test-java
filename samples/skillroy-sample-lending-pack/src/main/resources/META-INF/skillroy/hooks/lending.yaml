@@ -1,8 +1,11 @@
 # The lending pack's hook catalogue (phase6-contracts.md 5.1, 6.3): what the controller installs on a desk whose agent
 # loads the optional hooks module, once per target and idempotent by the catalogue's hash. Read by the controller; the
 # agent receives the enabled entries as JSON HookSpecs. Hooks never enter a plan or a fingerprint.
+# Version 2 (phase8-contracts.md 6.8, 12.3): the package rule carries a code-source qualifier that every entry under it
+# inherits (the IT copy skillroy-sample-lending-app.jar and a versioned jar match it; a class directory does not), and
+# the catalogue denies the desk's input queue, which every input source posts to: no module may change its bytecode.
 catalogue: lending
-version: 1
+version: 2
 application: skillroy-sample-lending-app 0.1.0, standard edition
 hooks:
   - id: limit.applied
@@ -55,4 +58,6 @@ hooks:
     fallbacks:
       - seam: lending.deposit
     note: the STUB demonstration of the acceptance; never armed by a committed scenario
-packages: [ai.skillroy.testjava.samples.lending]
+packages:
+  - { name: ai.skillroy.testjava.samples.lending, codeSource: 'skillroy-sample-lending-app(-[^/]*)?\.jar' }
+deny: [ai.skillroy.testjava.samples.lending.Inbox]

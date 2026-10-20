@@ -23,11 +23,13 @@ import ai.skillroy.testjava.agent.api.Probe;
 import ai.skillroy.testjava.agent.api.ProbeResult;
 import ai.skillroy.testjava.agent.api.instrument.ByteVerification;
 import ai.skillroy.testjava.agent.api.instrument.RetransformBatches;
+import ai.skillroy.testjava.agent.api.spi.hook.ClassDeny;
 import ai.skillroy.testjava.agent.api.spi.hook.HookEngine;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.Topics;
+import ai.skillroy.testjava.protocol.hook.ClassPattern;
 import ai.skillroy.testjava.protocol.hook.HookHealth;
 import ai.skillroy.testjava.protocol.hook.HookMode;
 import ai.skillroy.testjava.protocol.hook.HookProbe;
@@ -60,10 +62,18 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p><b>Nothing here names a {@code Spy} type</b> in a signature or a field: the handler is held as {@code Object} and
  * created by reflection after the append; {@link SpyBridge} is called only once {@code Spy} is on the bootstrap path.
  *
+ * <p><b>The class deny</b> (phase8-contracts.md sections 6.4 to 6.6): item 2b of every probe asks the agent option
+ * {@code hooks.deny}, then the catalogue deny-list this engine holds, then every other registered {@link ClassDeny}
+ * in registration order; the first refusal wins. The engine is itself the catalogue's {@link ClassDeny} in the shared
+ * registry (registered by {@link HooksModule} beside the {@link HookEngine}), so that the Byteman module asks it and
+ * tells it apart from a domain module's by {@code instanceof HookEngine}. The held list is add-only for the engine's
+ * life (D564): merged under the lock before the conflict check, kept across {@code hook.remove {}} and
+ * {@code replace}, at most {@link #MAX_HELD_DENY} patterns, echoed in every {@code hook.install} answer.
+ *
  * <p>Thread-safe: an install, a remove, a stub and the detach are serialised by one lock (the detach waits for it at
  * most its budget); probes and health read concurrent state. Every method runs on an agent thread.
  */
-final class HookEngineImpl implements HookEngine {
+final class HookEngineImpl implements HookEngine, ClassDeny {
 
     /**
      * Set by a detach that ran out of budget to the number of classes left carrying an inert advice, so that a later
@@ -76,6 +86,15 @@ final class HookEngineImpl implements HookEngine {
     static final String RESIDUE_AFTER_REFUSAL = "residue after a refused install";
     /** The health reason of a removed hook a class may still carry ({@code FAILED} restore, or the partial path). */
     static final String RESIDUE_AFTER_REMOVE = "residue after remove";
+    /** The most catalogue deny patterns an engine holds (phase8-contracts.md section 6.6). */
+    static final int MAX_HELD_DENY = 256;
+    /** The most delivering catalogue ids {@code hook.health.deny.from} lists. */
+    static final int MAX_DENY_FROM = 16;
+    /** The longest reason of a module's {@link ClassDeny}. */
+    static final int MAX_DENY_REASON = 200;
+    static final String DENIED_BY_OPTION = "denied by the agent option " + HookOptions.DENY + ": ";
+    static final String DENIED_BY_CATALOGUE = "denied by the catalogue ";
+    static final String DENIED_BY_MODULE = "denied by a module: ";
 
     private final AgentContext ctx;
     private final Instrumentation inst;
@@ -106,6 +125,12 @@ final class HookEngineImpl implements HookEngine {
      * P2-L2-F6): the install or remove that held it reports the classes left behind again when it ends.
      */
     private volatile boolean detachGaveUp;
+    /** The held catalogue deny-list: an immutable snapshot, replaced under the lock, read on any agent thread. */
+    private volatile HeldDeny held = HeldDeny.EMPTY;
+    /** The option's patterns, compiled once. */
+    private final List<ClassPattern> optionDeny;
+    /** The classes of the module {@link ClassDeny}s that threw, each logged once. */
+    private final Set<String> denyThrows = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
     HookEngineImpl(AgentContext ctx, HookOptions options) {
         this.ctx = ctx;
@@ -113,7 +138,213 @@ final class HookEngineImpl implements HookEngine {
         this.options = options;
         this.log = ctx.log();
         this.core = new HandlerCore(sites, ctx.events(), new Capture(ctx, options.captureMaxBytes));
-        this.probes = inst == null ? null : new Probes(inst, ctx.hostClassLoader(), options, ledger);
+        List<ClassPattern> compiled = new ArrayList<ClassPattern>();
+        for (String p : options.deny) {
+            compiled.add(ClassPattern.compile(p));
+        }
+        this.optionDeny = Collections.unmodifiableList(compiled);
+        this.probes = inst == null ? null : new Probes(inst, ctx.hostClassLoader(), options, ledger,
+                new Probes.Deny() {
+                    @Override
+                    public String refuse(String className) {
+                        return deniedBy(className);
+                    }
+                });
+    }
+
+    /**
+     * The held catalogue deny-list (phase8-contracts.md section 6.6): the patterns in the order first delivered, each
+     * with the catalogue that delivered it first. Immutable.
+     */
+    static final class HeldDeny {
+        static final HeldDeny EMPTY = new HeldDeny(new LinkedHashMap<String, String>());
+
+        /** Pattern to the id of the catalogue that delivered it first, in delivery order. */
+        final Map<String, String> from;
+        final List<ClassPattern> compiled;
+
+        HeldDeny(LinkedHashMap<String, String> from) {
+            this.from = Collections.unmodifiableMap(from);
+            List<ClassPattern> c = new ArrayList<ClassPattern>();
+            for (String p : from.keySet()) {
+                c.add(ClassPattern.compile(p));
+            }
+            this.compiled = Collections.unmodifiableList(c);
+        }
+
+        /** The union with a call's patterns: a new snapshot, or this one when nothing is new. */
+        HeldDeny with(List<String> patterns, String catalogueId) {
+            LinkedHashMap<String, String> union = new LinkedHashMap<String, String>(from);
+            for (String p : patterns) {
+                if (!union.containsKey(p)) {
+                    union.put(p, catalogueId);
+                }
+            }
+            return union.size() == from.size() ? this : new HeldDeny(union);
+        }
+
+        /** How many distinct patterns the union with {@code patterns} holds. */
+        int unionSize(List<String> patterns) {
+            Set<String> union = new HashSet<String>(from.keySet());
+            union.addAll(patterns);
+            return union.size();
+        }
+
+        List<String> sorted() {
+            List<String> out = new ArrayList<String>(from.keySet());
+            Collections.sort(out);
+            return out;
+        }
+
+        /** The delivering catalogue ids, distinct, in the order of first delivery, at most {@link #MAX_DENY_FROM}. */
+        List<String> catalogues() {
+            List<String> out = new ArrayList<String>(new LinkedHashSet<String>(from.values()));
+            return out.size() > MAX_DENY_FROM ? new ArrayList<String>(out.subList(0, MAX_DENY_FROM)) : out;
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------- the deny
+
+    /**
+     * The catalogue's source of the class deny (phase8-contracts.md section 6.5 item 2): {@code denied by the
+     * catalogue <id>: <pattern>} for the first held pattern that matches, or null. Any agent thread.
+     */
+    @Override
+    public String refuse(String className) {
+        HeldDeny h = held;
+        for (ClassPattern p : h.compiled) {
+            if (p.matches(className)) {
+                return DENIED_BY_CATALOGUE + h.from.get(p.pattern()) + ": " + p.pattern();
+            }
+        }
+        return null;
+    }
+
+    /** The catalogue deny patterns held, sorted (phase8-contracts.md section 6.6). */
+    @Override
+    public List<String> deny() {
+        return Collections.unmodifiableList(held.sorted());
+    }
+
+    /**
+     * Item 2b of section 6.4: the option's patterns, then the catalogue's held list, then every other registered
+     * {@link ClassDeny} in registration order; the first refusal wins, a throw refuses. Null to allow.
+     */
+    String deniedBy(String className) {
+        for (ClassPattern p : optionDeny) {
+            if (p.matches(className)) {
+                return DENIED_BY_OPTION + p.pattern();
+            }
+        }
+        String catalogue = refuse(className);
+        if (catalogue != null) {
+            return catalogue;
+        }
+        for (ClassDeny d : ctx.spi().all(ClassDeny.class)) {
+            if (d == this || d instanceof HookEngine) {
+                continue;
+            }
+            String reason;
+            try {
+                reason = d.refuse(className);
+            } catch (VirtualMachineError e) {
+                throw e;
+            } catch (Throwable t) {
+                String type = d.getClass().getName();
+                if (denyThrows.add(type)) {
+                    log.warn("hooks: the deny policy " + type + " threw " + t.getClass().getName()
+                            + "; every class it is asked about is refused");
+                }
+                return DENIED_BY_MODULE + "the deny policy " + type + " threw " + t.getClass().getName();
+            }
+            if (reason != null) {
+                return DENIED_BY_MODULE + (reason.length() > MAX_DENY_REASON ? reason.substring(0, MAX_DENY_REASON)
+                        : reason);
+            }
+        }
+        return null;
+    }
+
+    /** The number of registered {@link ClassDeny}s other than a hook engine's (the catalogue's). */
+    int moduleDenies() {
+        int n = 0;
+        for (ClassDeny d : ctx.spi().all(ClassDeny.class)) {
+            if (d != this && !(d instanceof HookEngine)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** {@code hook.health.deny} (section 6.6): always present on a Phase 8 engine. */
+    Map<String, Object> denyInfo() {
+        HeldDeny h = held;
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("catalogue", new ArrayList<Object>(h.sorted()));
+        out.put("from", new ArrayList<Object>(h.catalogues()));
+        out.put("option", new ArrayList<Object>(options.deny));
+        out.put("modules", Long.valueOf(moduleDenies()));
+        return out;
+    }
+
+    /**
+     * {@code catalogue.deny} of a {@code hook.install} (section 6.6): absent, or a list of at most 64 class patterns;
+     * checked before the lock.
+     */
+    static List<String> denyOf(Map<String, Object> info) {
+        if (!info.containsKey("deny") || info.get("deny") == null) {
+            return Collections.emptyList();
+        }
+        Object raw = info.get("deny");
+        if (!(raw instanceof List)) {
+            throw new RpcException(ErrorCodes.INVALID_PARAMS, "catalogue.deny must be a list of class patterns",
+                    data("param", "catalogue.deny"));
+        }
+        List<?> list = (List<?>) raw;
+        if (list.size() > ClassPattern.MAX_PER_SOURCE) {
+            throw new RpcException(ErrorCodes.INVALID_PARAMS, "at most " + ClassPattern.MAX_PER_SOURCE
+                    + " deny patterns per catalogue", data("param", "catalogue.deny"));
+        }
+        List<String> out = new ArrayList<String>();
+        for (int i = 0; i < list.size(); i++) {
+            Object item = list.get(i);
+            if (!(item instanceof String)) {
+                throw new RpcException(ErrorCodes.INVALID_PARAMS, "deny pattern " + i + ": not a string",
+                        data("param", "catalogue.deny[" + i + "]"));
+            }
+            String violation = ClassPattern.violation((String) item);
+            if (violation != null) {
+                throw new RpcException(ErrorCodes.INVALID_PARAMS, "deny pattern " + i + ": " + violation,
+                        data("param", "catalogue.deny[" + i + "]"));
+            }
+            if (!out.contains(item)) {
+                out.add((String) item);
+            }
+        }
+        return out;
+    }
+
+    /** Under the lock: the call's patterns merged into the held list (add-only; at most {@link #MAX_HELD_DENY}). */
+    private void mergeDeny(List<String> patterns, String catalogueId) {
+        if (patterns.isEmpty()) {
+            return;
+        }
+        HeldDeny h = held;
+        if (h.unionSize(patterns) > MAX_HELD_DENY) {
+            throw new RpcException(ErrorCodes.INVALID_PARAMS, "the engine holds " + MAX_HELD_DENY
+                    + " deny patterns; restart the target", data("param", "catalogue.deny"));
+        }
+        HeldDeny next = h.with(patterns, catalogueId);
+        if (next != h) {
+            held = next;
+            log.info("hooks: catalogue " + catalogueId + " delivered " + patterns.size() + " deny patterns; the engine"
+                    + " holds " + next.from.size() + " (add-only until the agent restarts)");
+        }
+    }
+
+    /** {@code catalogue.deny} of an install answer: the held patterns, sorted; an empty list when none is held. */
+    private List<Object> denyEcho() {
+        return new ArrayList<Object>(held.sorted());
     }
 
     /** The installed catalogue. */
@@ -293,12 +524,16 @@ final class HookEngineImpl implements HookEngine {
             throw new RpcException(ErrorCodes.INVALID_PARAMS, "the catalogue needs an id and a hash",
                     data("param", catalogueId == null ? "catalogue.id" : "catalogue.hash"));
         }
+        List<String> deny = denyOf(info);
         lock.lock();
         try {
             if (detached) {
                 throw new RpcException(ErrorCodes.CAPABILITY_UNAVAILABLE, "the hooks module is uninstalling",
                         data("capability", HooksModule.ENGINE));
             }
+            // Section 6.6: merged before the conflict check, so that the call's own specs are checked against it and
+            // a catalogue refused with HOOK_CONFLICT has still tightened the engine (the safe direction).
+            mergeDeny(deny, catalogueId);
             Catalogue current = catalogue;
             if (current != null) {
                 boolean sameId = current.id.equals(catalogueId);
@@ -335,6 +570,7 @@ final class HookEngineImpl implements HookEngine {
     private Map<String, Object> alreadyInstalled(Catalogue current) {
         Map<String, Object> cat = current.toJson();
         cat.put("alreadyInstalled", Boolean.TRUE);
+        cat.put("deny", denyEcho());
         List<Object> statuses = new ArrayList<Object>();
         for (HookSpec spec : current.specs) {
             statuses.add(currentStatus(spec.id()).toJson());
@@ -554,7 +790,7 @@ final class HookEngineImpl implements HookEngine {
                 Ledger.Entry entry = ledger.find(m.type.getName().replace('.', '/'), m.type);
                 if (entry == null) {
                     entry = new Ledger.Entry(m.type, Ledger.loaderId(m.type.getClassLoader()), m.sizeBytes,
-                            m.methods);
+                            m.methods, m.codeSource);
                     ledger.add(entry);
                     created.add(entry);
                 }
@@ -720,6 +956,7 @@ final class HookEngineImpl implements HookEngine {
         cat.put("hash", catalogueHash);
         cat.put("installedAt", installed == null ? null : Long.valueOf(installed.installedAt));
         cat.put("alreadyInstalled", Boolean.FALSE);
+        cat.put("deny", denyEcho());
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         out.put("catalogue", cat);
         out.put("hooks", statuses);
@@ -773,6 +1010,7 @@ final class HookEngineImpl implements HookEngine {
                         Map<String, Object> line = new LinkedHashMap<String, Object>();
                         line.put("class", c.getName());
                         line.put("loader", e.loaderId);
+                        line.put("codeSource", e.codeSource);
                         byte[] first = e.first;
                         line.put("bytes", Long.valueOf(first != null ? first.length : e.sizeBytes));
                         line.put("methods", Long.valueOf(e.methods));
@@ -1347,8 +1585,29 @@ final class HookEngineImpl implements HookEngine {
     Map<String, Object> healthCall(List<String> ids) {
         requireInstrumentation();
         Map<String, Object> byId = new LinkedHashMap<String, Object>();
+        Map<Ledger.Entry, String> deniedNow = new IdentityHashMap<Ledger.Entry, String>();
+        for (Ledger.Entry entry : ledger.entries()) {
+            String reason = deniedBy(entry.name);
+            if (reason != null) {
+                deniedNow.put(entry, wire(reason));
+            }
+        }
         for (Map.Entry<String, HookHealth> e : health(ids).entrySet()) {
-            byId.put(e.getKey(), e.getValue().toJson());
+            Map<String, Object> json = e.getValue().toJson();
+            HookEntry hook = hooks.get(e.getKey());
+            if (hook == null) {
+                hook = residue.get(e.getKey());
+            }
+            if (hook != null) {
+                for (Ledger.Entry entry : hook.classes) {
+                    if (deniedNow.containsKey(entry)) {
+                        // Section 6.6 (D568): a hook installed before its class was denied is flagged, not removed.
+                        json.put("deniedNow", Boolean.TRUE);
+                        break;
+                    }
+                }
+            }
+            byId.put(e.getKey(), json);
         }
         List<Object> stubs = new ArrayList<Object>();
         for (HookEntry hook : hooks.values()) {
@@ -1382,6 +1641,55 @@ final class HookEngineImpl implements HookEngine {
             out.put("catalogue", current.toJson());
         }
         out.put("otherAgents", OtherAgents.list());
+        out.put("classes", classesInfo(deniedNow));
+        out.put("deny", denyInfo());
+        return out;
+    }
+
+    /**
+     * {@code hook.health.classes} (phase8-contracts.md section 6.4, D559): one line per ledger class, sorted by class
+     * then loader, at most {@code hooks.maxClasses}: {@code {class, loader, codeSource, bytes, methods, hooks: [id...],
+     * deniedNow?}}.
+     */
+    private List<Object> classesInfo(Map<Ledger.Entry, String> deniedNow) {
+        List<Ledger.Entry> entries = ledger.entries();
+        Collections.sort(entries, new java.util.Comparator<Ledger.Entry>() {
+            @Override
+            public int compare(Ledger.Entry a, Ledger.Entry b) {
+                int byName = a.name.compareTo(b.name);
+                return byName != 0 ? byName : a.loaderId.compareTo(b.loaderId);
+            }
+        });
+        List<HookEntry> all = new ArrayList<HookEntry>(hooks.values());
+        all.addAll(residue.values());
+        List<Object> out = new ArrayList<Object>();
+        for (Ledger.Entry entry : entries) {
+            if (out.size() >= options.maxClasses) {
+                break;
+            }
+            List<String> ids = new ArrayList<String>();
+            for (HookEntry hook : all) {
+                for (Ledger.Entry c : hook.classes) {
+                    if (c == entry && !ids.contains(hook.id)) {
+                        ids.add(hook.id);
+                    }
+                }
+            }
+            Collections.sort(ids);
+            Map<String, Object> line = new LinkedHashMap<String, Object>();
+            line.put("class", entry.name);
+            line.put("loader", entry.loaderId);
+            line.put("codeSource", entry.codeSource);
+            byte[] first = entry.first;
+            line.put("bytes", Long.valueOf(first != null ? first.length : entry.sizeBytes));
+            line.put("methods", Long.valueOf(entry.methods));
+            line.put("hooks", new ArrayList<Object>(ids));
+            String denied = deniedNow.get(entry);
+            if (denied != null) {
+                line.put("deniedNow", denied);
+            }
+            out.add(line);
+        }
         return out;
     }
 
@@ -1525,5 +1833,10 @@ final class HookEngineImpl implements HookEngine {
 
     Transformers transformers() {
         return transformers;
+    }
+
+    /** The probe, whose code-source reader is the tests' seam (phase8-contracts.md section 13.1 row 24). */
+    Probes probes() {
+        return probes;
     }
 }

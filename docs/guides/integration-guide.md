@@ -545,6 +545,7 @@ marked there; the design's table is design §2.6.
 | `WebEngineAdapter` | one per browser technology | an engine other than JCEF or JxBrowser | agent workers | built-ins `jcef`, `jxbrowser` | P4 §3, §4.5 |
 | `SurfaceSource` | non-Swing areas of the tree, for captures and hit-tests | rarely (the web module supplies one) | EDT | web module | P7 §3.7 |
 | `HookEngine` | hooks from Java instead of a catalogue | rarely (§9.5) | agent threads only | – | P6 §3.6 |
+| `ClassDeny` *(Phase 8, built 2026-10-19, EH)* | refuse a class by name before any module changes its bytecode (§9.3) | a hot path, a licensed or timing-sensitive class | agent workers, under the engine's or the Byteman module's lock; cheap, never blocks | `LendingClassDeny` (behind the agent option `lending.hooks.deny`) | P8 §6.5 |
 
 `SyncPolicy` is **not** an agent SPI: it is the pack's (§8.2). The module's part is to publish the topics it names.
 
@@ -1008,6 +1009,35 @@ Rules the reader enforces: the first fallback is a `seam`; at most 64 hooks; `ca
 class outside `packages` is off unless written `enabled: true`, with a warning. Pin every descriptor of an overloaded
 method that reaches the behaviour. A `reflect` fallback is refused ("not in this version").
 
+**Code sources and the deny (Phase 8, built 2026-10-19, EH; P8 §6.2, §6.3, §6.8).** A `packages` item may be a map
+that names the jar the package's classes must come from, and an entry may carry the same qualifier itself; both are a
+Java regular expression matched against the **whole** code-source name (anchored: `desk-app.*` does not match
+`desk-app-scheduler.jar` unless written so), and an entry's own wins over the longest `packages` name its class is
+under. The name is the jar's file name, never a directory; for a class directory it is the directory's last segment,
+for a nested jar the outer jar and the entry inside it:
+
+```yaml
+version: 2                             # bump on every change, as always
+packages:
+  - { name: <your package>, codeSource: '<your-app>(-[^/]*)?\.jar' }   # the IT copy and a versioned jar match
+  - <a package you share with nobody>  # the plain form stays
+deny: [<your package>.Inbox, <your package>.licensed.**]               # class patterns, at most 64
+```
+
+| Where the class was loaded from | Its code-source name |
+|---|---|
+| `file:/opt/desk/lib/desk-app-1.2.jar` (a versioned jar) | `desk-app-1.2.jar` |
+| `file:/opt/it-target/desk-app.jar` (an unversioned IT copy) | `desk-app.jar` |
+| `file:/build/desk/target/classes/` (a class directory) | `classes` |
+| `jar:file:/opt/app.jar!/BOOT-INF/lib/lib.jar!/` (a nested jar) | `app.jar!/BOOT-INF/lib/lib.jar` |
+| the bootstrap loader, a generated proxy | `(none)` |
+
+A qualifier is a filter, like `loader`: a copy of the name from another jar is left alone, not a failure of the hook
+(`class from another code source: <names>` when no copy matches). `deny:` takes class patterns (`a.b.C` with its nested
+classes, `a.b.*` the package, `a.b.**` everything under it, `a.b.Input*` a glob in the last segment); an **enabled**
+entry on a denied class is an error at its `class` line, a disabled one a warning. An overlay unions both lists and can
+never lift a base deny; an enabled base entry the overlay denies must be disabled by the overlay.
+
 **Per application version.** The pack's default `hooks()` reads one catalogue. Choosing among catalogues per application
 version is the layer's: one pack build per supported application line, or a `hooks()` override that reads the right
 resource (`HookCatalogues.readResource(type, name)` or `HookCatalogues.read(reader, source)`) by something the layer
@@ -1021,6 +1051,20 @@ JDK's and the agent's packages and loaders, refuses a class larger than `hooks.m
 see the bootstrap `Spy` (a strict-delegation loader, gap 50). Detach restores and verifies the original bytes within
 `hooks.detachBudgetMs` (8000) (P6 §3.5). A failed install falls back to the first `seam` the target serves; scenarios
 that need the hook name it in `requires:` or guard on it.
+
+**The class deny (Phase 8, built 2026-10-19, EH; P8 §6.4-§6.6, §6.9).** A class is refused **by name, before anything
+of it is read**, by three sources asked in order, the first refusal winning: the agent option `hooks.deny` (the
+operator's; comma-separated class patterns, read by the hooks and the Byteman modules alike), the catalogue's `deny:`
+(delivered with `hook.install` and held by the engine) and a domain module's `ClassDeny` (§6.2). The held catalogue list
+is **add-only for the agent instance's life**: it survives `hook.remove {}` and a replace, so loosening a deny needs a
+target restart; `hook.health.deny` (and `skillroy hooks status`) shows the effective list. The agent echoes the held
+list in every `hook.install` answer and the installer fails closed (`ENVIRONMENT`, "upgrade the agent") when the echo
+is missing. A run that skips the install (`--hooks off`, or no usable hooks module) records `denyNotDelivered` with the
+patterns and whether the remedy, the agent option `hooks.deny`, is in force on the target (`agentOption`, read from
+`rule.list` when the Byteman module is loaded, else `unknown`); set it on a target that runs without the hooks module.
+A hook installed before its class was denied is **flagged, not removed** (`deniedNow`; remove it yourself). The deny is
+policy (a hot path, a licence, timing-sensitive code), not checksum protection: retransformation changes neither the
+jar nor the bytes the class's resource returns.
 
 ### 9.4 Reading hook facts and the CLI
 
@@ -1044,6 +1088,12 @@ write. Byteman is loaded in process on the first confirmed `rule.submit`, with n
 loading it, `rule.submit` is destructive and needs `confirm`, `rule.unload` restores, `rule.list` lists (P6 §7;
 `JAVAAGENT` or `ATTACH` only). Only rules unload; Byteman stays loaded for the JVM's life, and a rule left installed by a
 detach that ran out of time keeps running until the target restarts (`SECURITY.md`).
+
+*(Phase 8, built 2026-10-19, EH; P8 §6.7.)* The Byteman module honours the class deny of §9.3 before it loads: a rule
+whose `CLASS` or `INTERFACE` names a denied class is reported by `rule.check` and refused by `rule.submit` before the
+count and before Byteman is loaded, and a `^` or `INTERFACE` rule that reaches a denied loaded subtype is refused too;
+`rule.list.deny` shows the deny in force. A denied subtype loaded **after** a `^`/`INTERFACE` submit still receives
+Byteman's trigger at its load (gap 140): deny the supertype or write the rule on the class itself.
 
 ---
 
@@ -1363,6 +1413,7 @@ From TODO "Open SPI and DSL gaps" (read the row for the proposed shape):
 | 50 | a class behind a strict-delegation loader cannot be hooked |
 | 77, 78, 81 | no Robot key input; HiDPI unverified; no key input into a page through `web.pointer` |
 | 83, 84 | one baseline per rendering; redaction hides a rectangle, not a value |
+| 140 *(Phase 8, EH)* | a denied subtype loaded after a `^`/`INTERFACE` Byteman submit still receives the trigger (§9.6) |
 
 ### 15.3 Not verified
 

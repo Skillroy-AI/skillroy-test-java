@@ -213,6 +213,85 @@ class HookWireTypesTest {
                 "{\"id\":\"x\",\"state\":\"FINE\"}")));
     }
 
+    // ---- Phase 8 (phase8-contracts.md section 6.3, section 13.1 row 22) ----
+
+    /** The hash of {@link #LIMIT} as v0.1.0 computed it: a spec without the new key keeps it. */
+    private static final String LIMIT_HASH = "sha256:4448f89527d1dd627ab97319465d20c4375b89a2f307b52f7f5dc02953d7e5c1";
+
+    @Test
+    void aCodeSourceQualifierRoundTripsAndAnAbsentOneIsNotWritten() {
+        HookSpec plain = limit();
+        assertNull(plain.target().codeSource());
+        assertFalse(plain.target().toJson().containsKey("codeSource"), "absent: not written");
+        assertEquals(LIMIT_HASH, plain.hash(), "a spec without a qualifier keeps its v0.1.0 hash");
+        String qualified = LIMIT.replace("\"descriptors\":[\"(Ljava/lang/String;)Ljava/math/BigDecimal;\"]}",
+                "\"descriptors\":[\"(Ljava/lang/String;)Ljava/math/BigDecimal;\"],"
+                        + "\"codeSource\":\"skillroy-sample-lending-app(-[^/]*)?\\\\.jar\"}");
+        HookSpec spec = HookSpec.fromJson(Json.parseObject(qualified));
+        assertEquals("skillroy-sample-lending-app(-[^/]*)?\\.jar", spec.target().codeSource());
+        assertNull(spec.violation());
+        assertEquals(qualified, Json.write(spec.toJson()), "the written form is the read form");
+        assertEquals(spec, HookSpec.fromJson(Json.parseObject(Json.write(spec.toJson()))));
+        assertNotEquals(plain, spec);
+        assertNotEquals(plain.target().hashCode(), spec.target().hashCode());
+        assertNotEquals(LIMIT_HASH, spec.hash(), "a qualifier changes the spec's hash");
+        assertEquals(spec.target(), plain.target().withCodeSource(spec.target().codeSource()));
+        assertEquals(plain.target(), spec.target().withCodeSource(null));
+        HookTarget five = new HookTarget("a.B", "m", Collections.singletonList("()V"), "system", "app\\.jar");
+        assertEquals("{\"class\":\"a.B\",\"method\":\"m\",\"descriptors\":[\"()V\"],\"loader\":\"system\","
+                + "\"codeSource\":\"app\\\\.jar\"}", Json.write(five.toJson()));
+        assertEquals(five, HookTarget.fromJson(five.toJson()));
+        refused(LIMIT.replace("\"method\":\"returnLimit\"", "\"method\":\"returnLimit\",\"codeSources\":\"x\""),
+                "unknown field \"codeSources\"");
+        refused(LIMIT.replace("\"method\":\"returnLimit\"", "\"method\":\"returnLimit\",\"codeSource\":1"),
+                "codeSource");
+    }
+
+    @Test
+    void aBadCodeSourceIsAViolationOfTargetCodeSource() {
+        HookSpec.Violation bad = qualified("lending-app(.jar").violation();
+        assertEquals("target.codeSource", bad.field());
+        assertTrue(bad.message().startsWith("not a regular expression: "), bad.message());
+        HookSpec.Violation tooLong = qualified(repeat('a', 201)).violation();
+        assertEquals("target.codeSource", tooLong.field());
+        assertEquals("codeSource longer than 200 characters", tooLong.message());
+        assertNull(qualified(repeat('a', 200)).violation());
+        assertNull(HookTarget.codeSourceViolation(null));
+        assertEquals("codeSource longer than 200 characters", HookTarget.codeSourceViolation(repeat('x', 201)));
+    }
+
+    private static HookSpec qualified(String codeSource) {
+        return new HookSpec("a", HookMode.OBSERVE, new HookTarget("a.B", "m", Collections.singletonList("()V"), null,
+                codeSource), null, null, null, false, null);
+    }
+
+    @Test
+    void aProbeAnswerCarriesTheCodeSourcesAndIsReadLeniently() {
+        HookProbe ok = new HookProbe("limit.applied", CapabilityState.OK, null, "advice", 2,
+                Arrays.asList("system", "1a2b3c"), Arrays.asList("skillroy-sample-lending-app.jar", "test-classes"),
+                null, 9810L, 12, HookProbe.SpyVisibility.VISIBLE);
+        assertEquals("{\"id\":\"limit.applied\",\"state\":\"OK\",\"strategy\":\"advice\",\"loaders\":2,"
+                + "\"loaderIds\":[\"system\",\"1a2b3c\"],\"codeSources\":[\"skillroy-sample-lending-app.jar\","
+                + "\"test-classes\"],\"sizeBytes\":9810,\"methods\":12,\"spyVisibility\":\"VISIBLE\"}",
+                Json.write(ok.toJson()));
+        HookProbe back = HookProbe.fromJson(Json.parseObject(Json.write(ok.toJson())));
+        assertEquals(ok, back);
+        assertEquals(Arrays.asList("skillroy-sample-lending-app.jar", "test-classes"), back.codeSources());
+        HookProbe ten = new HookProbe("x", CapabilityState.UNAVAILABLE, "class not loaded", null, null, null, null,
+                null, null, null);
+        assertNull(ten.codeSources(), "the ten-argument form carries none");
+        assertFalse(ten.toJson().containsKey("codeSources"), "written only when set");
+        assertNull(HookProbe.fromJson(ten.toJson()).codeSources(), "an answer without the key reads as none");
+        java.util.List<String> many = new java.util.ArrayList<String>();
+        for (int i = 0; i < 20; i++) {
+            many.add("lib" + i + ".jar");
+        }
+        HookProbe capped = new HookProbe("x", CapabilityState.OK, null, "advice", 20, null, many, null, null, null,
+                null);
+        assertEquals(HookProbe.MAX_CODE_SOURCES, capped.codeSources().size(), "at most 16 names");
+        assertEquals("lib15.jar", capped.codeSources().get(15));
+    }
+
     @Test
     void aStatusRoundTripsWithItsCapabilityAlwaysPresent() {
         HookStatus installed = new HookStatus("limit.applied", CapabilityState.OK, null, "advice",
