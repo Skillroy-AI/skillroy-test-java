@@ -79,16 +79,19 @@ class MaskedSurfaceHitTestDisplayTest extends DisplayTestBase {
             Map<String, Object> point = map("x", 60L, "y", 40L);
             Map<String, Object> space = map("window", ref(frame[0]));
             Map<String, Object> open = call("swing.hitTest", "point", point, "space", space);
-            assertEquals("WEB", open.get("surface"), String.valueOf(open));
+            assertEquals(ref(holder[0]), open.get("target"), "the point's target is the listening holder: " + open);
             assertEquals(Boolean.FALSE, open.get("masked"), "the control: an unmasked surface");
-            assertEquals(Boolean.FALSE, call("swing.hitTest", "target", ref(view[0])).get("masked"));
+            Map<String, Object> openView = call("swing.hitTest", "target", ref(view[0]));
+            assertEquals("WEB", openView.get("surface"), String.valueOf(openView));
+            assertEquals(Boolean.FALSE, openView.get("masked"), "the control");
 
             masked[0] = true;
             Map<String, Object> hit = call("swing.hitTest", "point", point, "space", space);
-            assertEquals(Boolean.TRUE, hit.get("masked"), "a point on a masked surface: " + hit);
-            assertEquals("WEB", hit.get("surface"));
-            assertEquals(Boolean.TRUE, call("swing.hitTest", "target", ref(view[0])).get("masked"),
-                    "the target form names the masked view itself");
+            assertEquals(Boolean.TRUE, hit.get("masked"), "a point on a masked surface whose target is a listening "
+                    + "ancestor: " + hit);
+            Map<String, Object> onView = call("swing.hitTest", "target", ref(view[0]));
+            assertEquals("WEB", onView.get("surface"), String.valueOf(onView));
+            assertEquals(Boolean.TRUE, onView.get("masked"), "the target form names the masked view itself");
             assertEquals(Boolean.TRUE, call("swing.hitTest", "target", ref(holder[0])).get("masked"),
                     "the target form names its listening ancestor, whose centre shows the masked view");
         } finally {
