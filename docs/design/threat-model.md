@@ -13,7 +13,9 @@ the §2 notes on A4 and A13, the §5 paragraph, the §6 rows and the §7 and §8
 "(Phase 8)" row and line as built (a package's tag where it marked one), and **completed 2026-10-20 by the code
 review's fix wave and the delta review's fixes** (findings S149-S180, `phase8-contracts.md` §15, marked "Phase 8
 security fix" or "fix wave" below; the delta review was run and fixed and signed off by the owner on 2026-10-20, B40,
-with S180 accepted). It says who the adversaries are, where the
+with S180 accepted). **Two findings were opened on 2026-10-22, after that sign-off, and are open and not yet rated**
+(S181 and S182, `phase8-contracts.md` §15; the owner sets their severity): §5 says where the model rule does not hold
+yet. It says who the adversaries are, where the
 trust boundaries run, what the framework trusts on purpose, and what is out of scope, so that a reviewer's "who can
 reach it" and a release reader's "what does this protect me from" rest on one text. Where this document and a
 contract disagree, the contract has the detail and this document the judgement; change this one first when the
@@ -208,7 +210,17 @@ model-facing key rule, uncut, applied again to every value `[json]` parses), so 
 `[json]` or a `size` never reads a secret: a filter over a field holding `<redacted>` compares nothing, a value holding
 the marker is a secret, and the answer, its reason and its time are the same for a right guess at a credential and a
 wrong one; a path's or a size's reason names a value's kind and never the value, so a short numeric credential is not
-written bare. A model never sets a step modifier (`accept`, `minRung`): sessions refuse raw calls that carry
+written bare. *(Phase 8, opened after the sign-off, 2026-10-22, not yet rated: S181, S182.)* Two routes do not meet
+that rule yet. A caller's own arguments come back to it through the value mask: the session journal (served to an MCP
+client as `run/<id>/journal.jsonl`) and a failed call's reply detail record them masked by value, so a right guess at a
+value the controller holds reads back as `<redacted>` and a wrong one as sent, and one argument holding several
+candidates tests them all at once (S181, gap 156; shown on 2026-10-22 by a throwaway probe that sent model-origin calls
+straight to an executor session over a fake agent, the MCP server's and the session service's paths read and not run).
+And a Swing locator's `by.text` or `by.name` (exact, `contains` or `regex`), and a web selection's `by.url` or
+`by.title` regex on a browser that is not masked, compare the caller's text or pattern with the raw text, while every
+read shows a secret pair in that text masked, so a caller can confirm a guess at a pair's value and, with `contains` or
+a regex, recover it one character at a time, on a read-only server too (S182, gap 157; by reading, not run). A model
+never sets a step modifier (`accept`, `minRung`): sessions refuse raw calls that carry
 one (P8 §7.3); and `on_prompt.unexpected` takes `fail` or `pack` only, so a model-written scenario can no longer select
 the pack's policy under a misleading name (P8 §9.2). A warning's text and a composite's `answered` list reach a model
 masked, with a parameter's name and never its value (P8 §7.1, §7.5).

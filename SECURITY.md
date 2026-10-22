@@ -216,6 +216,30 @@ Read these before you run the agent on a shared host.
   argument flows into a `match`, compares an event's raw payload on the agent by equality: where a module publishes a short
   secret unmasked, a client can confirm guesses at it, one call per guess. Mask such a payload with a `MaskPolicy` or
   publish it under a secret-looking key. The fix, rewriting such a match where a session sends the call, is gap 151.
+- **A caller's own arguments come back to it through the value mask** (S181; open, found 2026-10-22, not yet rated: the
+  owner sets its severity; gap 156). The session journal, which an MCP client reads as `run/<id>/journal.jsonl`, and a
+  failed call's reply detail record the caller's arguments masked by value. Any MCP client, or a model, can therefore
+  test whether a value is a secret the controller holds (a `credentials.yaml` value, a joined credential field): a right
+  guess reads back as `<redacted>` and a wrong one as sent, and one argument holding several candidates tests them all at
+  once. It needs nothing from the target and works on a read-only server. It confirms whole guesses only, but as many in
+  one argument as fit, so until it is fixed keep every secret in `credentials.yaml` long and random enough that no list
+  of guesses covers it (letters, digits and symbols, not a numeric code); `masking.minLengthInText` does not limit the
+  echo. Treat a short code the target requires, such as a four-digit staff code, as recoverable in a few calls by any
+  client or model of a session whose mask holds it (the batch size by reading). Shown by a throwaway probe that sent
+  model-origin calls straight to an executor session over a fake agent; the MCP server's and the session service's paths
+  to a client or a model were read, not run.
+- **A locator or a selection regex can test a secret pair in the target's text** (S182; open, found 2026-10-22, not yet
+  rated: the owner sets its severity; gap 157). A Swing locator's `by.text` or `by.name` (exact, `contains` or `regex`,
+  as `swing.find` and every verb with a locator take it) is compared with the component's raw text, and a web selection's
+  `by.url` or `by.title` regex with an unmasked browser's raw URL and title (by reading, a web read's CSS `selector`, as
+  `web.dom.text` takes it, tests the raw DOM the same way, for example an attribute selector on an `aria-label`), while
+  every read shows a secret pair in that text (`password=…`, a secret-named key in JSON text) masked. A caller can
+  confirm a guess at the pair's value and, with `contains` or a regex, recover it one character at a time (each call
+  extends a known prefix), on a read-only server too; unlike S181, a long random value does not help. Until it is fixed,
+  name a component that can show such text with a `CaptureMask`, which withholds its text, and a name that is only its
+  text, from the built-in `text` and `name` strategies. A name set apart from the text (an accessible name, `setName`, a
+  `NameEnricher`'s) is still matched by `by.name`, so keep such text out of names, and a module's own `LocatorResolver`
+  sees the raw component. Also mask a browser whose page, URL or title can carry one. Found by reading the code; not run.
 - **What Phase 8 changes by default** (P8 §11's behaviour changes, where the full list is). Two protections apply to
   every target and pack because that is their point: event payloads are masked at publish, and a browser without a view
   is masked while any mask is registered (above). Also: every `CALL`/`EXEC` is refused by the statement guard; the CDP
@@ -279,4 +303,7 @@ S149-S180: 32 confirmed, 3 high, 8 medium, 21 low). Every finding of medium or a
 S157 (these Phase 8 sentences were missing) by the documentation pass; the other, S180, is accepted by the owner with
 the release note above. The owner signed the delta review off on 2026-10-20 (B40 in `docs/DECISIONS.md`), so Phase 8's
 boundary is reviewed, fixed and signed off; the limitations above are the build's own statement of what the veto, the
-masks and the new readers cannot do.
+masks and the new readers cannot do. Two findings were opened after that sign-off, on 2026-10-22, while gap 151's fix
+was being specified, outside a review lens as S180 was: S181 and S182, both open and not yet rated (above, and
+`docs/TODO.md`, "Phase 8 security delta review"). B40 does not cover them, and `docs/release-checklist.md` item 2 holds the next release until each is fixed or, if the
+owner rates it low, accepted with a release note.

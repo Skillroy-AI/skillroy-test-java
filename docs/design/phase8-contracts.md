@@ -20,7 +20,9 @@ an unmasked payload confirming guesses at a short secret) is accepted by the own
 shared key rule (`bdafc52`). The decisions of the build, the integration and step R are D643-D767 and those of the fix
 wave D768-D810 (§17); built on the then provisional B38 and B39, **the answers of §18 (B38) and all these decisions
 (B39) were confirmed by the owner on 2026-10-20, every row and every decision, no veto, and the delta review was signed
-off by the owner the same day (B40)** (`../DECISIONS.md`).
+off by the owner the same day (B40)** (`../DECISIONS.md`). Two more findings, S181 and S182, were opened on 2026-10-22,
+after that sign-off; they are open and not yet rated, B40 does not cover them, and their fixes are gaps 156 and 157
+(§15, §16.2).
 Written after the nine reader maps of 2026-10-19 (kept in the session
 notes, not in this repository; `map A §n` to `map I §n` below), which verified every claim of the second domain's wave
 1 against the code at `fcfb8dc` (every `.java` file of `main` equals the tag `v0.1.0`, the released base), and assembled
@@ -37,7 +39,8 @@ in section order, D624-D635 the editor's, D636-D642 the reviser's after the cont
 D643-D767 and the fix wave's D768-D810 (§17); amendments to the frozen Phase 1 contract are **A67 to A99** (§10), the
 next free number after P7's A61-A66 (none of A67 onwards was used by the Phase 7 build), and neither the build nor the
 fix wave needed another (A100 is the next free number); gaps continue from **126** (§16.2: 126-150 are opened here,
-151-155 by the build's and the fix wave's open items); the security delta review's findings are **S149-S180** (§15);
+151-155 by the build's and the fix wave's open items, 156 and 157 on 2026-10-22 for the fixes of S181 and S182); the
+security delta review's findings are **S149-S180** (§15), and S181 and S182 were opened after its sign-off (§15);
 the plan version becomes **7** (§8.2); the bindings file version stays **2**, the script library's version **2**, the
 fingerprint format **1**; the protocol stays **0.2** (§2.1, D624). The questions of §18 were answered by the orchestrator
 on 2026-10-19 and recorded as decision **B38** (`../DECISIONS.md`), confirmed by the owner on 2026-10-20; the build's,
@@ -154,6 +157,7 @@ specified):
 | Quantifiers `some`/`every` over list elements; the `events` root on a non-agent web path; projection in expectation paths; a `json:` matcher; an `expectNoEvent` verb | gaps 145-147 (D598, D603, D601, D607): `size`, `containsWhere` and `[json]` cover the stated needs; negation is a count | later, low |
 | Step 0b in `re-resolve` and `caps`; credentials for `caps --pack`; a TTL on a `SUITE` answer; named pack prompt policies (`promptPolicies()`) | gaps 148-150 and D615: `pack` is the explicit spelling of the default and an unknown name is already refused, so names can come later without a break | later, low |
 | (As built) a client's raw `sync.await` match on an unmasked payload; a masked opener's popups; the moment between the Robot route's release question and the release; a root pane off ENTER's walk; a browser masked while it is open | gaps 151-155, opened by the build's and the fix wave's open items (§16.2): the call boundary, `InputVetoes.next`, the static refusal (D771's veto form), a window walk (D769's) and a registration signal are the seams; S180 is gap 151's residual, accepted by the owner (B40, 2026-10-20) | later, low |
+| (Opened 2026-10-22, after the sign-off) a caller's own arguments read back through the value mask; a Swing locator's or an unmasked browser's selection text compared with raw text whose secret pair every read masks | gaps 156 and 157 (§16.2), the fixes of S181 and S182, open and not yet rated (§15): a record of a caller's input that does not depend on the mask's judgement, and a text locator judged against the client-facing view, are the seams | after the owner's rating |
 | A `0.3` protocol minor; a new error code; a new base event topic; a new core capability id | never in this phase (D624, D523, D594): every change is additive and the major is in every bindings fingerprint; the three safety-relevant parameters are acknowledged by an echo instead (§2.1) | – |
 | Windows, macOS and Wayland peers for routed AWT events; a Playwright line other than 1.63.0; JxBrowser's view-less browsers; `Statement.cancel()` on drivers other than HSQLDB; a `SecurityManager` target; a real application server's code-source URLs | specified where the maps and the JDK's sources reach; verified nowhere here (§13.3) | when a host exists |
 
@@ -4847,6 +4851,20 @@ and its fix left to gap 151 (later, low); no outside reader has read the record,
 (B26 Q12). The owner did not ask for an amendment number for S166's additive `SurfaceSource.Surface.masked` field
 (§5.2), so its security-fix mark stands without one and A100 stays the next free number.
 
+**Opened after the sign-off (2026-10-22), open and not yet rated** (the owner sets the severity; B40 does not cover
+them): two findings, found while gap 151's fix was being specified, outside a review lens as S180 was. **S181**, a
+caller's own arguments come back to it through the value mask: the session journal (served to an MCP client as
+`run/<id>/journal.jsonl`) and a failed call's reply detail record them masked by value, so any MCP client or model can
+test whether a value is a secret the controller holds, several candidates per argument, against the same-answer rule
+of §11 rule 9 and P5 §12.2; shown by a throwaway probe that sent model-origin calls straight to an executor session
+over a fake agent, the MCP server's and the session service's paths read, not run; its fix is gap 156. **S182**, a
+Swing locator's `by.text` or `by.name` (exact, `contains` or `regex`) and a web selection's `by.url` or `by.title` regex
+on a browser that is not masked compare a caller's text or pattern with the raw text, while every read shows a secret
+pair in that text masked, so a caller can confirm a guess at the pair's value and, with `contains` or a regex, recover
+it one character at a time (by reading, a web read's CSS `selector` tests the raw DOM the same way); found by reading,
+not run; its fix is gap 157. Release checklist item 2 applies to both. The record is in `../TODO.md` ("Phase 8 security
+delta review").
+
 The delta review's "not verified" list (§13.3) joins `threat-model.md` §8, `README.md` and `SECURITY.md` by the
 build's documentation package; the release checklist's item 6 repeats it. B39 holds the build's, the integration's,
 step R's and the fix wave's decisions, D643-D810, in P7's form (§17).
@@ -5073,6 +5091,7 @@ only its "(Phase 8, built …)" marks and the delta review's findings)
 | §3 | a module's result is trusted code's output; the executor's secret-echo check and composite validation are consistency controls at the model and evidence boundaries, not a trust boundary; warning text reaches a model masked (ES) | §3's "The policies a layer registers are reviewed code" bullet (not a §6 row: the judgement is about what is trusted) |
 | §2 actor A4 (`:40`) | note: the `events` root and `[json]` bring more target content under the controller's parsers; each read bounded (10 pages, 1 Mi per JSON string, depth 200, the regex budgets) (EX) | §2, A4's row |
 | §6 (trust boundaries) | pack capability evaluation is pack code on the controller at run start, reads only through the guarded channel, no model, reasons masked like every reason and a failure's reason the exception's class only; the suite cache is in-memory, per host, never written (EP) | §6's "the pack ↔ the base" row (merged, no row of its own) |
+| the status paragraph, §5 (2026-10-22, after the sign-off) | S181 and S182, open and not yet rated: a caller's own arguments read back through the value mask, and a Swing locator's or an unmasked browser's selection text compared with raw text whose secret pair every read masks (§15; gaps 156, 157) | the status paragraph and §5's Phase 8 paragraph |
 
 **`SECURITY.md`**
 
@@ -5081,6 +5100,7 @@ only its "(Phase 8, built …)" marks and the delta review's findings)
 | "Known limitations" | the eight limitation sentences of §11, (a) to (h), as built (the fix wave's additions to (a), (b), (c) and (f)), and (i), S180's release note: the veto's uncovered key bindings, a window veto not covering `web.*` input into a browser inside it (gap 126) and the failed-module case (EA); the quiescent overrun and the uncancellable read (ET); events masked by key and policy at publish (on attach, the module-install window by key only), the CDP path's own events not, the view-less browser masked while any mask is registered (EW); the Byteman later-loaded subtype and the add-only deny (EH); the secret-echo check's equality for short secrets, an undetectable composite, `taken` as application data (ES); the `events` root's window (EX); pack code on the controller with no host timeout (EP); the Playwright gate proved through a seam (EW) |
 | "Run outputs", "A page's pixels are masked as a whole" | events are masked by key and by the pack's policies; a browser without a view is masked while any mask is registered, released only by a `BrowserMask` (EW) |
 | "Reviews" | the delta review's record (§15, B40), written by the build's documentation pass (EE) |
+| "Known limitations", "Reviews" (2026-10-22, after the sign-off) | a bullet each for S181 and S182, open and not yet rated, with the advice that holds until their fixes (gaps 156, 157); the "Reviews" paragraph says B40 does not cover them (§15) |
 
 **`README.md`**
 
@@ -5178,6 +5198,14 @@ documentation pass of 2026-10-20; the tag names the report that opened the gap; 
 | 153 | The Robot route's release question is not atomic with the native release | a popup or a drop zone the application shows after the question (a submenu's open delay, a timer, a native drag's own window) receives the release (D771) | D771's veto form (a): a static refusal of a Robot `DRAG` while a veto is registered when the press target is a menu element, has a component popup menu or the button is `RIGHT` | if asked; low (FA) |
 | 154 | A `JRootPane` placed off the key target's walk and outside a `JInternalFrame` is not asked for ENTER | such a root pane registers its default button under the window, so ENTER presses it without the veto being asked (D769) | D769's veto form: walk the window for every `JRootPane` whose top ancestor is the window (a walk of the whole window per ENTER) | if asked; low (FA) |
 | 155 | A browser that becomes masked while it is open sends page data until it is judged again | the judgement is event-driven, at most once per 2 s (D809), so its events carry page text for up to about 2 s after its next event; the SPI registry has no registration signal | a registration signal in the agent's SPI registry on which the web module judges its flags again at once | later; low (FE) |
+
+**New, numbered 156 and 157** (2026-10-22, for the fixes of S181 and S182, the two findings opened after the sign-off,
+§15; both **open**):
+
+| # | Gap | Why it matters | Proposed shape | Phase |
+|---|---|---|---|---|
+| 156 | A caller's own arguments come back to it through the value mask: the session journal (served as `run/<id>/journal.jsonl`) and a failed call's reply detail record them masked by value (by reading also `skillroy_session_check`'s matcher, a note and a refused call's journal line) | any MCP client or model can test whether a value is a secret the controller holds, several candidates per argument, against the same-answer rule of §11 rule 9 (S181) | a record of a caller's own input that does not depend on the mask's judgement (the journal also feeds the export), or membership recorded as inherent to masking by value; either way it also covers a value the caller planted in the target and reads back masked, and, once gap 151's fix rewrites a guarded match, a wait on such a value that times out only when the mask knows the value | after the owner's rating; not yet rated (S181) |
+| 157 | A Swing locator's `by.text` or `by.name` (exact, `contains`, `regex`) and a web selection's `by.url` or `by.title` regex on a browser that is not masked (and, by reading, a web read's CSS `selector`) compare a caller's text or pattern with the raw text | every read shows a secret pair in that text masked, so a caller can confirm a guess at the pair's value and, with `contains` or a regex, recover it one character at a time, on a read-only server too (S182) | judge a caller's text locator or pattern against the text as the client-facing view shows it, or refuse it on a component or page whose text the view changes, whatever the locator holds | after the owner's rating; not yet rated (S182) |
 
 **Defects found in passing and fixed by this contract** (each in its section; none left open): the pointer's component
 form delivered to whatever lay at a point its component does not show, and `swing.hitTest`'s `deepest` descended
