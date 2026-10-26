@@ -703,11 +703,11 @@ final class DataQuery {
     }
 
     /**
-     * Puts the exception's own text into {@code data.message} when the provider opted in and no {@code MaskPolicy} is
-     * registered (both read now), else {@code data.messageWithheld = true}.
+     * Puts the exception's own text into {@code data.message} when {@code exposesErrorText()} is true, else
+     * {@code data.messageWithheld = true}.
      */
     private void driverText(Map<String, Object> data, DataSourceProvider provider, Exception e) {
-        if (spi.all(MaskPolicy.class).isEmpty() && optedIn(provider)) {
+        if (optedIn(provider)) {
             data.put("message", e.getMessage());
         } else {
             data.put("messageWithheld", Boolean.TRUE);

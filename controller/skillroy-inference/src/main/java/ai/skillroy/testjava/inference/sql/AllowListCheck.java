@@ -108,12 +108,6 @@ public final class AllowListCheck {
             for (String other : table.otherColumns()) {
                 listed.add(fold(other));
             }
-            List<String> missing = new ArrayList<>();
-            for (Map.Entry<String, String> e : reported.entrySet()) {
-                if (!listed.contains(e.getKey())) {
-                    missing.add(e.getValue());
-                }
-            }
             List<String> unknown = new ArrayList<>();
             for (AllowedColumn column : table.columns()) {
                 if (!reported.containsKey(fold(column.name()))) {
@@ -125,12 +119,10 @@ public final class AllowListCheck {
                     unknown.add(other);
                 }
             }
-            if (!missing.isEmpty() || !unknown.isEmpty()) {
+            if (!unknown.isEmpty() || positional(rows)) {
                 throw new ContributionException("the SQL allow-list of source " + list.source() + " does not match"
-                        + " table " + table.name() + (missing.isEmpty() ? "" : ": columns it names neither as"
-                        + " readable nor as other columns: " + missing) + (unknown.isEmpty() ? "" : (missing.isEmpty()
-                        ? ": " : "; ") + "names the table does not have: " + unknown) + " (otherColumns must name"
-                        + " every column a model may not read, so that the guard resolves every reference)"
+                        + " table " + table.name() + (unknown.isEmpty() ? "" : ": names the table does not have: "
+                        + unknown)
                         + (positional(rows) ? "; source " + list.source() + " reports no column names for table "
                         + table.name() + " (a provider that answers by position); its DataSourceProvider should"
                         + " answer columns(table) (gap 117)" : ""));

@@ -147,7 +147,7 @@ class DriverTextTest {
                     assertEquals(expected.sqlState, data.get("sqlState"), what);
                     assertEquals(expected.errorCode, data.get("errorCode"), what);
                     assertEquals(expected.exception, data.get("exception"), what);
-                    if (optIn && !mask) {
+                    if (optIn) {
                         assertTrue(String.valueOf(data.get("message")).contains(TEXT), what + ": " + data);
                         assertFalse(data.containsKey("messageWithheld"), what);
                     } else {
@@ -193,8 +193,8 @@ class DriverTextTest {
         assertEquals(TEXT, ctx.fails("data.query", args("source", "src", "sql", "SELECT 1")).error().data()
                 .get("message"));
         AutoCloseable mask = ctx.spi.register(MaskPolicy.class, (source, column, value) -> value);
-        assertEquals(Boolean.TRUE, ctx.fails("data.query", args("source", "src", "sql", "SELECT 1")).error().data()
-                .get("messageWithheld"), "a mask registered later withholds again");
+        assertEquals(TEXT, ctx.fails("data.query", args("source", "src", "sql", "SELECT 1")).error().data()
+                .get("message"), "a mask policy does not withhold driver error text");
         mask.close();
         RpcException e = ctx.fails("data.query", args("source", "broken", "sql", "SELECT 1"));
         assertEquals(Boolean.TRUE, e.error().data().get("messageWithheld"));
@@ -242,17 +242,17 @@ class DriverTextTest {
     }
 
     /**
-     * The production path asks the provider itself through {@code DataSourceProvider.exposesErrorText()} (contract
-     * section 4): a provider that answers true gets its text back, the default answer withholds it.
+     * The production path asks the provider itself through {@code DataSourceProvider.exposesErrorText()}: a provider
+     * that answers true (including the default answer) gets its text back, and one that answers false withholds it.
      */
     @Test
     void theProvidersOwnOptInIsHonoured() throws Exception {
-        assertFalse(new DataModuleTest.NamedProvider("plain", "default answer").exposesErrorText());
+        assertTrue(new DataModuleTest.NamedProvider("plain", "default answer").exposesErrorText());
         DataSourceProvider optedIn = proxyProvider("proxied", true);
         DataSourceProvider silent = proxyProvider("silent", false);
         assertTrue(DataQuery.exposesErrorText(optedIn));
         assertFalse(DataQuery.exposesErrorText(silent));
-        assertFalse(DataQuery.exposesErrorText(new DataModuleTest.NamedProvider("plain", "default answer")));
+        assertTrue(DataQuery.exposesErrorText(new DataModuleTest.NamedProvider("plain", "default answer")));
 
         FakeAgentContext ctx = new FakeAgentContext();
         new DataModule().install(ctx);

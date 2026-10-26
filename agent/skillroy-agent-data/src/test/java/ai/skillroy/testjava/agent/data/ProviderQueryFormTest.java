@@ -500,8 +500,8 @@ class ProviderQueryFormTest {
         assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code());
         assertEquals("42S02", e.error().data().get("sqlState"));
         assertEquals(942L, e.error().data().get("errorCode"));
-        // S22: the provider did not opt in, so its text is withheld (DriverTextTest covers the opt-in)
-        assertEquals(Boolean.TRUE, e.error().data().get("messageWithheld"));
+        assertEquals("table missing", e.error().data().get("message"));
+        assertFalse(e.error().data().containsKey("messageWithheld"));
         assertEquals("query on data source 'sql' failed: sqlState=42S02, errorCode=942 (java.sql.SQLException)",
                 e.error().message());
 
@@ -513,7 +513,8 @@ class ProviderQueryFormTest {
         e = ctx.fails("data.query", args("source", "bug", "sql", "SELECT 1"));
         assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code());
         assertEquals(IllegalStateException.class.getName(), e.error().data().get("exception"));
-        assertEquals(Boolean.TRUE, e.error().data().get("messageWithheld"));
+        assertEquals("bad", e.error().data().get("message"));
+        assertFalse(e.error().data().containsKey("messageWithheld"));
         assertNull(e.error().data().get("sqlState"), "no SQLException in the cause chain");
         assertNull(e.error().data().get("errorCode"));
         assertEquals("query on data source 'bug' failed in query() (java.lang.IllegalStateException)",

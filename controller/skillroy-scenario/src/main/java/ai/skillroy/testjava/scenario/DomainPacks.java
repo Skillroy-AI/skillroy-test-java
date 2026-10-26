@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.scenario.pack.BaseDomainPack;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.DomainPackOverlay;
 
@@ -103,24 +104,31 @@ public final class DomainPacks {
     }
 
     /**
-     * The pack with id {@code packId}, or the only pack when {@code packId} is null.
+     * The pack with id {@code packId}, the only pack when {@code packId} is null, or {@link BaseDomainPack#INSTANCE}
+     * when {@code packId} is {@code "base"} or when {@code packId} is null and {@code available} is empty.
      *
-     * @throws ScenarioException if no pack matches, {@code packId} is null and there is not exactly one pack, or the
-     *     selected pack's id is reserved ({@link #reservedId})
+     * @throws ScenarioException if no pack matches, {@code packId} is null and more than one pack is on the class
+     *     path, or the selected pack's id is reserved ({@link #reservedId})
      */
     public static DomainPack select(String packId, List<DomainPack> available) throws ScenarioException {
         List<String> ids = available.stream().map(DomainPack::id).toList();
         if (packId == null) {
+            if (available.isEmpty()) {
+                return BaseDomainPack.INSTANCE;
+            }
             if (available.size() == 1) {
                 return checked(available.get(0));
             }
-            throw new ScenarioException("the scenario names no 'pack:' and " + (available.isEmpty()
-                    ? "no domain pack is on the class path" : "several packs are on the class path: " + ids));
+            throw new ScenarioException("the scenario names no 'pack:' and several packs are on the class path: "
+                    + ids);
         }
         for (DomainPack pack : available) {
             if (packId.equals(pack.id())) {
                 return checked(pack);
             }
+        }
+        if (BaseDomainPack.ID.equals(packId)) {
+            return BaseDomainPack.INSTANCE;
         }
         throw new ScenarioException("domain pack '" + packId + "' is not on the class path; packs found: " + ids);
     }

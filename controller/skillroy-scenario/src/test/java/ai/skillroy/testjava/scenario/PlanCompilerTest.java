@@ -354,9 +354,9 @@ class PlanCompilerTest {
         assertEquals(List.of("toy"), DomainPacks.discover(getClass().getClassLoader()).stream()
                 .map(p -> p.id()).toList());
         assertEquals("toy", DomainPacks.select(null, List.of(pack)).id());
+        assertEquals("base", DomainPacks.select(null, List.of()).id());
+        assertEquals("base", DomainPacks.select("base", List.of(pack)).id());
         assertTrue(assertThrows(ScenarioException.class, () -> DomainPacks.select("lending", List.of(pack)))
                 .getMessage().contains("packs found: [toy]"));
-        assertTrue(assertThrows(ScenarioException.class, () -> DomainPacks.select(null, List.of()))
-                .getMessage().contains("no domain pack"));
     }
 }

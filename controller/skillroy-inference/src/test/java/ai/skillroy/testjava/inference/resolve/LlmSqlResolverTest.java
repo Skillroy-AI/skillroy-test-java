@@ -131,17 +131,26 @@ class LlmSqlResolverTest {
     }
 
     /**
-     * D100: the bind checks its allow-list against the source before the catalogue is built: a list that leaves a
-     * column of a table unnamed (here the BS6 list without {@code staff.pin_hash} as another column, which the guard's
-     * rule 4 needs to resolve a correlated name) ends the slot before any model call, naming the column, never a value.
+     * D100: the bind checks its allow-list against the source before the catalogue is built: a list that names a
+     * column the table does not have ends the slot before any model call, naming the column, never a value.
      */
     @Test
     void anAllowListThatDoesNotMatchTheSchemaEndsTheSlotBeforeAnyModelCall() {
         ScriptedGateway gateway = answering(goodProposal());
-        LlmSqlResolver<ItemByCategory, ItemRef> partial = resolver("ItemByCategory", ItemByCategory.class, null,
-                state(gateway, "0.50", LendingFixture.allowList(SqlDialect.HSQLDB)));
-        IllegalStateException e = assertThrows(IllegalStateException.class, () -> partial.candidates(POWER, ctx));
-        assertTrue(e.getMessage().contains("does not match table staff") && e.getMessage().contains("[PIN_HASH]"),
+        SqlAllowList.Builder b = SqlAllowList.builder("lending", SqlDialect.HSQLDB);
+        for (SqlAllowList.AllowedTable t : LendingFixture.withOtherColumns(SqlDialect.HSQLDB).tables()) {
+            if (t.name().equals("staff")) {
+                List<SqlAllowList.AllowedColumn> cols = new ArrayList<>(t.columns());
+                cols.add(SqlAllowList.AllowedColumn.of("nickname", "VARCHAR"));
+                b.table(new SqlAllowList.AllowedTable("staff", cols, t.key(), null, t.otherColumns()));
+            } else {
+                b.table(t);
+            }
+        }
+        LlmSqlResolver<ItemByCategory, ItemRef> mismatched = resolver("ItemByCategory", ItemByCategory.class, null,
+                state(gateway, "0.50", b.build()));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> mismatched.candidates(POWER, ctx));
+        assertTrue(e.getMessage().contains("does not match table staff") && e.getMessage().contains("[nickname]"),
                 e.getMessage());
         assertTrue(gateway.requests().isEmpty(), "no model call");
         assertTrue(ledger.isEmpty());
@@ -343,11 +352,9 @@ class LlmSqlResolverTest {
                 List.of(param("category", "POWER", "STRING")), 0.9, 1, 5))).candidates(POWER, ctx).isEmpty());
         assertTrue(ctx.allRejected().contains("proposal: SHAPE: the rows lack the column deposit"),
                 ctx.allRejected());
-        assertTrue(items(answering(proposal("SELECT i.code, i.title, i.deposit, i.barcode FROM item i WHERE"
-                + " i.category = ?", List.of(param("category", "POWER", "STRING")), 0.9, 1, 5))).candidates(POWER,
-                ctx).isEmpty());
-        assertTrue(ctx.allRejected().contains("SHAPE: the rows have columns [BARCODE] that ItemRef does not"),
-                ctx.allRejected());
+        assertEquals(3, items(answering(proposal("SELECT i.code, i.title, i.deposit, i.barcode FROM item i WHERE"
+                + " i.category = ? ORDER BY i.deposit", List.of(param("category", "POWER", "STRING")), 0.9, 1, 5)))
+                .candidates(POWER, ctx).size(), "extra selected columns are ignored during record decoding");
         assertTrue(resolver("StaffPlain", StaffPlain.class, null, state(answering(proposal("SELECT s.code, s.code AS"
                 + " roles FROM staff s", List.of(), 0.9, 1, 9)), "0.50")).candidates(new StaffPlain("DESK"), ctx)
                 .isEmpty());

@@ -125,13 +125,12 @@ public interface DataSourceProvider {
     }
 
     /**
-     * True when {@code data.query} may return this source's driver error text as {@code data.message} (finding
-     * S22). The default, false, withholds it: a driver's message can echo parameter or cell values, including values
-     * a {@code MaskPolicy} masks, and a mask cannot scrub free text. Even when this answers true the text is withheld
-     * while any {@code MaskPolicy} is registered. The text is never logged either way. Asked on agent worker threads
-     * for each failure; must not block.
+     * True when {@code data.query} may return this source's driver error text as {@code data.message}. The default,
+     * {@code true}, exposes SQL syntax and schema errors during authoring and debugging; override to return
+     * {@code false} if a driver echoes sensitive values in its exception messages that should be withheld from the
+     * controller. The text is never logged either way. Asked on agent worker threads for each failure; must not block.
      */
     default boolean exposesErrorText() {
-        return false;
+        return true;
     }
 }

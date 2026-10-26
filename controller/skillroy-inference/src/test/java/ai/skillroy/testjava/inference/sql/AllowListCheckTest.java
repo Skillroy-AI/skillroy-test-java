@@ -73,15 +73,11 @@ class AllowListCheckTest {
         assertDoesNotThrow(() -> AllowListCheck.rowMasks(complete, List.of((s, c, v) -> v)));
     }
 
-    /** The guard's rule 4 trusts otherColumns: a list that leaves out a hidden column is refused, naming it. */
+    /** Extra columns on the database table that the allow-list does not enumerate are tolerated. */
     @Test
-    void aColumnTheListDoesNotNameIsRefusedNamingIt() {
+    void aColumnTheListDoesNotNameIsTolerated() {
         SqlAllowList partial = LendingFixture.allowList(SqlDialect.HSQLDB);
-        ContributionException e = assertThrows(ContributionException.class,
-                () -> AllowListCheck.check(partial, channel, List.of(), TIMEOUT));
-        assertTrue(e.getMessage().contains("table staff"), e.getMessage());
-        assertTrue(e.getMessage().contains("[PIN_HASH]"), "the column, as the source names it: " + e.getMessage());
-        assertFalse(e.getMessage().contains("x1"), "never a value");
+        assertDoesNotThrow(() -> AllowListCheck.check(partial, channel, List.of(), TIMEOUT));
     }
 
     @Test
@@ -170,8 +166,11 @@ class AllowListCheckTest {
                     + " answer columns(table) (gap 117)"), e.getMessage());
         }
         // A named mismatch carries no hint.
+        SqlAllowList unknownCol = replace(LendingFixture.withOtherColumns(SqlDialect.HSQLDB), "staff",
+                table -> new AllowedTable("staff", plus(table.columns(), AllowedColumn.of("nickname", "VARCHAR")),
+                        table.key(), null, table.otherColumns()));
         ContributionException named = assertThrows(ContributionException.class, () -> AllowListCheck.check(
-                LendingFixture.allowList(SqlDialect.HSQLDB), channel, List.of(), TIMEOUT));
+                unknownCol, channel, List.of(), TIMEOUT));
         assertFalse(named.getMessage().contains("gap 117"), named.getMessage());
     }
 

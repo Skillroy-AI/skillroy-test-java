@@ -880,18 +880,18 @@ class ClaudeGatewayTest {
     }
 
     /**
-     * Phase 6 security fix S52: a configured model id the price table does not know is refused when the gateway opens
-     * ({@code INVALID_REQUEST}, naming the id and {@code prices:}); a dated snapshot id of a known model passes.
+     * A configured model id outside the explicit price table opens cleanly and uses {@link PriceTable#effective}'s
+     * fallback pricing ({@code claude-opus-5-5}); a dated snapshot id of a known model also passes.
      */
     @Test
-    void aConfiguredModelOutsideThePriceTableIsRefused() throws Exception {
+    void aConfiguredModelOutsideThePriceTableUsesFallbackPricing() throws Exception {
         Map<String, String> env = Map.of(ClaudeGateway.KEY_VARIABLE, KEY, ClaudeGateway.BASE_URL_VARIABLE, fake.url());
         InferenceSettings unknown = new InferenceSettings("claude", null, false, null, Map.of(
                 InferenceSettings.MODEL_SONNET, "claude-example-9"), null, null, null, null, false, false, null,
                 false, null);
-        InferenceException e = assertThrows(InferenceException.class, () -> ClaudeGateway.open(unknown, env::get));
-        assertEquals(Kind.INVALID_REQUEST, e.kind());
-        assertTrue(e.getMessage().contains("claude-example-9") && e.getMessage().contains("prices:"), e.getMessage());
+        try (ClaudeGateway g = ClaudeGateway.open(unknown, env::get)) {
+            assertNotNull(g);
+        }
         InferenceSettings dated = new InferenceSettings("claude", null, false, null, Map.of(
                 InferenceSettings.MODEL_HAIKU, "claude-haiku-4-5-20251001"), null, null, null, null, false, false,
                 null, false, null);

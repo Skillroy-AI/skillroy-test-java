@@ -714,20 +714,6 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
                     return rejected(ctx, "SHAPE: the rows lack the column " + components[i].getName());
                 }
             }
-            if (rows.columns().size() != components.length) {
-                List<String> extra = new ArrayList<>();
-                for (Rows.Column column : rows.columns()) {
-                    boolean known = false;
-                    for (RecordComponent c : components) {
-                        known |= c.getName().equalsIgnoreCase(column.name());
-                    }
-                    if (!known) {
-                        extra.add(column.name());
-                    }
-                }
-                return rejected(ctx, "SHAPE: the rows have columns " + extra + " that " + raw.getSimpleName()
-                        + " does not");
-            }
             for (int r = 0; r < rows.rowCount() && out.size() < ctx.maxCandidates(); r++) {
                 Map<String, Object> json = new LinkedHashMap<>();
                 for (int i = 0; i < components.length; i++) {

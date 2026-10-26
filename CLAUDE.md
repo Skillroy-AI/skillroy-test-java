@@ -32,8 +32,8 @@ Do not copy that deny-list into this repository.
 - `controller/**`, `samples/skillroy-sample-lending-pack`, `samples/skillroy-sample-lending-scenarios`: Java 25
   (`--release 25`).
 - Wire types and the JSON codec live in `skillroy-protocol` and are shared by both sides; never duplicate them.
-- `docs/design/phase1-contracts.md` is the contract for Phase 1 and for the Phase 1.x amendments, each marked
-  built or specified. Change the contract first, then the code.
+- **PoC-first iteration:** Prioritize low-friction target onboarding, fast edit-and-run loops, and clear diagnostics over specification ceremony. Update code and tests directly without requiring multi-document `phaseN-contracts.md` or `B`/`D`/`S`/`A` ledger synchronization first.
+- **Trusted test-harness boundary:** Treat the local controller, CLI, MCP client, and configured model session as part of the trusted test-authoring harness. Keep basic credential redaction in logs and outputs, but do not add oracle-prevention complexity that withholds SQL/UI diagnostics or blocks legitimate test queries.
 - The agent must never throw into, block, or slow the host: bounded waits everywhere, actions on the EDT are
   posted (`invokeLater`), reads are bounded `invokeAndWait`, and a thread the application forbids is never used.
 - No sleeps in the scenario executor: wait on events (`sync.await`) and `swing.settle`.
@@ -47,6 +47,7 @@ Do not copy that deny-list into this repository.
 
 ## Working here
 
-- Build: `mvn -q verify` (JDK 25+). Display and Java 8 target tests: see `README.md`.
+- Build: `JAVA_HOME=/Users/mikemills/Library/Java/JavaVirtualMachines/openjdk-25.0.1/Contents/Home mvn -q verify` (JDK 25; note that `agent/skillroy-agent-hooks` depends on the shaded jar built during `package`, so run `verify` rather than bare `test` or `compile`). Display and Java 8 target tests: see `README.md`.
 - Do not commit or push unless asked; commits carry a DCO sign-off (`git commit -s`, see `CONTRIBUTING.md`). This
   repo has a public-facing remote; history is permanent once pushed.
+

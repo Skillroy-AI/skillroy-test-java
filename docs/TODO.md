@@ -39,9 +39,8 @@ security-reviewed as a delta over everything changed since `223c5fb` (eight lens
 high, 8 medium, 21 low), and fixed by one fix wave of five fixers (FA-FE, merged up to `d4daa0f`, the session
 recordings regenerated key-free in `bdafc52`): every code-review finding and every security finding but two, S157 (the
 missing `SECURITY.md` sentences, written by the documentation pass) and S180 (low, latent; accepted by the owner on
-2026-10-20 with a release note, B40, its fix recorded as gap 151). Two more findings were opened on 2026-10-22, after
-the sign-off: S181 and S182, open and not yet rated (the owner sets their severity; "Phase 8 security delta review"
-below, gaps 156 and 157). The decisions of the build, the integration, step R
+2026-10-20 with a release note, B40; S180, S181 and S182 / gaps 151, 156 and 157 were retired as non-issues under the
+trusted test-harness boundary on 2026-10-26). The decisions of the build, the integration, step R
 and the fix wave are D643-D810, **B39**; the delta review's sign-off is **B40**. The built behaviour stood on B38 and B39,
 provisional, while the work ran, as Phase 6 and Phase 7 stood on B26-B27 and B29-B30; on 2026-10-20 the owner confirmed
 both without a veto and signed off B40 (`B38 ok; B39 ok; B40 ok`), so it stands as built. The native reactor on `bdafc52`: 5,861

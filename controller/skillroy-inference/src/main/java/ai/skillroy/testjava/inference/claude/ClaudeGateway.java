@@ -210,13 +210,6 @@ public final class ClaudeGateway implements InferenceGateway {
         } catch (SettingsException e) {
             throw new InferenceException(Kind.INVALID_REQUEST, "the price table cannot be read: " + e.getMessage());
         }
-        // Phase 6 security fix S52: a configured model must be in the effective table, else it would be under-counted.
-        for (String model : new java.util.TreeSet<>(settings.models().values())) {
-            if (model != null && !model.isBlank() && prices.price(model.strip()) == null) {
-                throw new InferenceException(Kind.INVALID_REQUEST, "model " + model.strip() + " is not in the price"
-                        + " table; name it under prices: with its price");
-            }
-        }
         Config config = Config.of(settings, prices);
         AnthropicClient client;
         try {

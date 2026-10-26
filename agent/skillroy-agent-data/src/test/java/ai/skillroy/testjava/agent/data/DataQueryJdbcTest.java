@@ -354,12 +354,11 @@ class DataQueryJdbcTest {
         assertEquals("42501", data.get("sqlState"));
         assertEquals(-5501L, data.get("errorCode"));
         assertEquals("db", data.get("source"));
-        // S22: the driver's text is withheld unless the provider opts in (DriverTextTest covers the opt-in)
-        assertEquals(Boolean.TRUE, data.get("messageWithheld"), data.toString());
-        assertFalse(data.containsKey("message"), data.toString());
+        assertTrue(String.valueOf(data.get("message")).contains("NOSUCH"), data.toString());
+        assertFalse(data.containsKey("messageWithheld"), data.toString());
         assertEquals("query on data source 'db' failed: sqlState=42501, errorCode=-5501 (" + data.get("exception")
                 + ")", e.error().message());
-        assertFalse(Json.write(e.error().toJson()).contains("NOSUCH"), Json.write(e.error().toJson()));
+        assertFalse(e.error().message().contains("NOSUCH"), e.error().message());
         assertFalse(ctx.log.all().contains("NOSUCH"), ctx.log.all());
         assertTrue(provider.spy.allClosed(), provider.spy.toString());
 
@@ -421,7 +420,7 @@ class DataQueryJdbcTest {
         assertEquals("08001", e.error().data().get("sqlState"));
         assertEquals(17L, e.error().data().get("errorCode"));
         assertEquals(SQLException.class.getName(), e.error().data().get("exception"));
-        assertEquals(Boolean.TRUE, e.error().data().get("messageWithheld"), "S22: withheld without the opt-in");
+        assertEquals("connection refused", e.error().data().get("message"));
         assertEquals("query on data source 'down' failed: sqlState=08001, errorCode=17 (java.sql.SQLException)",
                 e.error().message());
 
@@ -434,7 +433,7 @@ class DataQueryJdbcTest {
         e = ctx.fails("data.query", args("source", "bug", "sql", "SELECT 1"));
         assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code());
         assertEquals(IllegalStateException.class.getName(), e.error().data().get("exception"));
-        assertEquals(Boolean.TRUE, e.error().data().get("messageWithheld"), "S22: withheld without the opt-in");
+        assertEquals("pool closed", e.error().data().get("message"));
         assertEquals("query on data source 'bug' failed in open() (java.lang.IllegalStateException)",
                 e.error().message());
         assertFalse(ctx.log.all().contains("pool closed"), ctx.log.all());
