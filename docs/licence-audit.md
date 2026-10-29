@@ -1,672 +1,258 @@
 # Dependency licence audit
 
-Audit date: 2026-10-02, updated 2026-10-03 for Phase 2, 2026-10-06 for the holder's name and the publication
-metadata of the root POM, later on 2026-10-06 for the test image's Chromium run-time libraries (spike BS8, section 7)
-and the artifacts spike BS8 used (section 8), and on 2026-10-07 for Phase 4 (sections 1 to 5, 8 and 9; later that
-day the agent home's seventh jar was inspected and the web host scenarios module's scopes read from its POM), and on
-2026-10-09 for Phase 6 (each package updated the sections for its dependencies; the documents pass brought section 1
-and the table of section 3 to the agent home as built, eleven jars), and on 2026-10-10 for Phase 7 (a new controller module,
-`skillroy-vision`, and no new dependency: the module counts of section 2, its row in the table of section 3, the CLI
-distribution's ninth project jar in section 4), and re-checked on 2026-10-11 for the release checklist's item 4: no
-dependency changed since Phase 7, and each of the reactor's 60 third-party runtime artifacts (`dependency:list`, runtime
-scope) is named here with its version; `DistributionNoticesIT` is green in that day's matrices. Re-checked on
-2026-10-12 for the 0.1.0 release commit: no dependency changed since 2026-10-11 (the POMs changed in their version
-only). Version audited: 0.1.0 (0.1.0-SNAPSHOT before the release), all 31 reactor modules since Phase 7 (28 in a
-build without the Maven profile `jcef`; the 3 web host samples are built only with `-Pjcef`); the spike projects under
-`spikes/` are not reactor modules and distribute nothing (their POMs keep 0.1.0-SNAPSHOT, the owner's choice of
-2026-10-12).
-Intended licence of the project: Apache-2.0.
+Intended licence of the project: **Apache-2.0**.
 
-This is an engineering inventory built from primary sources that are available locally: the `<licenses>` element of
-each artifact's POM (or of its parent POM) in the local Maven repository, licence files inside jars, and the
-licence files inside the CI image. It is not legal advice. Where no local primary source gave an SPDX identifier,
-the tables say "not determined locally".
+This is an engineering inventory built from primary sources available locally: the `<licenses>` element of each
+artifact's POM (or parent POM) in the local Maven repository, licence and notice files inside jars, and package
+copyright files inside the CI test container image. It is not legal advice. Where no local primary source gave an
+SPDX identifier, the tables say "not determined locally".
 
 ## 1. Summary
 
 **Result: everything the project distributes, bundles or depends on is compatible with distributing the project
 under Apache-2.0.** No dependency carries a copyleft licence that reaches a distributed artifact.
 
-- **The agent contains no third-party code, with one carve-out** (the sentence of the root `NOTICE`, Phase 6, B26 Q1,
-  confirmed by the owner on 2026-10-10): its optional hooks module carries a relocated copy of Byte Buddy (Apache-2.0) and the ASM it bundles
-  (BSD-3-Clause), whose notices travel inside that jar under `META-INF/third-party/`; the module is loaded only when
-  the agent option `optionalModules` names it. The agent home holds **eleven jars** (thirteen files with `LICENSE` and
-  `NOTICE`): the seven of Phase 4, `skillroy-agent-spy.jar` at its root and three in `optional/` (Phase 6, built
-  2026-10-09): `skillroy-agent-hooks.jar`, `skillroy-agent-byteman.jar` and `skillroy-agent-byteman-sys.jar`. Every
-  entry in ten of them is one of the project's own classes or resources, and their classes refer to nothing outside the
-  JDK and the project (section 3); the eleventh, the hooks jar, holds the relocated copy besides. The seventh jar,
-  `skillroy-agent-web` (Phase 4, inspected 2026-10-07), reaches JCEF and JxBrowser only by reflection, through class
-  names that its two descriptors hold as text; the two Byteman jars hold no Byteman class (Byteman is the user's jar,
-  at test and provided scope only, B8; section 5), the sys jar naming Byteman's types in method descriptors alone.
-  `DistributionContentIT` holds the home to its eleven jars, and `HomeConstantPoolIT` and `OptionalModulesIT` to what
-  they refer to and when they load.
-- **The CLI distribution is the only other place third-party code is redistributed** (besides the hooks jar's
-  relocated copy above): since Phase 5 (2026-10-08) 36 jars, 27 Apache-2.0, 8 MIT and 1 MIT-0 (until then five, all
-  Apache-2.0: four Jackson jars and SnakeYAML), and since Phase 6 (2026-10-09, TL) 47, the eleven OpenTelemetry Java
-  jars (Apache-2.0) added (section 4). The additions of Phase 5 are the Anthropic Java SDK with its tree, JSqlParser, the MCP Java SDK with its tree and the SLF4J
-  no-operation provider. The jackson-core jar embeds small MIT, BSL-1.0 and BSD-2-Clause components and carries their
-  notices inside the jar; the MIT and MIT-0 jars carry no licence file, so `THIRD-PARTY.txt` carries their copyright
-  lines and licence texts; OkHttp's public-suffix data file is MPL-2.0 and ships unmodified with its notice (section
-  4). `DistributionNoticesIT` holds the distribution to all of this.
-- **Playwright and JCEF are in no distribution.** Playwright is the compile dependency of the optional
-  `skillroy-cdp` alone (D49, `docs/design/phase4-contracts.md` section 14); no POM of the modules whose jars are in
-  the CLI distribution refers to it. JCEF belongs to the sample web host modules behind the Maven profile `jcef`,
-  with the natives at test scope. The POMs name Apache-2.0 for Playwright, jcefmaven and the small libraries around
-  them; java-cef and CEF are BSD; JOGL and GlueGen carry several licences that their licence files assign to
-  different components, not as alternatives; the Node.js binaries inside Playwright's driver bundle carry Node's own
-  notices (section 5).
-- **JUnit 5 is EPL-2.0 and is test-only.** It is in no distribution. One published module (`skillroy-junit`)
-  declares it as a compile dependency, which makes it a dependency of consumers, not something this project ships.
-- **HSQLDB (BSD-style licence) is used only by the sample lending desk and by tests.** It is not bundled in any jar
-  or distribution.
-- **All 11 pinned build plugins and Maven itself are Apache-2.0.** They are not redistributed.
-- **One dual-licensed artifact is in the build since Phase 5:** JSqlParser 5.4 (LGPL-2.1 or Apache-2.0); the
-  project takes Apache-2.0, `THIRD-PARTY.txt` says so (sections 4 and 8). JNA, the next one planned, would be taken
-  under Apache-2.0 as well.
-- The CI image is used for testing and is not redistributed (section 7).
+- **The agent contains no third-party code, with one carve-out:** its optional hooks module
+  (`optional/skillroy-agent-hooks.jar`, loaded only when the agent option `optionalModules` names it) carries a
+  relocated copy of Byte Buddy (Apache-2.0) and the ASM it bundles (BSD-3-Clause), whose notices travel inside
+  that jar under `META-INF/third-party/`. The agent home (`skillroy-agent-dist`) holds **eleven jars** (thirteen
+  files including `LICENSE` and `NOTICE`): `skillroy-agent-bootstrap.jar`, `skillroy-agent-spy.jar`, three jars in
+  `lib/`, three in `modules/`, and three in `optional/` (`skillroy-agent-hooks.jar`,
+  `skillroy-agent-byteman.jar` and `skillroy-agent-byteman-sys.jar`). Every entry in ten of those jars is project
+  code or resources; `skillroy-agent-web` reaches JCEF and JxBrowser purely by reflection, and the two Byteman
+  jars contain no Byteman classes (Byteman is supplied by the user at runtime via `byteman.jar` and is never
+  bundled). `DistributionContentIT`, `HomeConstantPoolIT` and `OptionalModulesIT` enforce these invariants on
+  every build.
+- **The CLI distribution is the only other place third-party code is redistributed:** `controller/skillroy-cli`
+  assembles 9 project jars and **47 third-party runtime jars** (38 Apache-2.0, 8 MIT, 1 MIT-0): the Jackson YAML
+  and datatype modules, SnakeYAML, the Anthropic Java SDK with its OkHttp/Kotlin/victools tree, JSqlParser, the
+  MCP Java SDK with its Reactor/JSON-Schema tree, `slf4j-nop`, and the OpenTelemetry Java SDK/OTLP-HTTP set
+  (§4). `THIRD-PARTY.txt` carries all required attributions and MIT/MIT-0 licence texts, and
+  `DistributionNoticesIT` verifies `lib/` against `THIRD-PARTY.txt` on every build.
+- **Playwright and JCEF are in no distribution.** Playwright is a compile dependency of the optional
+  `skillroy-cdp` module alone. JCEF belongs only to the sample web host modules behind the `jcef` Maven profile.
+- **JUnit 5 (EPL-2.0) is test-only** across the reactor, except in `skillroy-junit`, which declares
+  `junit-jupiter-api` at compile scope for consumers without redistributing it.
+- **HSQLDB (BSD-style licence) is used only by the sample lending desk and tests** and is not bundled in any
+  distribution.
+- **All 12 pinned Maven build plugins and Apache Maven itself are Apache-2.0** and are not redistributed (§6).
+- **Dual-licensed artifacts:** `com.github.jsqlparser:jsqlparser` 5.4 (LGPL-2.1 or Apache-2.0) is taken under
+  Apache-2.0, as stated in `THIRD-PARTY.txt`.
+- **The Linux CI image (`ci/Dockerfile`) is used for testing only and is not redistributed** (§7).
 
-### Needs attention before the first release
+### Ongoing compliance rules
 
-Items 1 to 4 were closed on 2026-10-02 (status column); the rest are open. How each was closed is described in the
-status text and in sections 3 and 4.
-
-| # | Item | Why | Suggested action | Status |
-|---|---|---|---|---|
-| 1 | LICENSE and NOTICE are not packaged | Neither assembly descriptor nor the jar configuration copies them; no jar or zip contains them | Add both to the META-INF of every jar and to the top level of the agent home and CLI zips | **Closed 2026-10-02.** The root POM binds a `copy-resources` execution (`copy-legal-files`) that puts the root `LICENSE` and `NOTICE` into `META-INF/` of every module's classes, so every one of the 14 jars (15 since Phase 2 added `skillroy-data`) carries them; both assembly layouts copy them to the top level of the agent home and of the CLI distribution (directory and zip). `DistributionContentIT` (agent home) and `DistributionNoticesIT` (CLI) check the exact file lists and that every copy equals the root file |
-| 2 | Apache-2.0 notices for the CLI zip | Section 4(a) and 4(d) of the licence: recipients get a copy of the licence and the attribution notices of redistributed works. Jackson jars carry `META-INF/LICENSE` and `META-INF/NOTICE`; the SnakeYAML jar carries no licence file | Keep the jars unmodified; add a NOTICE to the CLI zip that reproduces the Jackson and SnakeYAML attributions and a copy of Apache-2.0 | **Closed 2026-10-02.** The CLI distribution has the Apache-2.0 text (`LICENSE`), the project `NOTICE` and a `THIRD-PARTY.txt` at its top level. `THIRD-PARTY.txt` lists the five redistributed artifacts with version, SPDX licence and file, and carries the Jackson and SnakeYAML attributions; the jars are copied unmodified. `DistributionNoticesIT` compares the file with the jars actually in `lib/` (coordinates read from each jar's own `pom.properties`), allows only listed licences and checks that each is evidenced inside its jar, so the file cannot go stale |
-| 3 | Embedded permissive components in jackson-core | MIT, BSL-1.0 and BSD-2-Clause code is shaded into the jar; its notices are in `META-INF/` of that jar | Do not strip or repack that jar (no shading, no minimising) | **Closed 2026-10-02.** `THIRD-PARTY.txt` lists the embedded components with licence and the file inside the jar that holds each licence text; `DistributionNoticesIT` fails if one of those files is gone from `lib/jackson-core-*.jar`, or if a jar gains a licence or notice file that the list does not name. The rule itself stays: never repack that jar |
-| 4 | The root POM has no `<licenses>` element | Published POMs would declare no licence | Declare Apache-2.0 in the root POM | **Closed 2026-10-02.** The root POM declares `<licenses>` (Apache License, Version 2.0, `https://www.apache.org/licenses/LICENSE-2.0.txt`, distribution `repo`) and `<inceptionYear>2026</inceptionYear>`; every module inherits it. On 2026-10-06 `<url>`, `<developers>` (the holder) and `<scm>` (the private remote) were added for publication |
-| 5 | EPL-2.0 (JUnit) | Test-only; EPL-2.0 is weak copyleft and is not combined into anything distributed | Keep JUnit out of every assembly; keep `skillroy-junit` the only module that declares JUnit at compile scope | Open |
-| 6 | HSQLDB, BSD-style | Sample and test use only | Keep it out of the assemblies; if a runnable sample bundle is ever shipped, include HSQLDB's licence text with it | Open |
-| 7 | Not determined locally | HSQLDB SPDX identifier; SPDX identifiers of the free-form copyright files of several CI image packages; the SGI Free Software License B and Ubuntu Font Licence entries in the JOGL POM; whether the JCEF natives deliver Chromium's third-party notices (section 5); every planned piece in section 8 | Resolve when the piece is adopted, when the image is published or when a JCEF artifact would enter a distribution | Open |
-| 8 | Observation, not a licence issue | No class in the controller-side jars refers to `jackson-databind` or `jackson-annotations` types; only `jackson-core` and `jackson-dataformat-yaml` are referenced | Check whether data binding is needed; dropping it would remove two redistributed jars | **Moot since Phase 5 (2026-10-08):** the Anthropic Java SDK and the MCP Java SDK bind their types with `jackson-databind`; the CLI distribution needs all three Jackson core jars |
-| 9 | Notice-heavy Phase 4 pieces: Playwright's driver bundle (Node.js binaries for five platforms) and the JCEF natives with JOGL and GlueGen | In no distribution today (D49; sample and test scope), but each carries notices that would have to travel with it: Node's `driver/<platform>/LICENSE` files (an MIT-style grant, then the notices of Node's own components) and the driver package's `LICENSE`, `NOTICE` and `ThirdPartyNotices.txt`; the natives' `LICENSE.txt`, `jogl.LICENSE.txt` and `gluegen.LICENSE.txt`. No file with Chromium's third-party notices was found in the natives, and the JOGL and GlueGen POMs list licences beyond BSD-2-Clause and BSD-3-Clause (section 5) | Keep `skillroy-cdp`, the Playwright set and the JCEF set out of every assembly: `DistributionNoticesIT` allows only Apache-2.0 jars in the CLI `lib/` and fails on one that `THIRD-PARTY.txt` does not list, and `DistributionContentIT` fixes the agent home's file list. If one of them ever enters a distribution, audit it as section 4 does, ship the notices above and extend `THIRD-PARTY.txt` first | Open |
+- Every built jar, the agent home and the CLI distribution carry the root `LICENSE` and `NOTICE` (enforced by
+  `DistributionContentIT` and `DistributionNoticesIT`).
+- Never repack or strip `jackson-core`, so its embedded permissive component notices remain intact inside
+  `META-INF/`.
+- Keep JUnit, HSQLDB, Byteman, `skillroy-cdp`/Playwright, and JCEF out of the CLI and agent-home assemblies unless
+  their third-party notices are audited and added to `THIRD-PARTY.txt` first.
 
 ## 2. Scope and conventions
 
-Modules audited (32 since Phase 7, 2026-10-10; 31 since Phase 6, 2026-10-09; 24 since Phase 5; 22 before): the root POM `skillroy-test-java-parent`; the agent side `skillroy-protocol`,
-`skillroy-agent-api`, `skillroy-agent-bootstrap`, `skillroy-agent-core`, `skillroy-agent-swing`,
-`skillroy-agent-data`, `skillroy-agent-web` (new in Phase 4), `skillroy-agent-spy`, `skillroy-agent-bytebuddy`,
-`skillroy-agent-hooks`, `skillroy-agent-byteman-sys` and `skillroy-agent-byteman` (new in Phase 6), `skillroy-agent-dist`;
-the controller side `skillroy-controller`, `skillroy-data` (new in Phase 2), `skillroy-scenario`, `skillroy-inference` and
-`skillroy-mcp` (new in Phase 5), `skillroy-junit`, `skillroy-cli`, `skillroy-cdp` (new in Phase 4), `skillroy-telemetry` (new in
-Phase 6), `skillroy-vision` (new in Phase 7); the lending samples `skillroy-sample-lending-app`, `skillroy-sample-lending-agent`,
-`skillroy-sample-lending-pack`, `skillroy-sample-lending-pack-branch` (new in Phase 6), `skillroy-sample-lending-scenarios`; and the web host samples
-`skillroy-sample-web-host`, `skillroy-sample-web-host-agent` and `skillroy-sample-web-host-scenarios` (all three new
-in Phase 4). The root POM lists 28 modules in `<modules>` (all but itself and the web host samples; 27 before Phase 7, 20 before Phase 6, 18 before
-Phase 5); the three web host samples are listed only in its profile `jcef` and are built only with `-Pjcef`, so a build
-without the profile has 29 reactor projects and one with it 32. The agent-side modules (`skillroy-agent-web` included), the sample app and sample
-agent, and the web host and its agent module build with `--release 8`; the controller-side modules (`skillroy-cdp`
-included), the sample pack and the scenarios of both samples build with `--release 25`.
+The reactor comprises 32 projects when built with `-Pjcef` (29 in the default build without `-Pjcef`):
 
-- "Project" artifacts (`ai.skillroy:*`) are the project's own and are not listed as third-party.
-- Scopes are Maven scopes as reported by `dependency:list`. The reactor declares no `runtime`-scoped dependency.
-- "Evidence" names the primary source: **POM** (`<licenses>` in the artifact's POM or a parent POM), **JAR** (a
-  licence file or manifest entry inside the jar), **JDK** and **IMAGE** (files inside the CI image).
-- SPDX identifiers are given as stated by the evidence; none was guessed.
+- Root aggregator: `skillroy-test-java-parent`
+- Agent side (`--release 8`): `skillroy-protocol`, `skillroy-agent-api`, `skillroy-agent-bootstrap`,
+  `skillroy-agent-core`, `skillroy-agent-swing`, `skillroy-agent-data`, `skillroy-agent-web`,
+  `skillroy-agent-spy`, `skillroy-agent-bytebuddy`, `skillroy-agent-hooks`, `skillroy-agent-byteman-sys`,
+  `skillroy-agent-byteman`, `skillroy-agent-dist`
+- Controller side (`--release 25`): `skillroy-controller`, `skillroy-data`, `skillroy-scenario`,
+  `skillroy-inference`, `skillroy-mcp`, `skillroy-junit`, `skillroy-cli`, `skillroy-cdp`, `skillroy-telemetry`,
+  `skillroy-vision`
+- Lending desk sample: `skillroy-sample-lending-app` (`8`), `skillroy-sample-lending-agent` (`8`),
+  `skillroy-sample-lending-pack` (`25`), `skillroy-sample-lending-pack-branch` (`25`),
+  `skillroy-sample-lending-scenarios` (`25`)
+- Web host sample (profile `jcef`): `skillroy-sample-web-host` (`8`), `skillroy-sample-web-host-agent` (`8`),
+  `skillroy-sample-web-host-scenarios` (`25`)
+
+Conventions:
+- Project artifacts (`ai.skillroy:*`) are the project's own code and are not listed as third-party.
+- Evidence cites **POM** (`<licenses>` in the artifact's or parent's POM), **JAR** (licence file or manifest entry
+  inside the jar), **JDK**, or **IMAGE** (`/usr/share/doc/*/copyright` inside the test container).
 
 ### Third-party dependencies by module
 
-"JUnit set" is `junit-jupiter` 5.14.4 with its transitive artifacts (section 5). "Jackson set" is
-`jackson-annotations`, `jackson-core`, `jackson-databind`, `jackson-dataformat-yaml` and `snakeyaml` (section 4).
-"Playwright set" is `playwright` 1.63.0 with `driver`, `driver-bundle`, `gson` 2.14.0, `error_prone_annotations`
-2.48.0, `jspecify` and `opentest4j` (section 5). "JCEF set" is `jcefmaven` 152.0.6 with `jcef-api`, `jogl-all`,
-`gluegen-rt`, `commons-compress`, `commons-codec`, `commons-io`, `commons-lang3`, `gson` 2.11.0 and
-`error_prone_annotations` 2.27.0 (section 5); the platform natives are named apart.
+- **JUnit set:** `junit-jupiter` 5.14.4 and transitive platform/assertion artifacts (§5).
+- **Jackson set:** `jackson-annotations`, `jackson-core`, `jackson-databind`, `jackson-dataformat-yaml`,
+  `snakeyaml` (§4).
+- **Playwright set:** `playwright` 1.63.0, `driver`, `driver-bundle`, `gson` 2.14.0, `error_prone_annotations`
+  2.48.0, `jspecify`, `opentest4j` (§5).
+- **JCEF set:** `jcefmaven` 152.0.6, `jcef-api`, `jogl-all`, `gluegen-rt`, `commons-compress`, `commons-codec`,
+  `commons-io`, `commons-lang3`, `gson` 2.11.0, `error_prone_annotations` 2.27.0 (§5).
 
 | Module | Compile (third-party) | Provided | Test |
 |---|---|---|---|
-| `skillroy-protocol` | none | none | JUnit set, HSQLDB (since Phase 2, for the moved `…protocol.sql` tests) |
-| `skillroy-agent-api`, `-agent-bootstrap`, `-agent-core`, `-agent-swing`, `-agent-dist` | none | none | JUnit set |
+| `skillroy-protocol` | none | none | JUnit set, HSQLDB |
+| `skillroy-agent-api`, `-agent-bootstrap`, `-agent-core`, `-agent-swing`, `-agent-spy`, `-agent-dist` | none | none | JUnit set |
+| `skillroy-agent-bytebuddy`, `skillroy-agent-hooks` | Byte Buddy 1.18.14 (shaded and relocated into `skillroy-agent-hooks`) | none | JUnit set |
 | `skillroy-agent-data` | none | none | JUnit set, HSQLDB |
-| `skillroy-agent-web` (Phase 4) | none | none | JUnit set |
-| `skillroy-agent-byteman-sys` (Phase 6, BW) | none | Byteman 4.0.27 (a work that uses the library: compiled against it, nothing of it in the jar) | JUnit set; `skillroy-agent-api` |
-| `skillroy-agent-byteman` (Phase 6, BW) | none | `skillroy-agent-api`, `skillroy-protocol`, `skillroy-agent-byteman-sys` (project) | JUnit set, Byteman 4.0.27 |
+| `skillroy-agent-web` | none | none | JUnit set |
+| `skillroy-agent-byteman-sys` | none | Byteman 4.0.27 (compiled against it; nothing bundled) | JUnit set |
+| `skillroy-agent-byteman` | none | project modules only | JUnit set, Byteman 4.0.27 |
 | `skillroy-controller` | none | none | JUnit set |
-| `skillroy-data` (Phase 2) | Jackson set (it declares `jackson-databind` and `jackson-dataformat-yaml`) | none | JUnit set, HSQLDB |
-| `skillroy-scenario` | Jackson set, through `skillroy-data` (since Phase 2 its own POM declares no Jackson artifact) | none | JUnit set, HSQLDB |
-| `skillroy-inference` (Phase 5, 2026-10-08) | the Anthropic Java SDK 2.70.0 set (OkHttp, Okio, Kotlin, Jackson's jdk8/jsr310/Kotlin modules, victools, swagger-annotations, errorprone annotations, standardwebhooks, slf4j-api), JSqlParser 5.4; the Jackson set through `skillroy-data` | none | JUnit set, HSQLDB |
-| `skillroy-mcp` (Phase 5, 2026-10-08) | the MCP Java SDK 2.0.1 (`mcp-core`, `mcp-json-jackson2`) with `reactor-core`, `reactive-streams`, `slf4j-api`, `json-schema-validator` and `itu`; the inference set through `skillroy-inference` | none | JUnit set |
-| `skillroy-junit` | Jackson set; `junit-jupiter-api` and its transitive artifacts | none | JUnit set, `junit-platform-launcher` |
-| `skillroy-telemetry` (Phase 6, built 2026-10-09, TL) | the OpenTelemetry set of section 4 (1.66.0: `opentelemetry-api`, `-context`, `-common`, `-sdk-common`, `-sdk-trace`, `-sdk-metrics`, `-sdk-logs`, `-exporter-otlp`, `-exporter-otlp-common`, `-exporter-common`, `-exporter-sender-jdk`; the OkHttp sender excluded, no autoconfiguration artifact in the tree); the Jackson set through `skillroy-scenario` | none | JUnit set, HSQLDB, `opentelemetry-sdk-testing` 1.66.0 with `opentelemetry-sdk` 1.66.0, `skillroy-scenario`'s `test-jar` |
-| `skillroy-vision` (Phase 7, built 2026-10-10, VM) | none of its own: it adds no dependency (image work is the JDK's `java.awt.image` and `javax.imageio`); the inference set and the Jackson set through `skillroy-inference` and `skillroy-scenario` | none | JUnit set, `skillroy-scenario`'s `test-jar` |
-| `skillroy-cli` | Jackson set, through `skillroy-data`, which it also declares itself since Phase 2; since Phase 5 (2026-10-08) the inference set through `skillroy-inference` and the MCP set through `skillroy-mcp`, plus `slf4j-nop` 2.0.16, which it declares itself (D88: the only SLF4J binding, so the libraries' logging is silent); since Phase 6 (2026-10-09, TL) the OpenTelemetry set through `skillroy-telemetry` (section 4); since Phase 7 (2026-10-10, VM) `skillroy-vision`, which brings no third-party jar | none | JUnit set |
-| `skillroy-cdp` (Phase 4) | Playwright set; Jackson set, through `skillroy-scenario` and `skillroy-data` | none | JUnit set |
+| `skillroy-data` | Jackson set | none | JUnit set, HSQLDB |
+| `skillroy-scenario` | Jackson set (via `skillroy-data`) | none | JUnit set, HSQLDB |
+| `skillroy-inference` | Anthropic Java SDK 2.70.0 set, JSqlParser 5.4, Jackson set | none | JUnit set, HSQLDB |
+| `skillroy-mcp` | MCP Java SDK 2.0.1 (`mcp-core`, `mcp-json-jackson2`) + Reactor/JSON-Schema tree, inference set | none | JUnit set |
+| `skillroy-junit` | Jackson set, `junit-jupiter-api` | none | JUnit set, `junit-platform-launcher` |
+| `skillroy-telemetry` | OpenTelemetry 1.66.0 set (§4; OkHttp sender excluded, no autoconfigure), Jackson set | none | JUnit set, HSQLDB, `opentelemetry-sdk-testing` 1.66.0 |
+| `skillroy-vision` | none of its own (uses JDK `java.awt.image` / `javax.imageio`, plus `skillroy-inference` and `skillroy-scenario`) | none | JUnit set |
+| `skillroy-cli` | Jackson, inference, MCP, telemetry and vision sets, plus `slf4j-nop` 2.0.16 | none | JUnit set |
+| `skillroy-cdp` | Playwright set, Jackson set | none | JUnit set |
 | `skillroy-sample-lending-app` | HSQLDB | none | JUnit set |
-| `skillroy-sample-lending-agent` | none | HSQLDB (through the sample app) | JUnit set |
-| `skillroy-sample-lending-pack` | Jackson set | none | JUnit set |
-| `skillroy-sample-lending-scenarios` | Jackson set; `junit-jupiter-api` set (through `skillroy-junit`) | none | JUnit set, HSQLDB (through the sample app); since Phase 6 (2026-10-09, TL) the OpenTelemetry set through `skillroy-telemetry` (test scope); Byteman 4.0.27 (Phase 6, BW: the hooks leg's Byteman check) |
-| `skillroy-sample-web-host` (Phase 4, profile `jcef`) | JCEF set | none | JUnit set; the natives `jcef-natives-<platform>` of the platform in `skillroy.jcef.platform` (default `linux-amd64`) |
-| `skillroy-sample-web-host-agent` (Phase 4, profile `jcef`) | none | JCEF set (through the host module, which it declares `provided`; it declares no third-party artifact itself) | JUnit set |
-| `skillroy-sample-web-host-scenarios` (Phase 4, profile `jcef`) | Jackson set, through `skillroy-scenario` (and `skillroy-data`); it declares no third-party artifact at compile scope | none | JUnit set (`junit-jupiter`); the Playwright set, through `skillroy-cdp`; the JCEF set and the natives `jcef-natives-<platform>`, through the web host, which it declares with the natives; besides, test-scope project artifacts whose transitive dependencies it excludes (the agent home's zip, the host's agent module, the CLI). Read from its POM on 2026-10-07; it does not depend on `skillroy-junit` |
+| `skillroy-sample-lending-agent` | none | HSQLDB (via sample app) | JUnit set |
+| `skillroy-sample-lending-pack`, `-pack-branch` | Jackson set | none | JUnit set |
+| `skillroy-sample-lending-scenarios` | Jackson set, `junit-jupiter-api` (via `skillroy-junit`) | none | JUnit set, HSQLDB, OpenTelemetry set, Byteman 4.0.27 |
+| `skillroy-sample-web-host` (`jcef`) | JCEF set | none | JUnit set, `jcef-natives-<platform>` |
+| `skillroy-sample-web-host-agent` (`jcef`) | none | JCEF set (via web host) | JUnit set |
+| `skillroy-sample-web-host-scenarios` (`jcef`) | Jackson set | none | JUnit set, Playwright set, JCEF set + natives |
 
 ## 3. What ships inside a target JVM
 
-The agent home is built by `skillroy-agent-dist` from `agent-home-layout.xml`, which lists exactly eleven project
-artifacts by coordinates (`ai.skillroy:skillroy-agent-bootstrap`, `-protocol`, `-agent-api`, `-agent-core`,
-`-agent-swing`, `-agent-data`, `-agent-web`, and since Phase 6 `-agent-spy`, `-agent-hooks`, `-agent-byteman` and
-`-agent-byteman-sys`). Third-party artifacts cannot enter it: the module has no third-party compile dependency, the
-descriptor uses explicit includes (the `optional/` set without transitive dependencies), and the one third-party copy is
-inside the hooks module's own jar (the shaded copy, below). The built zip was inspected when the audit was written,
-when it held six jars; the seventh, added by Phase 4, was inspected on 2026-10-07 as the module's own jar
-(`agent/skillroy-agent-web/target/skillroy-agent-web-0.1.0-SNAPSHOT.jar` of the final tree), which the home holds as
-`modules/skillroy-agent-web.jar`.
+`skillroy-agent-dist` builds the agent home from `agent-home-layout.xml`:
 
 | File in the agent home | Content | Third-party code |
 |---|---|---|
-| `LICENSE`, `NOTICE` | Copies of the root files (added 2026-10-02) | none |
-| `skillroy-agent-bootstrap.jar` | 9 classes (`ai.skillroy.testjava.agent.bootstrap`), manifest | none |
-| `lib/skillroy-protocol.jar` | 20 classes (`ai.skillroy.testjava.protocol`) | none |
-| `lib/skillroy-agent-api.jar` | 61 class files on 2026-10-08 (`ai.skillroy.testjava.agent.api` and its sub-packages; the count of 36 recorded in Phase 1 predates the web SPI of Phase 4 and the Phase 4.x defaults `BitmapSource`, `WebBrowser$1`, `WebBrowser$2`) | none |
-| `lib/skillroy-agent-core.jar` | 75 classes, `agent.properties` | none |
-| `modules/skillroy-agent-swing.jar` | 73 classes, one properties file, one service file | none |
-| `modules/skillroy-agent-data.jar` | 8 classes, one service file | none |
-| `skillroy-agent-spy.jar` | (Phase 6, built 2026-10-09, HK) 3 classes (`ai.skillroy.testjava.agent.spy.Spy`, `Spy$Handler`, `Spy$Stub`), the manifest and the project's `META-INF/LICENSE` and `NOTICE`, nothing else (no Maven descriptor: the hooks module refuses to append a jar holding any other entry); 8,128 bytes | none |
-| `optional/skillroy-agent-hooks.jar` | (Phase 6, built 2026-10-09, HK) the optional hooks module, loaded only when the agent option `optionalModules` names it: 51 classes of its own (`ai.skillroy.testjava.agent.hooks`), `hooks-module.properties`, one service file, and **3,048 classes of Byte Buddy 1.18.14 (its bundled ASM 9.10.1 included) relocated under `ai.skillroy.testjava.agent.hooks.shaded.bytebuddy`**, with Byte Buddy's references to JNA renamed to `ai.skillroy.testjava.agent.hooks.shaded.absent.jna` (a package that exists nowhere); 3,099 class files, 5,006,772 bytes (counted on the jar of the main tree, 2026-10-09) | **yes: Byte Buddy (Apache-2.0) and ASM (BSD-3-Clause), relocated; their notices inside the jar** |
-| `optional/skillroy-agent-byteman.jar` | (Phase 6, built 2026-10-09, BW) the optional Byteman module, loaded only when `optionalModules` names it: 27 classes of its own (`ai.skillroy.testjava.agent.byteman`), `byteman-module.properties`, one service file, the manifest, the Maven descriptor and the project's `META-INF/LICENSE` and `NOTICE`; 72,557 bytes. It loads the user's Byteman jar (agent option `byteman.jar`) in process on the first confirmed `rule.submit`; that jar is never in the home (B8) | none (Byteman 4.0.27, LGPL-2.1-or-later, is the user's jar) |
-| `optional/skillroy-agent-byteman-sys.jar` | (Phase 6, built 2026-10-09, BW) the project jar the Byteman module appends to the target's system class path: 3 classes (`ai.skillroy.testjava.agent.byteman.sys.RuleManager`, `RuleHelper`, `RuleHelper$Handler`), the manifest, the Maven descriptor and the project's licence files; 13,222 bytes. Compiled against Byteman at `provided` scope: its constant pools name classes under `java/` and `ai/skillroy/` only (`SysConstantPoolTest`), and Byteman's types appear in method descriptors alone | none |
-| `modules/skillroy-agent-web.jar` | 156 classes since the Phase 4.x amendments of 2026-10-08 (155 in Phase 4: `BrowserExtras` removed, `WebModule$Pace` and `WebModule$Pace$1` added) (`ai.skillroy.testjava.agent.web` and its sub-packages `jcef`, `jxbrowser` and `reflect`): the agent's `web.*` primitives, the browser index and events, and two reflective adapters; the descriptors `jcef.json` and `jxbrowser.json`, `web-module.properties`, one service file (Phase 4) | none |
+| `LICENSE`, `NOTICE` | Root project licence and notice files | none |
+| `skillroy-agent-bootstrap.jar` | `ai.skillroy.testjava.agent.bootstrap` classes and agent manifest | none |
+| `skillroy-agent-spy.jar` | `Spy`, `Spy$Handler`, `Spy$Stub`, manifest, `META-INF/LICENSE` and `NOTICE` only (appended to bootstrap path only when hooks install) | none |
+| `lib/skillroy-protocol.jar` | Shared wire DTOs, JSON codec, HMAC and SQL helpers | none |
+| `lib/skillroy-agent-api.jar` | Agent SPIs (`ai.skillroy.testjava.agent.api.*`) | none |
+| `lib/skillroy-agent-core.jar` | HTTP/1.1 control server, dispatcher, SSE ring, registries, safety guards | none |
+| `modules/skillroy-agent-swing.jar` | Swing tree, input rungs, capture, hit-test, routed/Robot pointer | none |
+| `modules/skillroy-agent-data.jar` | `data.query` over `DataSourceProvider` | none |
+| `modules/skillroy-agent-web.jar` | Generic `web.*` primitives and reflective `jcef` / `jxbrowser` descriptors | none |
+| `optional/skillroy-agent-hooks.jar` | Hook engine plus relocated `net.bytebuddy:byte-buddy:1.18.14` (and bundled ASM 9.10.1) under `ai.skillroy.testjava.agent.hooks.shaded.bytebuddy`; notices under `META-INF/third-party/` | **Yes: Byte Buddy (Apache-2.0) and ASM (BSD-3-Clause), shaded & relocated** |
+| `optional/skillroy-agent-byteman.jar` | Optional in-process Byteman bridge (loads user-supplied `byteman.jar` by reflection) | none |
+| `optional/skillroy-agent-byteman-sys.jar` | `RuleManager` and curated `RuleHelper` appended to system class path when Byteman loads | none |
 
-Checks made on the six jars inspected (221 class files in all):
+`ShadedContentIT`, `DistributionContentIT`, `HomeConstantPoolIT`, `SysConstantPoolTest` and `OptionalModulesIT`
+verify entry paths, constant-pool references and optional-module loading behavior automatically. A consumer who
+wants zero third-party bytecode in the agent home can delete `optional/skillroy-agent-hooks.jar`.
 
-- Every entry is under `ai/skillroy/` or `META-INF/`. The only `META-INF` entries besides Maven metadata and the
-  manifest are two `META-INF/services` files naming the project's own module interface and, since 2026-10-02,
-  `META-INF/LICENSE` and `META-INF/NOTICE` (the project's own files). `DistributionContentIT` checks both the
-  exact list of files in the agent home and that no jar holds an entry outside `ai/skillroy/` and `META-INF/`.
-- The constant pools of all 221 classes refer only to `java.*`, `javax.*` (`accessibility`, `imageio`, `swing`),
-  `com.sun.net.httpserver` (the JDK's `jdk.httpserver` module) and `ai.skillroy.*`. No third-party package is
-  referenced.
-- When this audit was written no LICENSE or NOTICE file was in any of the jars; that gap is closed (item 1 in
-  section 1). The six jars and the home itself now carry the project's own licence files and nothing else; the
-  Phase 4 jars carry them too (section 4).
-- The seventh jar, `modules/skillroy-agent-web.jar`, inspected on 2026-10-07 with `unzip -l` and `javap -v`: 155
-  class files (62 in `…agent.web`, 41 in `…agent.web.jcef`, 31 in `…agent.web.jxbrowser`, 21 in `…agent.web.reflect`)
-  and, besides them, only the manifest, `META-INF/maven`, one `META-INF/services` file naming the project's module
-  interface, the project's own `META-INF/LICENSE` and `META-INF/NOTICE`, and three resources of the module under
-  `ai/skillroy/` (`jcef.json`, `jxbrowser.json`, `web-module.properties`). Every entry is under `ai/skillroy/` or
-  `META-INF/`, and no entry is a vendor class (nothing under `org/cef/` or `com/teamdev/`). The constant pools refer
-  only to `java.*`, `javax.imageio` and `ai.skillroy.*`, and no class file contains the text `org/cef`, `org.cef`,
-  `com/teamdev` or `com.teamdev`. The two descriptors do name JCEF's and JxBrowser's classes and members, as strings:
-  that is by design (decision D54 of `docs/design/phase4-contracts.md`), because the adapters resolve those names by
-  reflection through the application's own class loader, so the agent carries no vendor class and no reference a JVM
-  would have to link. `DistributionContentIT` holds the jar in the exact file list of the agent home and checks its
-  entries as it does the others'.
+## 4. Redistributed third-party artifacts (`skillroy-cli`)
 
-**The shaded copy (Phase 6, built 2026-10-09, HK; `phase6-contracts.md` §2.1, §2.5, D115, D152).** The audited
-artifact is the shaded jar, as this section's earlier row said it would be ("verify at adoption, including the shaded
-copy"). Source: `net.bytebuddy:byte-buddy:1.18.14` (the regular jar, SHA-1
-`e26b6f5163f36a5ef91f84eea1befae54e11eb76`, 3,074 classes, Java 8 class files), Apache-2.0, bundling ASM 9.10.1 under
-BSD-3-Clause; its POM declares no run-time dependency (JNA, findbugs annotations and jsr305 at `provided` scope only).
-The shading module `skillroy-agent-bytebuddy` relocates `net.bytebuddy` (ASM travels inside it as
-`net.bytebuddy.jar.asm`) and `com.sun.jna`, and drops the dependency's `META-INF/MANIFEST.MF`, `META-INF/maven/**`,
-`META-INF/LICENSE`, `META-INF/NOTICE`, `META-INF/licenses/**`, the 26 Multi-Release entries under
-`META-INF/versions/` and `module-info.class`; it adds the dependency's notices verbatim, once, as
-`META-INF/third-party/byte-buddy/LICENSE` (Apache-2.0, headed by Byte Buddy's note that it bundles ASM),
-`META-INF/third-party/byte-buddy/NOTICE` and `META-INF/third-party/asm/LICENSE` (ASM's BSD-3-Clause text), so that the
-project's own `META-INF/LICENSE` and `NOTICE`, which `DistributionContentIT` compares with the root files, are never
-shadowed. The hooks module merges that jar into its own. Checks made on the built jar: every entry is under
-`ai/skillroy/` or `META-INF/` (`DistributionContentIT`), none under `net/`; no class's constant pool names a class
-under `net/bytebuddy/`, `org/objectweb/asm/` or `com/sun/jna/`, and every class reference of every class of the home
-is under `java/`, `javax/`, `sun/`, `com/sun/`, `jdk/` or `ai/skillroy/` (`ShadedContentIT` for the shading module's
-jar, `HomeConstantPoolIT` for the whole home, the mechanical form of this section's manual constant-pool reading).
-The default agent path loads none of it: the home's `optional/` is never scanned, and `OptionalModulesIT` proves with
-`-verbose:class` that no class of the hooks module, of the relocated prefix or of `Spy` loads without the option. A
-consumer who wants no third-party code in the home deletes `optional/skillroy-agent-hooks.jar`.
+`skillroy-cli` builds `skillroy-cli.zip` from `cli-layout.xml`, containing `bin/skillroy`, `bin/skillroy.bat`,
+`LICENSE`, `NOTICE`, `THIRD-PARTY.txt`, 9 project jars (`cli`, `controller`, `data`, `inference`, `mcp`,
+`protocol`, `scenario`, `telemetry`, `vision`), and the **47 third-party runtime jars** listed below.
 
-**The Byteman jars (Phase 6, built 2026-10-09, BW; `phase6-contracts.md` §7.4, D134).** Neither holds a Byteman class.
-Byteman 4.0.27 (`org.jboss.byteman:byteman`, LGPL-2.1-or-later) is the user's jar, named by the agent option
-`byteman.jar` and loaded in process; in the build it is a test-scoped dependency of the module, of `skillroy-agent-dist`
-and of the scenarios module and a `provided` dependency of the sys jar (section 5), so the sys jar is a work that uses
-the library, compiled against it with nothing of it inside. What holds the home to that: `DistributionContentIT` fixes
-the list of files (a Byteman jar in the home fails it), `HomeConstantPoolIT` reads every class's constant pool, and
-`SysConstantPoolTest` holds the sys jar's three class files to `CONSTANT_Class` entries under `java/` and
-`ai/skillroy/`; `BytemanIT` loads the real jar from the test class path in a child JVM.
+### OpenTelemetry set (11 jars, all Apache-2.0)
 
-Modules that are loaded into a target JVM only in the sample set-up are not part of the agent home. The sample
-agent module `skillroy-sample-lending-agent` declares everything it compiles against as `provided` and its jar
-holds only project classes. The sample application jar `skillroy-sample-lending-app` also holds only project
-classes; HSQLDB must be put on the class path next to it and is not bundled.
+| Artifact | Version | Licence (SPDX) | Evidence |
+|---|---|---|---|
+| `io.opentelemetry:opentelemetry-api` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-common` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-context` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-exporter-common` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-exporter-otlp` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-exporter-otlp-common` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-exporter-sender-jdk` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-sdk-common` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-sdk-logs` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-sdk-metrics` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
+| `io.opentelemetry:opentelemetry-sdk-trace` | 1.66.0 | Apache-2.0 | POM; attribution in `THIRD-PARTY.txt` |
 
-The web host samples (Phase 4, profile `jcef`) follow the same pattern. The agent module
-`skillroy-sample-web-host-agent` declares the agent API and the host module as `provided`; its jar (5 classes, built
-2026-10-07) holds only project classes, and its constant pools name no JCEF type. The host jar
-`skillroy-sample-web-host` (21 classes) holds its own classes and its own three pages `webhost/*.html`, which have no
-external references; JCEF and the natives are separate dependencies and are not bundled.
-
-## 4. Redistributed third-party artifacts
-
-The CLI distribution is built by `skillroy-cli` from `cli-layout.xml`: `bin/skillroy` (a POSIX shell launcher, the
-project's own), `lib/`, which receives the module's jar and its `runtime`-scope dependencies, and, since
-2026-10-02, `LICENSE`, `NOTICE` and `THIRD-PARTY.txt` at the top level. It is produced as a directory and as
-`skillroy-cli.zip`. Until Phase 5 the zip held 17 entries (three directories, the three top-level files, the
-launcher and ten jars: five project jars and the four Jackson jars and SnakeYAML). **Since Phase 5 (2026-10-08)**
-`lib/` holds 43 jars (the zip: 50 entries): seven project jars (`skillroy-cli`, `skillroy-controller`,
-`skillroy-data`, `skillroy-inference`, `skillroy-mcp`, `skillroy-protocol`, `skillroy-scenario`, at the project's
-version; `DistributionNoticesIT` expects exactly these seven) and the 36 third-party jars below: 27
-Apache-2.0, 8 MIT, 1 MIT-0. They are the four Jackson jars and SnakeYAML as before, the Anthropic Java SDK 2.70.0
-with its tree (OkHttp and Okio, the Kotlin standard library and reflection with the JetBrains annotations, Jackson's
-`jdk8`, `jsr310` and Kotlin modules, the victools JSON schema generator with classmate and swagger-annotations, Error
-Prone annotations, the Standard Webhooks library, `slf4j-api`), JSqlParser 5.4, the MCP Java SDK 2.0.1 with its tree
-(`reactor-core`, `reactive-streams`, the networknt JSON schema validator, `itu`) and the SLF4J no-operation provider
-`slf4j-nop` (D88: the CLI silences the libraries' logging; nothing else binds SLF4J). JUnit, HSQLDB and the agent
-jars are not in it, and neither are `skillroy-cdp` and Playwright (D49): no POM of the modules whose jars are in
-`lib/` refers to them. `DistributionNoticesIT` checks the set of jars against `THIRD-PARTY.txt` line by line
-(coordinates, SPDX identifier, file name), requires each licence to be one of Apache-2.0, MIT and MIT-0, and
-requires the evidence of each licence to be inside the jar (a licence file, the manifest's `Bundle-License` or the
-embedded POM) or, failing that, in `THIRD-PARTY.txt`'s attributions with the licence text distributed.
-
-**Since Phase 6 (built 2026-10-09, TL; phase6-contracts.md 2.2, 2.6, D140, D141)** `lib/` also holds the project's
-`skillroy-telemetry` jar and eleven OpenTelemetry Java jars at **1.66.0** (released 2026-09-11; 1.67.0 came out on
-the day of the build and was not adopted), all Apache-2.0: `lib/` then holds 55 jars (the zip: 62 entries), eight
-project jars (`DistributionNoticesIT.PROJECT_MODULES` gains `telemetry`) and 47 third-party jars (38 Apache-2.0, 8
-MIT, 1 MIT-0). The set is exactly the resolved runtime tree of `skillroy-telemetry` read with `mvn
-dependency:tree` on 2026-10-09: the API (`opentelemetry-api`, `-context`, `-common`), the SDK's `-sdk-common`,
-`-sdk-trace`, and `-sdk-metrics` and `-sdk-logs` (compile dependencies of the OTLP exporter, which also offers metric
-and log exporters; the module builds spans only), the exporter `-exporter-otlp` with `-exporter-otlp-common` and
-`-exporter-common`, and the JDK's HTTP client sender `-exporter-sender-jdk`. The exporter's runtime dependency
-`opentelemetry-exporter-sender-okhttp` is **excluded** in the root POM's managed entry (exactly one sender, D141), and
-no `opentelemetry-sdk-extension-autoconfigure` or `-autoconfigure-spi` artifact is in the tree at all (the contract's
-section 2.2 named the SPI as a possible transitive; the exporter declares it compile-only, so it is not resolved:
-the `META-INF/services` files of `opentelemetry-exporter-otlp` that name autoconfiguration SPIs are never read, since
-nothing on the class path loads them). `DistributionNoticesIT` fails on an OkHttp sender, an autoconfiguration jar or
-`opentelemetry-sdk-testing` in `lib/`. The jars are built with Gradle and carry no `pom.properties`: the test
-identifies them by file name (its existing rule); none carries a licence or notice file, a `Bundle-License` or an
-embedded POM, so the evidence is the published POM ("The Apache License, Version 2.0") and `THIRD-PARTY.txt`'s
-attribution with the Apache-2.0 text at the top level. Every class is under `io/opentelemetry/` (the one
-`META-INF/versions/9/` entry of `-exporter-common` is the project's own `VarHandleStringEncoder`); nothing is shaded.
-None of it is in the agent home: export is controller-only (D140), and `skillroy-telemetry` is found through
-`ServiceLoader` only when an exporter is named.
-
-| Artifact (Phase 6, TL) | Version | Licence (SPDX) | Evidence | Size, classes |
-|---|---|---|---|---|
-| `io.opentelemetry:opentelemetry-api` | 1.66.0 | Apache-2.0 | POM; no licence file, no `pom.properties` | 176,425 bytes, 171 classes |
-| `io.opentelemetry:opentelemetry-common` | 1.66.0 | Apache-2.0 | POM; as above | 4,496 bytes, 3 classes |
-| `io.opentelemetry:opentelemetry-context` | 1.66.0 | Apache-2.0 | POM; as above | 50,773 bytes, 42 classes |
-| `io.opentelemetry:opentelemetry-exporter-common` | 1.66.0 | Apache-2.0 | POM; as above (Multi-Release, one project class for Java 9) | 113,308 bytes, 71 classes |
-| `io.opentelemetry:opentelemetry-exporter-otlp` | 1.66.0 | Apache-2.0 | POM; as above | 110,174 bytes, 48 classes |
-| `io.opentelemetry:opentelemetry-exporter-otlp-common` | 1.66.0 | Apache-2.0 | POM; as above | 216,438 bytes, 167 classes |
-| `io.opentelemetry:opentelemetry-exporter-sender-jdk` | 1.66.0 | Apache-2.0 | POM; as above | 21,170 bytes, 10 classes |
-| `io.opentelemetry:opentelemetry-sdk-common` | 1.66.0 | Apache-2.0 | POM; as above | 84,670 bytes, 73 classes |
-| `io.opentelemetry:opentelemetry-sdk-logs` | 1.66.0 | Apache-2.0 | POM; as above | 69,487 bytes, 47 classes |
-| `io.opentelemetry:opentelemetry-sdk-metrics` | 1.66.0 | Apache-2.0 | POM; as above | 381,408 bytes, 290 classes |
-| `io.opentelemetry:opentelemetry-sdk-trace` | 1.66.0 | Apache-2.0 | POM; as above | 146,299 bytes, 107 classes |
-
-Obligations when redistributed: the Apache-2.0 text at the top level (`LICENSE`) and the attribution in
-`THIRD-PARTY.txt` (the OpenTelemetry Authors); no NOTICE file is published with the jars. Test scope only, in no
-distribution: `opentelemetry-sdk-testing` 1.66.0 (126,849 bytes) and `opentelemetry-sdk` 1.66.0 (13,008 bytes),
-Apache-2.0, in `skillroy-telemetry`'s tests.
-
-**Since Phase 7 (built 2026-10-10, VM; phase7-contracts.md 2.1, 2.6, D303)** `lib/` also holds the project's `skillroy-vision`
-jar and nothing else: `lib/` then holds 56 jars (the zip one entry more), nine project jars (`DistributionNoticesIT.PROJECT_MODULES`
-gains `vision`) and the same 47 third-party jars. The module adds no dependency: image work on the controller is the JDK's
-`java.awt.image` and `javax.imageio`, the model access is `skillroy-inference`'s (the Anthropic SDK 2.70.0 audited in Phase 5,
-whose typed classes already carry the computer toolset), and the module is found through `ServiceLoader`
-(`SessionTools`, `CapabilityContributor`) only when it is on the class path. Nothing of it is in the agent home: the agent's Phase 7
-additions (the hit-test, the pointer, the Robot path, the extended capture) are AWT and Java2D in the existing
-`skillroy-agent-swing` and `skillroy-agent-web` jars, and `java.awt.Robot` is constructed behind the agent option `robot` only.
-
-The 36 jars of Phase 5, their licences and what the evidence is (the sizes are those of the jars in the local Maven
-cache on 2026-10-08):
+### Core, inference and MCP set (36 jars: 27 Apache-2.0, 8 MIT, 1 MIT-0)
 
 | Artifact | Version | Licence (SPDX) | Evidence | Obligations when redistributed |
 |---|---|---|---|---|
-| `com.fasterxml.jackson.core:jackson-annotations` | 2.22 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest `Bundle-License` | Ship licence and NOTICE (they are in the jar) |
-| `com.fasterxml.jackson.core:jackson-core` | 2.22.3 | Apache-2.0, with embedded MIT, BSL-1.0, BSD-2-Clause parts (below) | POM; JAR `META-INF/LICENSE`, `NOTICE`, three more licence files; manifest | As above; keep the embedded licence files with the jar |
-| `com.fasterxml.jackson.core:jackson-databind` | 2.22.3 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in the jar) |
-| `com.fasterxml.jackson.dataformat:jackson-dataformat-yaml` | 2.22.3 | Apache-2.0 | POM (parent `jackson-dataformats-text`); JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in the jar) |
-| `com.fasterxml.jackson.datatype:jackson-datatype-jdk8` | 2.22.3 | Apache-2.0 | POM (parent `jackson-modules-java8`); JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in the jar) |
-| `com.fasterxml.jackson.datatype:jackson-datatype-jsr310` | 2.22.3 | Apache-2.0 | POM (parent `jackson-modules-java8`); JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in the jar) |
-| `com.fasterxml.jackson.module:jackson-module-kotlin` | 2.22.3 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in the jar) |
-| `org.yaml:snakeyaml` | 2.5 | Apache-2.0 | POM; JAR manifest `Bundle-License` | No LICENSE or NOTICE file in the jar: the Apache-2.0 text (`LICENSE`) and the attribution (`THIRD-PARTY.txt`) are at the top level of the distribution |
-| `com.anthropic:anthropic-java` | 2.70.0 | MIT | POM `<name>MIT</name>`; no licence file, no `Bundle-License` | The copyright line and the MIT text travel in `THIRD-PARTY.txt` ("Licence texts") |
-| `com.anthropic:anthropic-java-client-okhttp` | 2.70.0 | MIT | POM; no licence file | As above |
-| `com.anthropic:anthropic-java-core` | 2.70.0 (37,180,630 bytes) | MIT | POM; no licence file | As above |
-| `com.squareup.okhttp3:okhttp` | 4.12.0 | Apache-2.0; its data file `okhttp3/internal/publicsuffix/publicsuffixes.gz` is compiled from the Public Suffix List under MPL-2.0 | POM; the jar has no licence file; `okhttp3/internal/publicsuffix/NOTICE` names the MPL-2.0 file | Apache-2.0 text at the top level; the MPL-2.0 data file is shipped unmodified inside the jar and its source is named in `THIRD-PARTY.txt` (MPL-2.0 §3.2 is met by the notice and the unmodified file) |
-| `com.squareup.okio:okio` | 3.6.0 | Apache-2.0 | POM; no licence file | Apache-2.0 text at the top level; attribution in `THIRD-PARTY.txt` |
-| `com.squareup.okio:okio-jvm` | 3.6.0 | Apache-2.0 | POM; no licence file | As above |
-| `org.jetbrains.kotlin:kotlin-stdlib` | 2.1.21 | Apache-2.0 | POM ("The Apache License, Version 2.0"); no licence file | As above |
-| `org.jetbrains.kotlin:kotlin-reflect` | 2.1.21 (3,081,305 bytes) | Apache-2.0 | POM; no licence file | As above |
-| `org.jetbrains.kotlin:kotlin-stdlib-common` | 1.9.10 (no classes; a transitive leftover the SDK's POM still names) | Apache-2.0 | POM; no licence file | As above |
-| `org.jetbrains.kotlin:kotlin-stdlib-jdk7` | 1.9.0 (`module-info` only) | Apache-2.0 | POM; no licence file | As above |
-| `org.jetbrains.kotlin:kotlin-stdlib-jdk8` | 1.9.0 (`module-info` only) | Apache-2.0 | POM; no licence file | As above |
-| `org.jetbrains:annotations` | 13.0 | Apache-2.0 | POM; no licence file | As above |
-| `com.github.victools:jsonschema-generator` | 4.38.0 | Apache-2.0 | POM (parent `jsonschema-generator-parent`); no licence file | As above |
-| `com.github.victools:jsonschema-module-jackson` | 4.38.0 | Apache-2.0 | POM (parent); no licence file | As above |
-| `com.github.victools:jsonschema-module-swagger-2` | 4.38.0 | Apache-2.0 | POM (parent); no licence file | As above |
-| `com.fasterxml:classmate` | 1.7.0 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest `Bundle-License` | Ship licence and NOTICE (in the jar) |
-| `io.swagger.core.v3:swagger-annotations` | 2.2.50 | Apache-2.0 | POM (parent `swagger-project`); JAR `META-INF/LICENSE`, `NOTICE`; manifest `Bundle-License` | Ship licence and NOTICE (in the jar) |
-| `com.google.errorprone:error_prone_annotations` | 2.50.0 | Apache-2.0 ("Apache 2.0") | POM; manifest `Bundle-License`; no licence file | Apache-2.0 text at the top level |
-| `com.standardwebhooks:standardwebhooks` | 1.2.0 | MIT ("The MIT License") | POM; no licence file, no `Bundle-License` | The copyright line (Svix) and the MIT text travel in `THIRD-PARTY.txt` |
-| `org.slf4j:slf4j-api` | 2.0.16 | MIT | POM (parent `slf4j-parent`); JAR `META-INF/LICENSE.txt`; manifest `Bundle-License` | Ship the licence file (in the jar); the text is also in `THIRD-PARTY.txt` |
-| `org.slf4j:slf4j-nop` | 2.0.16 | MIT | POM (parent `slf4j-parent`); JAR `META-INF/LICENSE.txt`; manifest `Bundle-License` | As above |
-| `com.github.jsqlparser:jsqlparser` | 5.4 (2,008,413 bytes) | Dual LGPL-2.1 / Apache-2.0; **taken under Apache-2.0** (section 8) | POM (two `<license>` entries); manifest `Bundle-License` names both; no licence file | `THIRD-PARTY.txt` states the choice; the Apache-2.0 text is at the top level |
-| `io.modelcontextprotocol.sdk:mcp-core` | 2.0.1 | MIT ("MIT License") | POM; manifest `Bundle-License`; no licence file | The copyright line and the MIT text travel in `THIRD-PARTY.txt` |
-| `io.modelcontextprotocol.sdk:mcp-json-jackson2` | 2.0.1 | MIT | POM; manifest `Bundle-License`; no licence file | As above |
-| `io.projectreactor:reactor-core` | 3.7.0 (1,876,501 bytes) | Apache-2.0 | POM; no licence file | Apache-2.0 text at the top level; attribution in `THIRD-PARTY.txt` |
-| `org.reactivestreams:reactive-streams` | 1.0.4 | MIT-0 | POM (`MIT-0`); no licence file | No attribution required by the licence; the text is in `THIRD-PARTY.txt` all the same |
-| `com.networknt:json-schema-validator` | 2.0.4 | Apache-2.0 ("Apache License Version 2.0") | POM; manifest `Bundle-License`; no licence file | Apache-2.0 text at the top level |
-| `com.ethlo.time:itu` | 1.14.0 | Apache-2.0 | POM; manifest `Bundle-License`; no licence file | Apache-2.0 text at the top level |
+| `com.fasterxml.jackson.core:jackson-annotations` | 2.22 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in jar) |
+| `com.fasterxml.jackson.core:jackson-core` | 2.22.3 | Apache-2.0 (+ embedded MIT, BSL-1.0, BSD-2-Clause parts below) | POM; JAR `META-INF/LICENSE`, `NOTICE`, embedded licence files | Keep jar unmodified with embedded licence files |
+| `com.fasterxml.jackson.core:jackson-databind` | 2.22.3 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in jar) |
+| `com.fasterxml.jackson.dataformat:jackson-dataformat-yaml` | 2.22.3 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in jar) |
+| `com.fasterxml.jackson.datatype:jackson-datatype-jdk8` | 2.22.3 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in jar) |
+| `com.fasterxml.jackson.datatype:jackson-datatype-jsr310` | 2.22.3 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in jar) |
+| `com.fasterxml.jackson.module:jackson-module-kotlin` | 2.22.3 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in jar) |
+| `org.yaml:snakeyaml` | 2.5 | Apache-2.0 | POM; JAR manifest `Bundle-License` | Top-level `LICENSE` and `THIRD-PARTY.txt` attribution |
+| `com.anthropic:anthropic-java` | 2.70.0 | MIT | POM | Copyright and MIT text in `THIRD-PARTY.txt` |
+| `com.anthropic:anthropic-java-client-okhttp` | 2.70.0 | MIT | POM | Copyright and MIT text in `THIRD-PARTY.txt` |
+| `com.anthropic:anthropic-java-core` | 2.70.0 | MIT | POM | Copyright and MIT text in `THIRD-PARTY.txt` |
+| `com.squareup.okhttp3:okhttp` | 4.12.0 | Apache-2.0 (`publicsuffixes.gz` data under MPL-2.0) | POM; JAR `okhttp3/internal/publicsuffix/NOTICE` | Top-level `LICENSE`; unmodified MPL-2.0 data file + notice in `THIRD-PARTY.txt` |
+| `com.squareup.okio:okio` | 3.6.0 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `com.squareup.okio:okio-jvm` | 3.6.0 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `org.jetbrains.kotlin:kotlin-stdlib` | 2.1.21 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `org.jetbrains.kotlin:kotlin-reflect` | 2.1.21 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `org.jetbrains.kotlin:kotlin-stdlib-common` | 1.9.10 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `org.jetbrains.kotlin:kotlin-stdlib-jdk7` | 1.9.0 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `org.jetbrains.kotlin:kotlin-stdlib-jdk8` | 1.9.0 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `org.jetbrains:annotations` | 13.0 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `com.github.victools:jsonschema-generator` | 4.38.0 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `com.github.victools:jsonschema-module-jackson` | 4.38.0 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `com.github.victools:jsonschema-module-swagger-2` | 4.38.0 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `com.fasterxml:classmate` | 1.7.0 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in jar) |
+| `io.swagger.core.v3:swagger-annotations` | 2.2.50 | Apache-2.0 | POM; JAR `META-INF/LICENSE`, `NOTICE`; manifest | Ship licence and NOTICE (in jar) |
+| `com.google.errorprone:error_prone_annotations` | 2.50.0 | Apache-2.0 | POM; manifest `Bundle-License` | Top-level `LICENSE` |
+| `com.standardwebhooks:standardwebhooks` | 1.2.0 | MIT | POM | Copyright (Svix) and MIT text in `THIRD-PARTY.txt` |
+| `org.slf4j:slf4j-api` | 2.0.16 | MIT | POM; JAR `META-INF/LICENSE.txt`; manifest | Licence in jar and `THIRD-PARTY.txt` |
+| `org.slf4j:slf4j-nop` | 2.0.16 | MIT | POM; JAR `META-INF/LICENSE.txt`; manifest | Licence in jar and `THIRD-PARTY.txt` |
+| `com.github.jsqlparser:jsqlparser` | 5.4 | Dual LGPL-2.1 / Apache-2.0 (**taken under Apache-2.0**) | POM; manifest `Bundle-License` | Choice stated in `THIRD-PARTY.txt`; top-level `LICENSE` |
+| `io.modelcontextprotocol.sdk:mcp-core` | 2.0.1 | MIT | POM; manifest `Bundle-License` | Copyright and MIT text in `THIRD-PARTY.txt` |
+| `io.modelcontextprotocol.sdk:mcp-json-jackson2` | 2.0.1 | MIT | POM; manifest `Bundle-License` | Copyright and MIT text in `THIRD-PARTY.txt` |
+| `io.projectreactor:reactor-core` | 3.7.0 | Apache-2.0 | POM | Top-level `LICENSE` and `THIRD-PARTY.txt` |
+| `org.reactivestreams:reactive-streams` | 1.0.4 | MIT-0 | POM | MIT-0 text in `THIRD-PARTY.txt` |
+| `com.networknt:json-schema-validator` | 2.0.4 | Apache-2.0 | POM; manifest `Bundle-License` | Top-level `LICENSE` |
+| `com.ethlo.time:itu` | 1.14.0 | Apache-2.0 | POM; manifest `Bundle-License` | Top-level `LICENSE` |
 
-The three licence files that are neither `META-INF/LICENSE` nor `META-INF/NOTICE` (SLF4J's `META-INF/LICENSE.txt`
-twice, OkHttp's `okhttp3/internal/publicsuffix/NOTICE`) are listed in `THIRD-PARTY.txt` ("Other licence and notice
-files inside the jars"), and the test fails if one of them disappears from its jar.
+### Embedded components inside `jackson-core` 2.22.3
 
-Components embedded in `jackson-core` 2.22.3 (stated in its `META-INF/NOTICE` and the licence files beside it):
-
-| Component | Licence (SPDX) | Copyright holder named | File in the jar |
+| Component | Licence (SPDX) | Copyright holder | File in jar |
 |---|---|---|---|
-| FastDoubleParser, shaded under `com.fasterxml.jackson.core.internal.shaded.fdp` | MIT | Werner Randelshofer | `META-INF/FastDoubleParser-LICENSE` |
+| FastDoubleParser (`com.fasterxml.jackson.core.internal.shaded.fdp`) | MIT | Werner Randelshofer | `META-INF/FastDoubleParser-LICENSE` |
 | Schubfach number writing code | MIT | Raffaello Giulietti | `META-INF/Schubfach-LICENSE` |
-| Code derived from Daniel Lemire's fast_double_parser | BSL-1.0 | Daniel Lemire | `META-INF/FastDoubleParser-ThirdParty-LICENSE` |
-| fast_float | MIT | The fast_float authors | `META-INF/FastDoubleParser-ThirdParty-LICENSE` |
-| bigint (portions under the 2-clause licence) | BSD-2-Clause | Tim Buktu | `META-INF/FastDoubleParser-ThirdParty-LICENSE` |
+| Derived from Daniel Lemire's `fast_double_parser` | BSL-1.0 | Daniel Lemire | `META-INF/FastDoubleParser-ThirdParty-LICENSE` |
+| `fast_float` | MIT | The `fast_float` authors | `META-INF/FastDoubleParser-ThirdParty-LICENSE` |
+| `bigint` (2-clause portions) | BSD-2-Clause | Tim Buktu | `META-INF/FastDoubleParser-ThirdParty-LICENSE` |
 
-All of these are permissive and compatible with Apache-2.0. The MIT and BSD-2-Clause terms require the copyright
-notice to travel with the code; it does, as long as the jar is shipped unmodified.
+## 5. Non-redistributed dependencies (test, provided, optional, sample-only)
 
-SnakeYAML 2.5 also contains the package `org.yaml.snakeyaml.external.com.google.gdata.util.common.base`. The jar
-carries no separate licence statement for it; it is not determined locally.
-
-Not inspected inside the Phase 5 jars: whether `anthropic-java-core` (37 MB, generated model types), `kotlin-reflect`
-or `reactor-core` embed or shade third-party code beyond what their POMs declare. Their POMs declare no shading and
-their manifests no embedded component; a release audit should list the packages inside each (as section 3 does for
-the project's own jars) before the first release.
-
-Other places third-party code could be redistributed, and the result:
-
-| Place | Third-party code |
-|---|---|
-| Agent home (directory and zip) | none (section 3) |
-| Project jars published to a Maven repository (the 15 reactor jars audited before Phase 4, `skillroy-data` included) | none: no jar contains an entry outside `ai/skillroy/`, `META-INF/maven`, the manifest, `META-INF/services` and, since 2026-10-02, the project's own `META-INF/LICENSE` and `META-INF/NOTICE`; nothing is shaded |
-| The Phase 4 jars (2026-10-07: `skillroy-agent-web` and its `test-jar`, `skillroy-cdp`, `skillroy-sample-web-host`, `skillroy-sample-web-host-agent`, `skillroy-sample-web-host-scenarios`) | none: 155 and 213, 37, 21, 5 and 5 classes, nothing shaded. Besides `ai/skillroy/` they hold only the manifest, `META-INF/maven`, `META-INF/services` files, the project's own `META-INF/LICENSE` and `META-INF/NOTICE` and, in the host jar, its three own pages `webhost/*.html`; the agent module's descriptors and properties file (section 3) and the `test-jar`'s fake descriptors and kit pages are under `ai/skillroy/`. The `test-jar` (the adapter contract kit) holds no vendor class either: its fakes live under the project's own package. `skillroy-cdp` refers to Playwright types and one gson type but does not contain them |
-| The Phase 5 jars (2026-10-08: `skillroy-inference`, `skillroy-mcp`) | none: 142 and 22 classes, nothing shaded; besides `ai/skillroy/` they hold only the manifest, `META-INF/maven`, `META-INF/services` (the `ResolverContributor` registration of the inference module) and the project's own `META-INF/LICENSE` and `META-INF/NOTICE`. They refer to the Anthropic SDK, JSqlParser and the MCP SDK types but do not contain them |
-| The Phase 6 telemetry jars (2026-10-09, TL: `skillroy-telemetry`, `skillroy-scenario`'s `test-jar`) | none: 14 and 167 classes, nothing shaded; besides `ai/skillroy/` the telemetry jar holds only the manifest, `META-INF/maven`, its `META-INF/services` registration of the two `RunObserverProvider`s and the project's own `META-INF/LICENSE` and `META-INF/NOTICE`; the `test-jar` (not distributed) holds the scenario tests' fixtures, their `META-INF/services` files and two toy scenario files. The telemetry jar refers to the OpenTelemetry types but does not contain them |
-| The Phase 7 vision jar (2026-10-10, VM: `skillroy-vision`) | none: 53 classes, nothing shaded (counted with `unzip -l` on the jar of the package's worktree, 2026-10-10); besides `ai/skillroy/testjava/vision/` the jar holds only the manifest, `META-INF/maven`, the two `META-INF/services` registrations (`SessionTools` and `CapabilityContributor`) and the project's own `META-INF/LICENSE` and `META-INF/NOTICE`. It refers to the types of `skillroy-inference` and `skillroy-scenario`, but does not contain them |
-| Published POMs | They name third-party dependencies but do not contain them |
-| Sample application, sample agent module | HSQLDB is not bundled; it is a separate dependency |
-| Test fixtures and resources in the source tree | No vendored third-party files, fonts, images, native libraries or jars were found in the tree (the seven stand-in model recordings and the spike corpora under `spikes/BS6` are the project's own text) |
-
-## 5. All other dependencies: test, provided, sample-only
-
-None of these is in the agent home or the CLI distribution. The Playwright set (compile scope of the optional
-`skillroy-cdp`) and the JCEF set (the sample web host modules) are in no distribution at all.
+None of the artifacts below is included in the agent home or the CLI distribution:
 
 | Artifact | Version | Scope and modules | Licence (SPDX) | Evidence |
 |---|---|---|---|---|
-| `org.junit.jupiter:junit-jupiter` | 5.14.4 | test, every module that has tests | EPL-2.0 | POM |
-| `org.junit.jupiter:junit-jupiter-api` | 5.14.4 | test; compile in `skillroy-junit` and `skillroy-sample-lending-scenarios` | EPL-2.0 | POM; JAR `META-INF/LICENSE.md` |
-| `org.junit.jupiter:junit-jupiter-engine` | 5.14.4 | test | EPL-2.0 | POM |
-| `org.junit.jupiter:junit-jupiter-params` | 5.14.4 | test | EPL-2.0 | POM |
-| `org.junit.platform:junit-platform-commons` | 1.14.4 | test; compile where `junit-jupiter-api` is compile | EPL-2.0 | POM |
-| `org.junit.platform:junit-platform-engine` | 1.14.4 | test | EPL-2.0 | POM |
-| `org.junit.platform:junit-platform-launcher` | 1.14.4 | test, `skillroy-junit` only | EPL-2.0 | POM; JAR `META-INF/LICENSE.md` |
-| `org.junit:junit-bom` | 5.14.4 | import scope (dependency management only) | EPL-2.0 | POM |
-| `org.opentest4j:opentest4j` | 1.3.0 | test; compile where `junit-jupiter-api` is compile, and in `skillroy-cdp` (through `playwright`) | Apache-2.0 | POM; JAR `META-INF/LICENSE` |
-| `org.apiguardian:apiguardian-api` | 1.1.2 | test; compile where `junit-jupiter-api` is compile | Apache-2.0 | POM; JAR `META-INF/LICENSE` |
-| `org.jboss.byteman:byteman` (Phase 6, built 2026-10-09, BW; D134) | 4.0.27 | test in `skillroy-agent-byteman`, `skillroy-agent-dist` and `skillroy-sample-lending-scenarios` (the in-process tests and the ITs take the jar's path from the test class path); provided in `skillroy-agent-byteman-sys` (its manager and helper are declared with Byteman's parameter and constructor types; they keep what Byteman hands them as `Object`, so the jar's constant pool holds no Byteman class, which `SysConstantPoolTest` checks). In no distribution: at run time the jar is the user's, named by the agent option `byteman.jar` (B8); 861,185 bytes, 385 entries, class files major 50, `Premain-Class: org.jboss.byteman.agent.Main`; its POM declares no dependency outside `provided` | LGPL-2.1-or-later (B8); the sys jar is "a work that uses the library" (LGPL-2.1 section 6) and carries nothing of it | POM (parent `byteman-root` 4.0.27); the jar has no licence file |
-| `org.hsqldb:hsqldb` (classifier `jdk8`) | 2.7.4 | compile in `skillroy-sample-lending-app`; provided in `skillroy-sample-lending-agent`; test in `skillroy-protocol`, `skillroy-agent-data`, `skillroy-data`, `skillroy-scenario` (these three since Phase 2) and `skillroy-sample-lending-scenarios` | BSD-style ("HSQLDB License, a BSD open source license"); SPDX not determined locally | POM only; the jar has no licence file |
-| `com.microsoft.playwright:playwright` | 1.63.0 | compile, `skillroy-cdp`; test, through it, in `skillroy-sample-web-host-scenarios`; in no distribution (D49) | Apache-2.0 | POM (inherited from the parent `com.microsoft.playwright:parent-pom:1.63.0`); the jar has no licence file |
-| `com.microsoft.playwright:driver` | 1.63.0 | compile, through `playwright` (`skillroy-cdp`) | Apache-2.0; it carries the `playwright-core` package and its bundled npm packages, whose texts are not enumerated here | POM (parent `parent-pom`); JAR `driver/package/LICENSE`, `NOTICE`, `ThirdPartyNotices.txt` and the sidecars `driver/package/lib/utilsBundle.js.LICENSE`, `serverRegistry.js.LICENSE`, `webp_codec.LICENSE` |
-| `com.microsoft.playwright:driver-bundle` | 1.63.0 | compile, through `playwright` (`skillroy-cdp`); 203,821,698 bytes | Apache-2.0 for the artifact (parent POM); the five Node.js binaries inside carry Node's own notices (note below) | POM (parent `parent-pom`); JAR `driver/mac-arm64/LICENSE`, `driver/mac/LICENSE`, `driver/linux-arm64/LICENSE`, `driver/linux/LICENSE`, `driver/win32_x64/LICENSE` |
-| `com.anthropic:anthropic-java` (Phase 5, 2026-10-08) | 2.70.0 | compile, `skillroy-inference`; the CLI distribution once the CLI depends on it (wave 2b); 37,180,630 bytes for `anthropic-java-core`, 46,327,621 bytes for the whole new set of 24 jars | MIT (the three artifacts `anthropic-java`, `anthropic-java-client-okhttp`, `anthropic-java-core`) | POM `<name>MIT</name>` of each; no licence file in the jars, so `THIRD-PARTY.txt` must carry the MIT text and copyright line |
-| `com.fasterxml.jackson.datatype:jackson-datatype-jdk8`, `jackson-datatype-jsr310`; `com.fasterxml.jackson.module:jackson-module-kotlin` | 2.22.3 (aligned by the `jackson-bom` import of the root POM) | runtime, through the Anthropic SDK | Apache-2.0 | POM chain `jackson-modules-java8` > `jackson-base`; JAR `LICENSE`, `NOTICE` |
-| `org.jetbrains.kotlin:kotlin-stdlib`, `kotlin-reflect` | 2.1.21 (managed to one version in the root POM; `kotlin-stdlib-jdk7`/`-jdk8` 1.9.0 hold `module-info` only, `kotlin-stdlib-common` 1.9.10 no classes) | compile / runtime, through the Anthropic SDK and Jackson's Kotlin module | Apache-2.0 | POM |
-| `org.jetbrains:annotations` | 13.0 | compile, through Kotlin | Apache-2.0 | POM |
-| `com.google.errorprone:error_prone_annotations` | 2.50.0 | compile, through the Anthropic SDK | Apache-2.0 ("Apache 2.0") | POM; manifest `Bundle-License` |
-| `com.standardwebhooks:standardwebhooks` | 1.2.0 | compile, through the Anthropic SDK | MIT ("The MIT License") | POM |
-| `io.swagger.core.v3:swagger-annotations` | 2.2.50 | compile, through the Anthropic SDK | Apache-2.0 | POM parent `swagger-project`; JAR `LICENSE`, `NOTICE`; manifest `Bundle-License` |
-| `com.github.victools:jsonschema-generator`, `jsonschema-module-jackson`, `jsonschema-module-swagger-2` | 4.38.0 | runtime, through the Anthropic SDK | Apache-2.0 | POM parent `jsonschema-generator-parent` |
-| `com.fasterxml:classmate` | 1.7.0 | runtime, through victools | Apache-2.0 | POM; JAR `LICENSE`, `NOTICE` |
-| `org.slf4j:slf4j-api` | 2.0.16 | runtime, through victools (and compile through the MCP SDK in wave 2b) | MIT | POM chain `slf4j-parent` > `slf4j-bom`; JAR `META-INF/LICENSE.txt` |
-| `com.squareup.okhttp3:okhttp` | 4.12.0 | runtime, through the Anthropic SDK | Apache-2.0; its `publicsuffixes.gz` is compiled from the Public Suffix List under MPL-2.0 | POM; JAR `okhttp3/internal/publicsuffix/NOTICE` |
-| `com.squareup.okio:okio`, `okio-jvm` | 3.6.0 | runtime, through OkHttp | Apache-2.0 | POM |
-| `com.github.jsqlparser:jsqlparser` (Phase 5, 2026-10-08) | 5.4 | compile, `skillroy-inference`; the CLI distribution (wave 2b); no dependencies; 2,008,413 bytes | dual LGPL-2.1 / Apache-2.0 (two `<license>` entries in its POM; every source header says "Dual licensed under GNU LGPL 2.1 or Apache License 2.0"); the project takes Apache-2.0 | POM; manifest `Bundle-License` names both; no licence file in the jar |
-| `io.modelcontextprotocol.sdk:mcp-core`, `mcp-json-jackson2` (Phase 5, 2026-10-08) | 2.0.1 | compile, `skillroy-mcp`; the CLI distribution (wave 2b) | MIT (both; no licence file in the jars, so `THIRD-PARTY.txt` must carry the MIT text) | POM; manifest `Bundle-License` |
-| `io.projectreactor:reactor-core` | 3.7.0 | compile, through `mcp-core` | Apache-2.0 | POM; no licence file in the jar |
-| `org.reactivestreams:reactive-streams` | 1.0.4 | compile, through `reactor-core` | MIT-0 | POM; no licence file in the jar |
-| `com.networknt:json-schema-validator` | 2.0.4 | compile, through `mcp-json-jackson2` | Apache-2.0 | POM; manifest `Bundle-License` |
-| `com.ethlo.time:itu` | 1.14.0 | compile, through `json-schema-validator` | Apache-2.0 | POM; manifest `Bundle-License` |
-| `com.google.code.gson:gson` | 2.14.0 (Playwright set); 2.11.0 (JCEF set) | compile: 2.14.0 through `playwright` in `skillroy-cdp`; 2.11.0 through `jcefmaven` in the web host modules | Apache-2.0 | POM |
-| `com.google.errorprone:error_prone_annotations` | 2.48.0 (through gson 2.14.0); 2.27.0 (through gson 2.11.0) | compile, in the same modules as the `gson` version it comes with | Apache-2.0 (the POMs say "Apache 2.0") | POM |
-| `org.jspecify:jspecify` | 1.0.1 | compile, through `playwright` (`skillroy-cdp`) | Apache-2.0 | POM |
-| `me.friwi:jcefmaven` | 152.0.6 | compile, `skillroy-sample-web-host` (profile `jcef`); provided in `skillroy-sample-web-host-agent` and test in `skillroy-sample-web-host-scenarios`, through the host module; in no distribution | Apache-2.0 | POM ("Apache-2.0 License"); the jar has no licence file |
-| `me.friwi:jcef-api` | `jcef-17e805a+cef-152.0.6+g708dc14+chromium-152.0.7977.83` (the JCEF tag) | compile, through `jcefmaven` (same modules and scopes) | BSD-3-Clause (the java-cef and CEF text; the POM says "BSD License") | POM; JAR `LICENSE.txt` (the three-clause text, copyright Marshall A. Greenblatt and Google Inc.) |
-| `me.friwi:jcef-natives-linux-amd64` | the JCEF tag | test, `skillroy-sample-web-host` and `skillroy-sample-web-host-scenarios`, when `skillroy.jcef.platform` is `linux-amd64` (the default); 152,141,475 bytes | BSD-3-Clause for java-cef and CEF; JogAmp's licences for the JOGL and GlueGen natives (below); Chromium's own third-party notices: none found in the bundle, not verified here | POM ("BSD License"); notices inside the tarball the jar carries: `LICENSE.txt`, `jogl.LICENSE.txt`, `gluegen.LICENSE.txt` |
-| `me.friwi:jcef-natives-linux-arm64` | the JCEF tag | test, `skillroy-sample-web-host` and `skillroy-sample-web-host-scenarios`, when `skillroy.jcef.platform` is `linux-arm64`; 167,953,639 bytes | as the amd64 artifact | as the amd64 artifact (its three notice files are byte-identical to those of the amd64 artifact) |
-| `me.friwi:jogl-all` | v2.4.0 | compile, through `jcef-api` | BSD-2-Clause, BSD-3-Clause, SGI Free Software License B, Apache-2.0, Apache-1.1 and Ubuntu Font Licence 1.0, as the POM lists them, for different components; SPDX not determined locally for the SGI and Ubuntu entries | POM; the component list is `jogl.LICENSE.txt` inside the natives; the jar has no licence file |
-| `me.friwi:gluegen-rt` | v2.4.0 | compile, through `jcef-api` | BSD-2-Clause, BSD-3-Clause and BSD-4-Clause, as the POM lists them, for different components | POM; the component list is `gluegen.LICENSE.txt` inside the natives; the jar has no licence file |
-| `org.apache.commons:commons-compress` | 1.28.0 | compile, through `jcefmaven` | Apache-2.0 | POM chain `commons-parent` > `apache`; JAR `META-INF/LICENSE.txt`, `NOTICE.txt` |
-| `commons-codec:commons-codec` | 1.19.0 | compile, through `commons-compress` | Apache-2.0 | same |
-| `commons-io:commons-io` | 2.20.0 | compile, through `commons-compress` | Apache-2.0 | same |
-| `org.apache.commons:commons-lang3` | 3.18.0 | compile, through `commons-compress` | Apache-2.0 | same |
-
-Notes:
-
-- JUnit 5 is EPL-2.0. It is used to run tests and is never combined into a distributed artifact. Surefire and
-  Failsafe also load the JUnit Platform launcher at test time; that is a plugin dependency (section 6).
-- `skillroy-junit` is a published module that declares `junit-jupiter-api` at compile scope, so JUnit reaches the
-  class path of anyone who uses that module. The project does not redistribute it.
-- HSQLDB's POM names "HSQLDB License, a BSD open source license" and links to the HSQLDB site; the licence text
-  itself was not available locally, so no SPDX identifier is claimed. `docs/DECISIONS.md` (B1) also records it as
-  BSD-style. It is copied into build output directories by the sample's integration-test set-up, which are not
-  distributed.
-- The project's own artifacts (`ai.skillroy:*`) appear at `compile`, `provided` and `test` scope between modules.
-  `skillroy-agent-dist` (type `zip`) is a test-scope dependency of `skillroy-sample-lending-scenarios` and is never
-  put on a class path.
-- Playwright enters the build only as the compile dependency of the optional `skillroy-cdp` (D49,
-  `docs/design/phase4-contracts.md` section 14). (Phase 8, built 2026-10-19, EW; `docs/design/phase8-contracts.md`
-  5.3) 1.63.0 is the audited line and the only one run; the CDP path's gate lets a layer pin 1.58 or later, and a layer
-  that pins another line audits it. Its `playwright` POM also names Java-WebSocket, slf4j-simple and two
-  JUnit artifacts, all at test scope in the parent POM, so Maven does not pass them on. The driver bundle holds the
-  Node.js binary of five platforms (`mac-arm64`, `mac`, `linux-arm64`, `linux`, `win32_x64`), each beside a `LICENSE`
-  that opens with Node's MIT-style grant and goes on with the notices of Node's own components (2,946 lines in the one
-  file the four Unix-like platforms share; `win32_x64` has another). Those notices include GPL texts with the Autoconf
-  exception for two build-time files of ICU4C (`aclocal.m4`, `config.guess`); the licence families in them were not
-  enumerated further. The `driver` jar carries the `playwright-core` package with an Apache-2.0 `LICENSE`, a `NOTICE`
-  (code derived from Puppeteer, Apache-2.0) and a `ThirdPartyNotices.txt` that points to the sidecar `.LICENSE` files
-  of its inlined npm packages (the `utilsBundle.js` sidecar lists 79; texts seen: MIT, ISC, BSD 3-Clause and the Blue
-  Oak Model License) and of a WebP codec; they were not enumerated either.
-- Two artifacts of the Playwright and JCEF sets appear in two versions: `gson` 2.14.0 and 2.11.0, and
-  `error_prone_annotations` 2.48.0 and 2.27.0. They sit in different modules (`skillroy-cdp`; the web host modules),
-  so each module has one version. The scenarios module of the web host sample has both sets on its test class path;
-  its POM declares `skillroy-cdp` before the web host, so that Maven's mediation (equal depth, the first declaration
-  wins) gives it `gson` 2.14.0 and, through it, `error_prone_annotations` 2.48.0. That is read from the POM, not from a
-  `dependency:list` run.
-- The JCEF set belongs to the sample web host (profile `jcef`). `skillroy.jcef.platform` selects one natives artifact
-  (default `linux-amd64`); only the two Linux artifacts were inspected, the natives of other platforms were not. In
-  each natives jar the notices are not jar entries but sit inside the nested tarball
-  `jcef-natives-<platform>-<JCEF tag>.tar.gz`: `LICENSE.txt` (CEF's three-clause BSD text, byte-identical to
-  `LICENSE.txt` in the `jcef-api` jar), `jogl.LICENSE.txt` and `gluegen.LICENSE.txt` (JogAmp's component lists), a
-  `README.txt` and a `build_meta.json`. No file with Chromium's third-party notices is among them; whether the bundle
-  delivers them some other way is not verified here.
-- JOGL and GlueGen: each POM lists several licences, and the licence file for each in the natives assigns them to
-  components (JogAmp's own code under BSD-2-Clause; imported parts under BSD-3-Clause, the SGI licence, Apache-2.0 and
-  Apache-1.1; bundled fonts under the Ubuntu Font Licence 1.0; for GlueGen one BSD-4-Clause part). The JOGL file also
-  names Khronos and NVIDIA header files and an optional part from Oculus VR under that company's own licence, which
-  the POM does not list; their terms were not assessed here. The licences are not alternatives, so neither artifact is
-  dual-licensed in the sense of section 1.
+| `org.junit.jupiter:junit-jupiter` (`-api`, `-engine`, `-params`), `org.junit.platform:*`, `org.junit:junit-bom` | 5.14.4 / 1.14.4 | test across reactor; `junit-jupiter-api` compile in `skillroy-junit` and `skillroy-sample-lending-scenarios` | EPL-2.0 | POM; JAR `META-INF/LICENSE.md` |
+| `org.opentest4j:opentest4j` | 1.3.0 | test; compile via `junit-jupiter-api` and `playwright` | Apache-2.0 | POM; JAR `META-INF/LICENSE` |
+| `org.apiguardian:apiguardian-api` | 1.1.2 | test; compile via `junit-jupiter-api` | Apache-2.0 | POM; JAR `META-INF/LICENSE` |
+| `io.opentelemetry:opentelemetry-sdk-testing`, `opentelemetry-sdk` | 1.66.0 | test in `skillroy-telemetry` | Apache-2.0 | POM |
+| `org.jboss.byteman:byteman` | 4.0.27 | provided in `skillroy-agent-byteman-sys`; test in `skillroy-agent-byteman`, `skillroy-agent-dist`, `skillroy-sample-lending-scenarios` (user-supplied at runtime, never bundled) | LGPL-2.1-or-later | POM |
+| `org.hsqldb:hsqldb` (`jdk8`) | 2.7.4 | compile in `skillroy-sample-lending-app`; provided in `skillroy-sample-lending-agent`; test in data/scenario/sample modules | BSD-style ("HSQLDB License") | POM |
+| `com.microsoft.playwright:playwright`, `driver`, `driver-bundle` | 1.63.0 | compile in optional `skillroy-cdp`; test in `skillroy-sample-web-host-scenarios` | Apache-2.0 (bundled Node.js binaries and npm packages carry their own notices inside `driver` / `driver-bundle`) | POM; JAR `driver/*/LICENSE`, `ThirdPartyNotices.txt` |
+| `com.google.code.gson:gson` | 2.14.0 / 2.11.0 | compile in `skillroy-cdp` (2.14.0) and web host sample (2.11.0) | Apache-2.0 | POM |
+| `com.google.errorprone:error_prone_annotations` | 2.48.0 / 2.27.0 | compile via `gson` | Apache-2.0 | POM |
+| `org.jspecify:jspecify` | 1.0.1 | compile via `playwright` | Apache-2.0 | POM |
+| `me.friwi:jcefmaven` | 152.0.6 | compile in `skillroy-sample-web-host` (profile `jcef`) | Apache-2.0 | POM |
+| `me.friwi:jcef-api`, `jcef-natives-linux-amd64`, `jcef-natives-linux-arm64` | `jcef-17e805a+cef-152.0.6+...` | compile/test in web host sample (profile `jcef`) | BSD-3-Clause (CEF/java-cef) + JogAmp component licences in natives | POM; JAR `LICENSE.txt`, `jogl.LICENSE.txt`, `gluegen.LICENSE.txt` |
+| `me.friwi:jogl-all`, `gluegen-rt` | v2.4.0 | compile via `jcef-api` (profile `jcef`) | Multi-component permissive (BSD-2-Clause, BSD-3-Clause, BSD-4-Clause, SGI-B, Apache-2.0, Ubuntu Font 1.0) | POM; natives licence files |
+| `org.apache.commons:commons-compress`, `commons-codec`, `commons-io`, `commons-lang3` | 1.28.0 / 1.19.0 / 2.20.0 / 3.18.0 | compile via `jcefmaven` (profile `jcef`) | Apache-2.0 | POM; JAR `META-INF/LICENSE.txt`, `NOTICE.txt` |
 
 ## 6. Build plugins
 
-All plugin versions are pinned in the root POM (`pluginManagement`) and are the ones used by `mvn verify`, plus
-three that `verify` does not run. Each plugin's licence was read from its POM; none states a licence itself, and
-each inherits `Apache-2.0` from the Apache parent POM through its Maven parent chain. Plugin transitive
-dependencies (Plexus, the Maven resolver, the Surefire providers and so on) were not enumerated; they are used at
-build time only and are not redistributed.
+All Maven plugins are pinned in `pluginManagement` in the root `pom.xml` and inherit `Apache-2.0` from the Apache
+parent POM chain (`maven-enforcer-plugin` 3.6.3, `maven-resources-plugin` 3.5.0, `maven-compiler-plugin` 3.16.0,
+`maven-surefire-plugin` 3.6.0, `maven-failsafe-plugin` 3.6.0, `maven-jar-plugin` 3.5.1, `maven-assembly-plugin`
+3.8.0, `maven-dependency-plugin` 3.11.0, `maven-clean-plugin` 3.5.0, `maven-install-plugin` 3.2.0,
+`maven-deploy-plugin` 3.1.4, and `maven-shade-plugin` 3.6.2). None is redistributed.
 
-| Plugin (`org.apache.maven.plugins`) | Version | Use in this build | Licence (SPDX) | Evidence |
-|---|---|---|---|---|
-| `maven-enforcer-plugin` | 3.6.3 | Requires Maven 3.9 or later and JDK 25 or later | Apache-2.0 | POM chain `enforcer` > `maven-parent` > `apache` |
-| `maven-resources-plugin` | 3.5.0 | Copies and filters resources | Apache-2.0 | POM chain `maven-plugins` > `maven-parent` > `apache` |
-| `maven-compiler-plugin` | 3.16.0 | Compiles main and test code at release 8 or 25 | Apache-2.0 | same |
-| `maven-surefire-plugin` | 3.6.0 | Unit tests | Apache-2.0 | POM chain `surefire` > `maven-parent` > `apache` |
-| `maven-failsafe-plugin` | 3.6.0 | Integration tests in `skillroy-agent-dist`, `skillroy-cli`, `skillroy-sample-lending-scenarios` | Apache-2.0 | same |
-| `maven-jar-plugin` | 3.5.1 | Jars; manifest entries for the bootstrap, CLI and sample app | Apache-2.0 | POM chain `maven-plugins` |
-| `maven-assembly-plugin` | 3.8.0 | The agent home and CLI directories and zips | Apache-2.0 | same |
-| `maven-dependency-plugin` | 3.11.0 | `unpack` and `copy` for integration tests; `tree` and `list` for this audit | Apache-2.0 | same |
-| `maven-clean-plugin` | 3.5.0 | `mvn clean` (pinned, not run by `verify`) | Apache-2.0 | same |
-| `maven-install-plugin` | 3.2.0 | `mvn install` (pinned, not run by `verify`) | Apache-2.0 | same |
-| `maven-deploy-plugin` | 3.1.4 | `mvn deploy` (pinned, not run by `verify`) | Apache-2.0 | same |
-| `maven-shade-plugin` | 3.6.2 | (Phase 6, built 2026-10-09, HK) relocates Byte Buddy in `skillroy-agent-bytebuddy` and merges it into `skillroy-agent-hooks` (3.6.0 fails on Byte Buddy's Java 24 class files, `spikes/BS3/RESULT.md` §7) | Apache-2.0 | POM chain `maven-plugins` > `maven-parent` > `apache` |
+## 7. Linux test container (`ci/Dockerfile`)
 
-Apache Maven itself (3.9 or later is required by the enforcer rule) is Apache-2.0, as stated in the `LICENSE` file
-inside its distribution. It is the build tool and is not redistributed. The Maven libraries it bundles were not
-audited.
+`ci/Dockerfile` builds a local test container from `eclipse-temurin:25-jdk` (OpenJDK under
+`GPL-2.0-only WITH Classpath-exception-2.0`) plus Ubuntu Xvfb, fontconfig/DejaVu, and Chromium/JCEF shared-library
+packages (`xvfb`, `xauth`, `libxtst6`, `libxi6`, `libxrender1`, `libxext6`, `libfreetype6`, `fontconfig`,
+`fonts-dejavu-core`, `procps`, `libnss3`, `libnspr4`, `libatk1.0-0t64`, `libatk-bridge2.0-0t64`, `libatspi2.0-0t64`,
+`libcups2t64`, `libdbus-1-3`, `libglib2.0-0t64`, `libcairo2`, `libpango-1.0-0`, `libasound2t64`, `libxcomposite1`,
+`libxdamage1`, `libxfixes3`, `libxkbcommon0`). The image is used solely to run headless display and cross-JDK tests
+and is not published or redistributed.
 
-## 7. Test image
+## 8. Re-running this audit
 
-`ci/Dockerfile` builds the image used for display tests and cross-JDK tests: `FROM eclipse-temurin:25-jdk`, then
-one `apt-get install --no-install-recommends` of ten Debian packages (since 2026-10-06 twenty-five: the fifteen
-run-time libraries of an embedded Chromium, second table below), then `ENV LANG=C.UTF-8`. The image is used
-for testing and is not redistributed. The facts below come from an image built from that Dockerfile and inspected on
-2026-10-02 (Temurin 25.0.4.1; the base archive was Ubuntu 26.04, so the `.deb` packages come from the Ubuntu
-archive). The tag `25-jdk` moves, so versions will differ on later builds.
+Re-run this check whenever a dependency version changes in `pom.xml` or `skillroy-cdp/pom.xml`, a new module adds a
+dependency, or an assembly descriptor (`agent-home-layout.xml`, `cli-layout.xml`) changes:
 
-| Component | Version inspected | Licence | Evidence |
-|---|---|---|---|
-| Eclipse Temurin JDK (`/opt/java/openjdk`) | 25.0.4.1 | GPL-2.0-only WITH Classpath-exception-2.0 | JDK: `legal/java.base/LICENSE` (GPLv2) and `ASSEMBLY_EXCEPTION` (OpenJDK assembly exception). Bundled third-party parts have their own notices under `legal/` (for example FreeType, HarfBuzz, libpng, giflib, lcms) |
-| Ubuntu base system | 26.04 | Many packages, each under its own licence (GPL, LGPL, MIT, others) | Not enumerated |
-
-Packages named in the Dockerfile (licences as stated in each package's `copyright` file under `/usr/share/doc`):
-
-| Package | Version inspected | Licence as stated | SPDX |
-|---|---|---|---|
-| `xvfb` | 2:21.1.22-1ubuntu1.2 | Free-form file; X.Org MIT-style licence variants and other permissive notices | not determined locally |
-| `xauth` | 1:1.1.2-1.1build1 | Free-form file; permissive X.Org style | not determined locally |
-| `libxtst6` | 2:1.2.5-1build1 | Free-form file; permissive X.Org style | not determined locally |
-| `libxi6` | 2:1.8.2-2 | Free-form file; permissive X.Org style | not determined locally |
-| `libxrender1` | 1:0.9.12-1build1 | Free-form file; permissive notices (Keith Packard, SuSE) | not determined locally |
-| `libxext6` | 2:1.3.4-1build3 | Free-form file; permissive X.Org style | not determined locally |
-| `libfreetype6` | 2.14.2+dfsg-1ubuntu0.1 | Structured (DEP-5) file lists FTL, GPL-2+, GPL-3+, Expat, BSD-3-Clause, BSL-1.0, Zlib and others | per file, see left |
-| `fontconfig` | 2.17.1-3ubuntu1 | Free-form file; permissive notice (Keith Packard) | not determined locally |
-| `fonts-dejavu-core` | 2.37-8build1 | `bitstream-vera` and `GPL-2+` as listed | per file, see left |
-| `procps` | 2:4.0.4-9ubuntu1 | GPL-2.0+, LGPL-2.0+, LGPL-2.1+ as listed | per file, see left |
-
-Added on 2026-10-06 for spike BS8 and Phase 4 (the libraries `ldd` reported missing for `libcef.so`, `libjcef.so` and
-`jcef_helper` of jcefmaven 152.0.6; versions as installed in the image built that day; licences as the Ubuntu archive
-states them for these well-known libraries, each to be confirmed from its `copyright` file before the image is ever
-published):
-
-| Package | Version inspected | Licence as commonly stated | SPDX |
-|---|---|---|---|
-| `libnss3` | 2:3.120-1ubuntu2.1 | MPL-2.0 | not determined locally |
-| `libnspr4` | 2:4.38.2-1ubuntu1 | MPL-2.0 | not determined locally |
-| `libatk1.0-0t64` | 2.60.4-0ubuntu0.1 | LGPL-2.0+ | not determined locally |
-| `libatk-bridge2.0-0t64` | 2.60.4-0ubuntu0.1 | LGPL-2.0+ | not determined locally |
-| `libatspi2.0-0t64` | 2.60.4-0ubuntu0.1 | LGPL-2.0+ | not determined locally |
-| `libcups2t64` | 2.4.16-1ubuntu1.3 | Apache-2.0 (with the GPL/LGPL exception notices of CUPS) | not determined locally |
-| `libdbus-1-3` | 1.16.2-2ubuntu4 | AFL-2.1 or GPL-2.0+ | not determined locally |
-| `libglib2.0-0t64` | 2.88.0-1ubuntu0.1 | LGPL-2.1+ | not determined locally |
-| `libcairo2` | 1.18.4-3 | LGPL-2.1 or MPL-1.1 | not determined locally |
-| `libpango-1.0-0` | 1.57.0-1 | LGPL-2.0+ | not determined locally |
-| `libasound2t64` | 1.2.15.3-1ubuntu1.1 | LGPL-2.1+ | not determined locally |
-| `libxcomposite1` | 1:0.4.6-1build1 | permissive X.Org style | not determined locally |
-| `libxdamage1` | 1:1.1.7-1 | permissive X.Org style | not determined locally |
-| `libxfixes3` | 1:6.0.0-2build2 | permissive X.Org style | not determined locally |
-| `libxkbcommon0` | 1.13.1-1 | MIT/X11 | not determined locally |
-
-With them the image holds 212 packages (dpkg). They are test infrastructure: nothing of them is linked into a project
-artifact, and the agent never loads them (the target application's own embedded browser does).
-
-Four of the original ten (`libfreetype6`, `fontconfig`, `fonts-dejavu-core`, `procps`) were already present in the base image.
-The install command added 58 packages in all: the six named packages that were missing plus 52 dependencies
-installed automatically (X libraries, Mesa, LLVM, nettle, libelf, libsensors and others). Their copyright files
-list mostly MIT/Expat and X.Org permissive licences, with BSD, ISC and Apache-2.0 (including the LLVM exception)
-parts and some GPL and LGPL components. They are test infrastructure and are not linked into any project artifact.
-
-Other things the CI script uses at run time, none of them part of the image:
-
-| Item | Licence | Note |
-|---|---|---|
-| Apache Maven from the host, mounted read-only by `ci/run-in-linux.sh` | Apache-2.0 | Not in the image |
-| An optional Linux JDK 8 mounted at `/opt/jdk8` for legacy-target tests | not determined locally | Supplied by the person running the tests; depends on the vendor |
-
-If the image were ever published, the GPL and LGPL packages in it would bring source-offer and notice obligations
-of their own. That is not the case today.
-
-## 8. Planned, not yet audited
-
-The design names the following pieces. None is in the build today, so none was checked against a POM or jar, and no
-licence is claimed here beyond what `docs/DECISIONS.md` already records (cited in the third column).
-
-| Piece | Named for | Licence recorded in the repository | Status |
-|---|---|---|---|
-| Byte Buddy | Bytecode hooks module (shaded and relocated) | Apache-2.0 (B1) | adopted 2026-10-09 (Phase 6, HK) at 1.18.14, shaded and relocated into `optional/skillroy-agent-hooks.jar`: moved to §3 (the shaded copy, with its ASM) and §6 (`maven-shade-plugin`) |
-| Byteman 4.0.27 | Optional `rule.*` module | LGPL-2.1-or-later (B8) | moved to section 5 (Phase 6, built 2026-10-09, BW): test and provided scope only; the jar is never bundled; the user supplies it |
-| JNA | Optional emulated-attach path | Dual Apache-2.0 / LGPL-2.1-or-later (B1, B8); take Apache-2.0 | optional controller dependency; not audited |
-| jattach | Attach as root or across users | Apache-2.0 (B1) | not redistributed; found on `PATH` or at a configured path (B8) |
-| JSqlParser 5.4 | `SqlGuard` of Phase 5 | declared 2026-10-08 (wave 2a), dual LGPL-2.1 / Apache-2.0, the project takes Apache-2.0: moved to §5 | done |
-| MCP Java SDK | `skillroy-mcp` of Phase 5 | declared 2026-10-08 (wave 2b) as `mcp-core` and `mcp-json-jackson2` 2.0.1, MIT: moved to §5 with their tree | done |
-| Anthropic Java SDK | the Claude gateway of Phase 5 | declared 2026-10-08 (wave 2a) at 2.70.0, MIT: moved to §5 with its tree | done |
-| JxBrowser | Reflective adapter inside `skillroy-agent-web` (B9; Phase 4) | Commercial licence needed at run time (B9); the base ships no vendor code | the adapter ships without vendor code; JxBrowser itself is in no build and not audited; never bundled |
-| snakeyaml-engine, victools jsonschema-generator | Controller schema and YAML (design table) | not audited | not audited |
-| Jetty 12 | Servlet transport for a remote MCP controller | not audited | not audited |
-| OpenTelemetry Java | Export in Phase 6 (B11) | built 2026-10-09 (Phase 6, TL) at 1.66.0, Apache-2.0, controller only: moved to §4 with its tree (the exact set, the OkHttp sender excluded, no autoconfiguration) | done |
-
-Moved to section 5 on 2026-10-07 (both are built in Phase 4): Playwright Java and JCEF (jcefmaven 152.0.6 and its
-transitive artifacts).
-
-Each of these needs a licence check, and a decision on bundling, before it enters a distribution. The pieces under
-LGPL (Byteman, and JNA if its LGPL option were ever taken) need particular care, because they must not be bundled
-into an Apache-2.0 distribution without meeting LGPL's terms; B8 already keeps them optional and unbundled.
-
-## 9. How this audit was produced
-
-The audit was run on a working copy of the source tree (without `target/` and `.git/`), not on the tree under
-edit. In that copy the sample modules carry the `skillroy-sample-lending-*` names used in this document and the
-controller side builds with `--release 25`. The build ran offline, so no artifact was fetched from the network.
-Tools: Apache Maven 3.9 and a JDK 25 or later (the root enforcer rule requires both).
-
-1. Copy the tree: `rsync -a --exclude target --exclude .git <tree>/ <copy>/`.
-2. Build the reactor, assemble both distributions and print every dependency tree and list, offline:
-   `mvn -o -B verify -DskipTests dependency:tree dependency:list` (run in `<copy>`; add `-Pjcef` for the web host
-   samples, which needs the natives of the chosen platform in the local Maven repository). Drop `-o` only if an
-   artifact is missing from the local Maven repository.
-3. Read the plugin versions and the dependency versions from the root POM, and the executed plugin goals from the
-   build log (`--- plugin:version:goal` lines).
-4. List the two distributions:
+1. Build and inspect dependency lists:
+   `mvn -B verify -DskipTests dependency:tree dependency:list` (and with `-Pjcef`).
+2. Inspect assembled distributions:
    `unzip -l agent/skillroy-agent-dist/target/skillroy-agent.zip` and
-   `unzip -l controller/skillroy-cli/target/skillroy-cli.zip`; read `agent-home-layout.xml` and `cli-layout.xml`.
-5. Check that no agent or project jar contains foreign entries:
-   `unzip -Z1 <jar> | grep -v '^ai/skillroy/' | grep -v '^META-INF/'`, and list the packages the classes refer to
-   from their constant pools (`javap -v -p -cp <dir> <classes> | grep '= Class '`), ignoring `java/` and
-   `ai/skillroy/`.
-6. Read each artifact's licence from the local Maven repository, following `<parent>` until a `<licenses>` element
-   is found (this snippet is the whole tool; set `M2_REPO` to the local Maven repository):
-
-   ```python
-   import os, sys, xml.etree.ElementTree as ET
-   def lic(g, a, v):
-       p = os.path.join(os.environ["M2_REPO"], g.replace(".", "/"), a, v, f"{a}-{v}.pom")
-       if not os.path.exists(p): return None
-       r = ET.parse(p).getroot(); tag = lambda e: e.tag.split("}")[-1]
-       kids = {tag(c): c for c in r}
-       if "licenses" in kids and len(kids["licenses"]):
-           return [{tag(x): (x.text or "").strip() for x in l} for l in kids["licenses"]]
-       par = kids.get("parent")
-       if par is None: return []
-       f = {tag(x): (x.text or "").strip() for x in par}
-       return lic(f["groupId"], f["artifactId"], f["version"])
-   for coord in sys.argv[1:]: print(coord, lic(*coord.split(":")))
-   ```
-
-   Licence files inside jars: `unzip -Z1 <jar> | grep -i -E 'licen|notice'`, then `unzip -p <jar> <entry>`.
-7. For the test image: `docker build -t skillroy-test-java-ci:local ci`, then run the image with a shell entry
-   point to read `/opt/java/openjdk/release`, `/opt/java/openjdk/legal/java.base/LICENSE`, the `Install:` lines of
-   `/var/log/apt/history.log`, and `/usr/share/doc/<package>/copyright` for each package.
-
-The Phase 4 entries were added on 2026-10-07 from the module POMs and `dependency:list`, which was run offline on
-scratch POMs that repeat each new module's third-party declarations, because the reactor siblings were not installed
-in the local Maven repository. Licences were read with the snippet in step 6, the notices of the Playwright jars with
-`unzip -p`, those of the JCEF natives from the tarball inside each jar (`unzip -p <jar> <tarball> | tar -tz`), and the
-Phase 4 project jars that existed that day were inspected as in steps 4 and 5. Later that day the agent home's seventh
-jar, as the final tree's native build produced it, was inspected as in step 5 (its constant pools with `javap -v`, and
-its class files searched for the vendors' package names), the other Phase 4 jars of the final tree by their entry
-lists, and the web host scenarios module's scopes were read from its POM.
-
-To repeat: run steps 1 to 7 on a clean copy and compare the tables here with the output. The dependency versions
-are managed in the root POM (`jackson.version`, `hsqldb.version`, `junit.version`, and the plugin version
-properties; since Phase 4 also `jcefmaven.version`, `jcef.tag` and `skillroy.jcef.platform` in the profile `jcef`,
-while `playwright.version` is in the `skillroy-cdp` POM), so a version change there is the usual trigger for a
-re-audit, as is any new module that declares a dependency, a change to either assembly descriptor, or a change to
-`ci/Dockerfile`.
+   `unzip -l controller/skillroy-cli/target/skillroy-cli.zip`.
+3. Run the automated verification suites: `DistributionContentIT`, `HomeConstantPoolIT`, `ShadedContentIT`,
+   `OptionalModulesIT`, and `DistributionNoticesIT`.

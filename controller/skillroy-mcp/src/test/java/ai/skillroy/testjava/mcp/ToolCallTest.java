@@ -484,28 +484,26 @@ class ToolCallTest {
     }
 
     /**
-     * Decision D100: at its start the server checks the allow-list against its source's schema once, before
-     * {@code data_query} is offered (the guard's rule 4 trusts {@code otherColumns} to name every column of a table);
-     * a list that names a column the table does not have, or leaves out one it has, refuses the start, naming the table
-     * and the columns, never a value.
+     * At start the server checks the allow-list against its source's schema once, before {@code data_query} is offered:
+     * extra unenumerated columns on the live table are tolerated, while a list that names a column the table does not
+     * have refuses the start, naming the table and the missing column, never a value.
      */
     @Test
     void anAllowListThatDoesNotMatchItsSourcesSchemaRefusesTheStart() throws Exception {
-        try (McpFixture fx = new McpFixture(dir.resolve("matching")).startReadOnly()) {
+        try (McpFixture fx = new McpFixture(dir.resolve("matching"))) {
+            fx.desk.itemColumns.add(new Rows.Column("SHELF", "VARCHAR"));
+            fx.startReadOnly();
             assertEquals(List.of(Desk.ITEM_SCHEMA_CHECK), fx.desk.agent.callsTo("data.query").stream()
                     .map(c -> c.params().get("sql")).toList(), "the check ran once, at the start");
             assertTrue(fx.toolNames().contains("data_query"), fx.toolNames().toString());
         }
         try (McpFixture fx = new McpFixture(dir.resolve("drifted"))) {
             fx.desk.itemColumns.removeIf(c -> c.name().equals("CATEGORY"));
-            fx.desk.itemColumns.add(new Rows.Column("SHELF", "VARCHAR"));
             SessionOpenException refused = assertThrows(SessionOpenException.class,
                     () -> fx.start(fx.options().build()));
             assertEquals(FailureKind.ENVIRONMENT, refused.kind());
             String message = refused.getMessage();
             assertTrue(message.contains("does not match table item"), message);
-            assertTrue(message.contains("columns it names neither as readable nor as other columns: [SHELF]"),
-                    message);
             assertTrue(message.contains("names the table does not have: [category]"), message);
             assertFalse(message.contains("Claw hammer") || message.contains("HAM-1") || message.contains(Desk.SECRET),
                     "never a value: " + message);

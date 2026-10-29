@@ -1,6 +1,6 @@
 # Recorded model answers of the sample
 
-This directory holds the recordings of the recorded gateway (`phase5-contracts.md` §4.2, §14.5): the model's answers
+This directory holds the recordings of the recorded gateway: the model's answers
 that let the sample's AI-layer scenarios and checks run in the build, in CI and in the Linux image with no model key
 and no model call. `inference.example.yaml` in the module directory names it as its `recordings`.
 
@@ -8,10 +8,10 @@ and no model call. `inference.example.yaml` in the module directory names it as 
 
 ### Scenario D's tier (b) requests: recorded live
 
-The tier (b) request of scenario D's supervisor slot (`supervisor-return-llm-sql`, §14.2), on seed A and on seed B:
+The tier (b) request of scenario D's supervisor slot (`supervisor-return-llm-sql`), on seed A and on seed B:
 one recording per seed, of purpose `resolve`.
 
-- **How they were recorded**: on 2026-10-08, by the record route (decision D111): `ScenarioDRecordIT` under the
+- **How they were recorded**: on 2026-10-08, by the record route: `ScenarioDRecordIT` under the
   profile `-Pinference-record`, with the model key in the environment. It bound scenario D in `approve` without reuse
   on each seed through the live gateway wrapped in a `RecordingGateway`, against the sample's database in the test JVM
   (no display), and wrote both seeds' committed bindings files (`bindings/seed-a/`, `bindings/seed-b/`) from the new
@@ -37,7 +37,7 @@ one recording per seed, of purpose `resolve`.
 
 ### The interactive session's calls: scripted stand-ins
 
-The five model calls of the interactive session exported as `session-basic-loan` (§14.4), made on the sample desk in
+The five model calls of the interactive session exported as `session-basic-loan`, made on the sample desk in
 the test JVM (`HeadlessDesk`, whose fixed clock makes every request the same on every run); the export's YAML, plan and
 bindings file are committed under `scenarios/exported/`.
 
@@ -46,27 +46,26 @@ written by hand to be correct (`ScriptedAnswers.sessionScript()` in the module's
 and is keyed by the real request's fingerprint, and says what it is: its usage names `provider: "scripted"` and the
 model `scripted-model`, at a cost of `"0"`. They stay stand-ins whatever is recorded live: a live session is a new
 session, with its own answers and actions, not a refresh of the recorded one. `SessionExportTest` pins them, and the
-image's session check (`InferenceChecks`, §15.2 item 4) drives the same script by position and compares its export
+image's session check (`InferenceChecks`) drives the same script by position and compares its export
 with the committed copies.
 
 ### The live profile's settings file (not a recording)
 
-`inference-live.yaml` is the settings file `VisionLiveIT` reads under the profile `inference-live`
-(`phase7-contracts.md` §7.3, §13.3): the live gateway, `images: true`, `fallbacks: true`, `effort.vision: low` and the
+`inference-live.yaml` is the settings file `VisionLiveIT` reads under the profile `inference-live`: the live gateway, `images: true`, `fallbacks: true`, `effort.vision: low` and the
 class `haiku` mapped to `claude-haiku-5-5`. It holds no key and no account value (the gateway reads the key from the
 environment), and nothing in the build reads it: the recorded gateway reads only the `.json` files here.
 
 ## What is not here, and why
 
-- The vision session exported as `session-vision-loan` (`phase7-contracts.md` §12.4): its requests carry the desk's
+- The vision session exported as `session-vision-loan`: its requests carry the desk's
   captures, which only a desk drawn by the same JDK line on the same seed reproduces, so its check
-  (`InferenceChecks`, §13.2 item 8) drives the scripted model by position on the real desk, as the Phase 5 session's
+  (`InferenceChecks`) drives the scripted model by position on the real desk, as the non-vision session's
   image check does, and compares the export with the committed copies under `scenarios/exported/`.
-- The triage of failed runs (§11, §14.5): a triage request carries the failed run's own records (durations, event
+- The triage of failed runs: a triage request carries the failed run's own records (durations, event
   times, the desk's business date), so no committed file can answer a run made later; the end-to-end check records the
   triage of its own failed runs with the scripted answers and replays them through the recorded gateway.
-- The planner's answers (§10.2, §14.3): the planner runs the Claude Code CLI, not a model gateway, so what it answered
-  is never a recording of this directory; the envelope of scenario C's authoring is the planner's own fixture (§14.3).
+- The planner's answers: the planner runs the Claude Code CLI, not a model gateway, so what it answered
+  is never a recording of this directory; the envelope of scenario C's authoring is the planner's own fixture.
 
 ## Recording and regenerating them
 

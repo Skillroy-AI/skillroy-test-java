@@ -1,21 +1,8 @@
-# Integration and overlay guide: a product layer on the base
+# Integration and Overlay Guide: Building a Product Layer on the Base
 
-**Status:** written 2026-10-12 against the base's first release, `0.1.0` (the tag `v0.1.0`; in no Maven repository, §4.2).
-This guide is a map. Every rule it states is specified, with its reasons, in the contract it cites; where this guide and
-a contract differ, the contract wins and this guide has a defect. Names in backticks are the base's own (types,
-options, files, commands, primitives). Names in angle brackets (`<product>`, `<tenant>`, `<env>`) are placeholders for
-the layer's own.
+**Who it is for.** Engineers and AI agents building a private, application-specific testing layer on this base framework for a real Swing desktop application: one **product layer** per application, plus optional **tenant overlays** for customer or deployment variants. Read [`README.md`](../../README.md) first for a quick overview, [`base-framework-design.md`](../design/base-framework-design.md) (`design §n` below) for architectural background, and [`threat-model.md`](../design/threat-model.md) / [`SECURITY.md`](../../SECURITY.md) for trust boundaries.
 
-**Who it is for.** The people and the AI agents who build a private, application-specific layer on this base for a
-large, real Swing application: one **product layer** per application, and **tenant overlays** for the deployment
-variants of that application that particular customers run. Read [`README.md`](../../README.md) first, then this guide,
-then each contract section as the guide points to it.
-
-**Citations.** `design §n` is [`base-framework-design.md`](../design/base-framework-design.md); `P1 §n` to `P7 §n` are
-[`phase1-contracts.md`](../design/phase1-contracts.md) to [`phase7-contracts.md`](../design/phase7-contracts.md);
-`threat model §n` is [`threat-model.md`](../design/threat-model.md); `TODO` is [`docs/TODO.md`](../TODO.md), with the
-name of its section; `Bn` is an entry of [`docs/DECISIONS.md`](../DECISIONS.md); "gap n" is a row of TODO's "Open SPI and
-DSL gaps"; `Dn` is a decision inside a contract.
+Names in backticks are the base framework's own (types, options, files, commands, primitives). Names in angle brackets (`<product>`, `<tenant>`, `<env>`) are placeholders for your layer's identifiers.
 
 ## Contents
 
@@ -40,7 +27,7 @@ DSL gaps"; `Dn` is a decision inside a contract.
 
 ## 1. The layers at a glance
 
-```
+```text
 tenant overlay      one customer's deployment variant      private: overrides parts of the product layer
   over
 product layer       one target application                 private: agent module, domain pack, hook catalogues,
@@ -50,21 +37,18 @@ base                this repository                        Apache-2.0: agent, co
                                                             the sample lending desk that proves every SPI
 ```
 
-The framework learns an application through **two halves with one id** (design glossary "domain pack"; design §2.6,
-§3.6; P1 §4, §8.3):
+The framework learns an application through **two halves sharing one id** (design §2.6, §3.6):
 
 | Half | Runs in | Java | Base type | What it knows about the application |
 |---|---|---|---|---|
 | agent module | the target JVM, in an isolated class loader | 8 (`--release 8`) | `AgentModule` (`skillroy-agent-api`) | its threads and readiness, its widgets and dialogs, its input seam, its data connection, its devices and embedded browsers, its secrets |
 | domain pack | the controller | 25 (`--release 25`) | `DomainPack` (`skillroy-scenario`) | the verbs scenarios write, the sync topics, the fact roots, resolvers, verifiers and oracles, the fingerprint, the tables and masks, the hook catalogue, the constants |
 
-The id is at once the module id, the pack id and the primitive namespace. In the sample it is `lending`: the module
-`LendingModule` (id `lending`), the pack `lending`, the primitives `lending.*`, the MCP tools `lending_*` (P1 §9.2,
-§9.3; P5 §9.3).
+The id is simultaneously the module id, the pack id, and the primitive namespace. In the sample it is `lending`: the module `LendingModule` (id `lending`), the pack `lending`, the primitives `lending.*`, and the MCP tools `lending_*`.
 
 | The base owns | The product layer owns | A tenant overlay owns |
 |---|---|---|
-| the agent (bootstrap, core, Swing, data and web modules, optional hooks and Byteman modules), the wire protocol and its HMAC authentication, the controller, scenario compiler and executor, resolution engine, bindings, inference layer, MCP server, CLI, JUnit glue, telemetry export, vision bolt-on | one agent module per application, its domain pack, its hook catalogues, its scenarios with their committed plans and bindings, its credentials files (never committed), its CI and its leak check against the base | the overrides of one deployment variant: resolvers, constants, the SQL allow-list, the hook catalogue, its own environments' bindings |
+| the agent (bootstrap, core, Swing, data and web modules, optional hooks and Byteman modules), the wire protocol and its HMAC authentication, the controller, scenario compiler and executor, `BaseDomainPack`, resolution engine, bindings, inference layer, MCP server, CLI, JUnit glue, telemetry export, vision bolt-on | one agent module per application, its domain pack, its hook catalogues, its scenarios with their plans and bindings, its credentials files (never committed), its CI, and its leak check against the base | the overrides of one deployment variant: resolvers, constants, the SQL allow-list, the hook catalogue, and its own environments' bindings |
 
 The base proves every piece on its own sample, which is the worked example to read beside this guide:
 
@@ -74,113 +58,72 @@ The base proves every piece on its own sample, which is the worked example to re
 | its agent module | `samples/skillroy-sample-lending-agent` (`LendingModule`) |
 | its domain pack | `samples/skillroy-sample-lending-pack` (`LendingPack`) |
 | a tenant overlay (the "branch edition") | `samples/skillroy-sample-lending-pack-branch` (`LendingBranchOverlay`, `BranchPack`) |
-| scenarios, plans, bindings, the end-to-end tests | `samples/skillroy-sample-lending-scenarios` |
+| scenarios, plans, bindings, end-to-end tests | `samples/skillroy-sample-lending-scenarios` |
 | a host of embedded JCEF browsers, its agent module, pack and scenarios (Maven profile `jcef`) | `samples/skillroy-sample-web-host`, `-web-host-agent`, `-web-host-scenarios` |
 
 ---
 
 ## 2. Layering: how a tenant overlay resolves
 
-The overlay mechanism is controller-side. It was specified and proven in Phase 6 on the sample's branch edition (P6 §11;
-design §3.6; D144-D146; `BranchEndToEndIT`).
+The overlay mechanism is controller-side and proven on the sample's branch edition (design §3.6; `BranchEndToEndIT`).
 
 ### 2.1 Resolution
 
-A tenant overlay is a `DomainPackOverlay` (package `ai.skillroy.testjava.scenario.pack`): `baseId()` names the pack it
-overlays, `id()` is its own id (`[a-z][a-z0-9-]*`), `version()` its version, and `overlay(DomainPack base)` returns the
-pack to use instead, normally a subclass of `DelegatingDomainPack`, which forwards every member to the base and lets the
-subclass override what it changes (P6 §11.1).
+A tenant overlay implements `DomainPackOverlay` (package `ai.skillroy.testjava.scenario.pack`): `baseId()` names the pack it overlays, `id()` is its own id (`[a-z][a-z0-9-]*`), `version()` its version, and `overlay(DomainPack base)` returns the replacement pack — normally a subclass of `DelegatingDomainPack`, which forwards every member to `base` and lets the subclass override only what changes.
 
-1. `DomainPacks.discover(loader)` loads every `DomainPack` service of the loader, then every `DomainPackOverlay`
-   service of the same loader (`META-INF/services/ai.skillroy.testjava.scenario.pack.DomainPackOverlay`).
-2. The overlays are sorted by `id()`. For each base pack, every overlay whose `baseId()` matches is applied in that
-   order, each over the previous result (they chain).
-3. The result is listed under the base's id: `DelegatingDomainPack.id()` is final and returns the base's id, so a
-   scenario's `pack: <product>` selects the overlaid pack and **no scenario changes**.
+1. `DomainPacks.discover(loader)` loads every `DomainPack` service on the loader, then every `DomainPackOverlay` service (`META-INF/services/ai.skillroy.testjava.scenario.pack.DomainPackOverlay`).
+2. Overlays are sorted by `id()`. For each base pack, every overlay whose `baseId()` matches is applied in order, chaining over the previous result.
+3. The result is registered under the base's id: `DelegatingDomainPack.id()` is final and returns `base.id()`, so a scenario's `pack: <product>` selects the overlaid pack and **no scenario YAML changes**.
 4. `version()` becomes `<base version>+<overlay id>@<overlay version>`, which `plan.json` records as `packVersion`.
-5. An overlay whose base is absent, one that returns null, and one that returns a pack with another id are refused
-   with a `ScenarioException` before anything runs (the CLI's `Packs` exits 2).
+5. An overlay whose base is absent, returns `null`, or returns a pack with a different id fails fast with `ScenarioException` before anything runs (`skillroy packs` exits 2).
 
-Decision B26 Q4 fixes how a private layer consumes an overlay: **as a second jar** beside the pack it overlays. A
-layer that wraps its pack in a class of its own moves that wrapper into `overlay(base)`, the same seam.
+Consume an overlay **as a second jar** beside the product pack jar it overlays.
 
 ### 2.2 What an overlay may override
 
-Everything `DomainPack` declares (§8.1) can be overridden in a `DelegatingDomainPack` subclass, except `id()`. Override
-as little as possible: everything an overlay changes is code that must be kept in step with the product pack.
+Everything `DomainPack` declares (§8.1) can be overridden in a `DelegatingDomainPack` subclass except `id()`. Override as little as possible: everything an overlay changes must stay in step with the product pack.
 
-| Need of the variant | Override | How the sample does it (P6 §11.3) |
+| Need of the variant | Override | How the sample does it |
 |---|---|---|
-| a constant (a setting name, a threshold, a code) | `settings()`: `PackSettings` is an immutable string map; the product pack's code reads `ctx.settings().get("<pack>.<name>", default)` through `ResolveContext`, `VerifyContext`, `FingerprintContext` or `PreflightCheck.PreflightContext`, so the overlay changes the value and not the code | `settings()` sets `lending.maxReturnSetting = return_ceiling`; the base's system-limit resolver reads it |
-| a resolver, verifier, oracle or cross-check whose logic differs | `resolution()`: `ResolutionCatalogue.builder(base.resolution()).replace(…).build()` (replace by id; the builder refuses an id that is absent) | `BranchStaffResolver` replaces the staff resolver with SQL that names the variant's column |
+| a constant (a setting name, a threshold, a code) | `settings()`: `PackSettings` is an immutable string map; the product pack reads `ctx.settings().get("<pack>.<name>", default)` through `ResolveContext`, `VerifyContext`, `FingerprintContext`, or `PreflightCheck.PreflightContext` | `settings()` sets `lending.maxReturnSetting = return_ceiling`; the base's system-limit resolver reads it |
+| a resolver, verifier, oracle, or cross-check whose logic differs | `resolution()`: `ResolutionCatalogue.builder(base.resolution()).replace(…).build()` (replace by id; refuses an unknown id) | `BranchStaffResolver` replaces the staff resolver with SQL naming the variant's column |
 | the tables and columns model-written SQL may read | `sqlAllowLists()` | `BranchAllowList` lists the renamed column |
-| hooked methods that differ | `hooks()`: §2.3 | the overlay's catalogue retargets `limit.applied` |
-| verbs, sync policy, facts, prompt policy, pre-flight, recovery, fingerprint, stored tables, row masks, screen legend | the member itself | not overridden by the sample: the proof is that the product's surface stays untouched |
+| hooked methods that differ | `hooks()` (§2.3) | the overlay's catalogue retargets `limit.applied` |
+| verbs, sync policy, facts, prompt policy, pre-flight, recovery, fingerprint, stored tables, row masks, screen legend | the member itself | left untouched in the sample so the product's surface stays shared |
 
-Two consequences of the base's design make overrides cheap and safe:
+Two practices make overrides clean and low-maintenance:
 
-- **Write the product pack for overlays from the start.** The sample's pack exposes its query records, value types,
-  resolver and verifier ids and SQL texts as public API, and its resolver classes take their SQL in a public
-  constructor, so that an overlay subclasses instead of copying (P6 §11.3, "the pack's public surface"). A layer's
-  product pack should do the same, and should read every variant-sensitive literal through `settings()` with a default.
-- **The base stays restrictive by default; an overlay or an environment may relax it.** Two owner decisions have this
-  form (B19 Q10 and Q14): what a pack puts into binding values is the pack's choice, and the shortest secret that is also
-  masked inside longer text is the per-environment setting `masking.minLengthInText` in `credentials.yaml` (P2 §4).
+- **Write the product pack for overlays from the start.** Expose query records, value types, resolver/verifier ids, and SQL strings as public API, and accept custom SQL via public constructors so an overlay subclasses rather than copies. Read variant-sensitive literals through `settings()` with defaults.
+- **Keep sensible defaults in the base and relax per environment only when needed.** For example, the shortest secret masked inside free text is controlled per environment via `masking.minLengthInText` in `credentials.yaml`.
 
 ### 2.3 The hook catalogue of an overlay
 
-An overlay's `hooks()` answers `HookCatalogues.overlay(base.hooks(), …)` or `HookCatalogues.overlayResource(…)` over
-the resource `META-INF/skillroy/hooks/<overlayId>.yaml`, which has the catalogue format of §9.2 with two differences:
-`catalogue:` is the overlay's id, and its `hooks` entries **replace** the base's entries of the same id (every field)
-or are added when the id is new; `disable: [id…]` turns base entries off. The result has its own hash. Because the
-overlay's catalogue id differs from the product's, a target that already carries the product's catalogue makes the
-installer stop with `ENVIRONMENT` and the remedy (`skillroy hooks remove`); launch a fresh target per variant (P6 §11.2,
-§5.3 step 3). The sample's resource is `samples/skillroy-sample-lending-pack-branch/src/main/resources/META-INF/skillroy/hooks/lending-branch.yaml`.
+An overlay's `hooks()` calls `HookCatalogues.overlay(base.hooks(), …)` or `HookCatalogues.overlayResource(…)` over `META-INF/skillroy/hooks/<overlayId>.yaml`. That file uses the format of §9.2 with two differences: `catalogue:` is the overlay's id, its `hooks` entries **replace** base entries of the same id (or add new ids), and `disable: [id…]` disables base entries. Because the overlay's catalogue id differs from the product's, attempting to install it onto a target JVM that already holds the product's catalogue stops with `ENVIRONMENT` and suggests `skillroy hooks remove`; launch a fresh target per variant. See `samples/skillroy-sample-lending-pack-branch/src/main/resources/META-INF/skillroy/hooks/lending-branch.yaml`.
 
-### 2.4 Scenarios, plans and bindings of a variant
+### 2.4 Scenarios, plans, and bindings of a variant
 
-- The variant compiles **its own plans from the same YAML** with the overlaid pack; they differ at least in
-  `packVersion`. The sample commits them under `variants/branch/plan/` and proves them up to date with
-  `BranchPlansUpToDateTest` (P6 §11.4).
-- Bindings are per environment (`<bindings root>/<env>/<scenario>.bindings.json`, P2 §9), so a variant's environments
-  get their own ids and directories (the sample: `variants/branch/bindings/branch-a/`).
-- The fingerprint should separate variants by itself: the sample's schema checksum already differs between editions, so
-  bindings never cross them, and no fingerprint component was added for the overlay (adding one would have changed the
-  hash of every committed bindings file of the standard edition) (P6 §11.3).
-- Prove that the overlay is needed, not decorative: the sample runs scenario E with the base pack alone against the
-  variant and expects it to fail (P6 §11.4, "the negative").
+- If pre-compiling plans, compile the variant's plans from the same YAML using the overlaid pack (they differ at least in `packVersion`; see `variants/branch/plan/` and `BranchPlansUpToDateTest` in the sample). Alternatively, run `.yaml` files directly on the fly (§8.6).
+- Bindings are stored per environment (`<bindings root>/<env>/<scenario>.bindings.json`), so variant environments get their own environment ids and directories (e.g. `variants/branch/bindings/branch-a/`).
+- Let the environment fingerprint separate variants naturally (for example through the database schema checksum) rather than adding overlay-only fingerprint fields that would invalidate standard-edition bindings.
+- Include a negative test running a variant-sensitive scenario with the plain product pack against the variant target to confirm the overlay is genuinely exercised.
 
-### 2.5 Packaging, loading and the class-loader caveat
+### 2.5 Packaging, loading, and the class-loader caveat
 
-Packs and overlays are found by `ServiceLoader` on one class loader: the CLI's `--pack` jars (`--pack <product-pack>.jar
---pack <tenant-overlay>.jar`), or the test class path of a Maven scenarios module, where the JUnit glue looks on the
-thread's context class loader (`ScenarioTests`).
+Packs and overlays are discovered via `ServiceLoader` on a single class loader: either the CLI's `--pack` jars (`--pack <product-pack>.jar --pack <tenant-overlay>.jar`) or the test class path of a Maven scenarios module (`ScenarioTests`).
 
-**The caveat, recorded as built (P6 §11.4, D189).** An overlay jar on a class path overlays **every** pack lookup in that
-JVM. In the base's scenarios module the overlay is therefore a test dependency only for the reactor order: it is
-excluded from the surefire and failsafe class paths (`classpathDependencyExcludes`), its file is handed to the tests as
-the system property `skillroy.it.overlayJar`, and `BranchVariant` loads it in a class loader of its own over the test
-class path (`samples/skillroy-sample-lending-scenarios/pom.xml`). For a layer this means:
+**Class-loader caveat:** Any `DomainPackOverlay` jar on a class path overlays **every** lookup of its base pack in that JVM. Therefore:
 
-- never put a tenant overlay on a class path that also runs the plain product's scenarios;
-- give each variant its own test JVM: its own scenarios module (simplest), its own surefire or failsafe execution with
-  its own class path, or a class loader of its own as `BranchVariant` does;
-- in the CLI, pass the overlay's `--pack` jar only to the commands that run that variant.
+- never place a tenant overlay jar on the same class path that runs plain product scenarios;
+- give each variant its own test JVM: a dedicated `<tenant>-scenarios` Maven module (simplest), a separate Failsafe execution, or an isolated child class loader (as `BranchVariant` does in `samples/skillroy-sample-lending-scenarios/pom.xml`);
+- in the CLI, pass `--pack <tenant-overlay>.jar` only when targeting that variant.
 
-### 2.6 The agent side has no overlay SPI
+### 2.6 Handling variants on the agent side
 
-There is no agent-side counterpart of `DomainPackOverlay`. The agent half of a variant is handled with what exists:
+There is no agent-side `DomainPackOverlay` SPI. Handle target-side variant differences using:
 
-- **configuration of the product's module**: an option read with `AgentContext.option(key)`, which answers the
-  start-time option or else the live system property `skillroy.agent.<key>` (A20, P1 §2.4). The web host's agent module
-  reads `webhost.mask` this way (P4 §9.2);
-- **the application's own variant setting reported in `app.state`**, so that facts, pre-flight checks and a scenario's
-  expectations can see which variant runs (the sample's `edition` key, P6 §11.3);
-- **an additional agent module jar** in the home's `modules/` whose `requires()` names the product module. It can add
-  implementations; it cannot reliably replace the product's, because several implementations of one SPI combine by that
-  SPI's own rule: every `ReadinessSource` must report ready, `CaptureMask`s combine by union, the first
-  `ThreadPolicyProvider` serves `ThreadPolicy.APP`, `RegionResolver`s are asked in registration order. Read the
-  Javadoc of each SPI before relying on two implementations.
+- **module options**: `AgentContext.option(key)` reads start-time options or falls back to live system properties `skillroy.agent.<key>` (for example `webhost.mask` in the web-host sample);
+- **variant state in `app.state`**: expose the target's edition or mode in `AppStateProvider` so facts, pre-flight checks, and expectations can inspect it (such as `edition` in the lending sample);
+- **an additional agent module jar** in `modules/` whose `requires()` names the product module (additive SPIs combine: all `ReadinessSource`s must pass, `CaptureMask`s union, `RegionResolver`s run in registration order, and the first `ThreadPolicyProvider` owns `ThreadPolicy.APP`).
 
 ---
 
@@ -188,169 +131,107 @@ There is no agent-side counterpart of `DomainPackOverlay`. The agent half of a v
 
 ### 3.1 Modules
 
-A layout that mirrors the base's (P1 §1) and keeps each module's Java level and class-path rule obvious:
-
-```
-<product>-layer/                          private repository; Maven reactor; DCO sign-off as in the base
-  pom.xml                                 parent: pins one base version (a property) for every base artifact
+```text
+<product>-layer/                          private repository; Maven reactor
+  pom.xml                                 parent: pins one base version property for all base artifacts
   agent/
-    skillroy-<product>-constants/         Java 8, no dependencies: ids, primitive and topic names, setting keys
-    skillroy-<product>-agent/             Java 8: the AgentModule; the application's jars at provided scope
-    skillroy-<product>-plugin/            Java 8, optional: what the application's plugin or include mechanism loads
-                                          to start the agent in EMBEDDED mode (§5.3)
-    skillroy-<product>-web/               Java 8, optional: a WebEngineAdapter for an engine the base does not cover
+    skillroy-<product>-constants/         Java 8, zero dependencies: ids, primitive/topic names, setting keys
+    skillroy-<product>-agent/             Java 8: AgentModule; application jars at provided scope
+    skillroy-<product>-plugin/            Java 8, optional: host plugin bootstrap for EMBEDDED mode (§5.3)
+    skillroy-<product>-web/               Java 8, optional: custom WebEngineAdapter (§10.5)
   controller/
-    skillroy-<product>-pack/              Java 25: the DomainPack, its hook catalogues, its SQL allow-lists
-    skillroy-<product>-scenarios/         Java 25: scenario YAML, committed plans, bindings/<env>/, the JUnit glue,
-                                          the end-to-end tests that launch the application with the agent
-  tenants/<tenant>/                       or a repository of its own per tenant (§3.4)
-    skillroy-<product>-<tenant>-pack/     Java 25: the DomainPackOverlay (second jar, §2.5)
-    skillroy-<product>-<tenant>-scenarios/  the variant's plans and bindings; its own test JVM (§2.5)
-  ci/                                     the image and runner adapted from the base's ci/ (§12), the pipeline,
-                                          the leak check against the base (§13)
+    skillroy-<product>-pack/              Java 25: DomainPack, hook catalogues, SQL allow-lists
+    skillroy-<product>-scenarios/         Java 25: scenario YAML, optional plans, bindings/<env>/, JUnit glue
+  tenants/<tenant>/                       in-repo or in a separate repository (§3.4)
+    skillroy-<product>-<tenant>-pack/     Java 25: DomainPackOverlay jar (§2.5)
+    skillroy-<product>-<tenant>-scenarios/  variant bindings (and plans if committed); isolated test JVM (§2.5)
+  ci/                                     container image, runner scripts, and neutrality leak check (§12, §13)
 ```
 
 | Module | Java | Depends on (scope) | Notes |
 |---|---|---|---|
-| constants | `--release 8` | nothing | Shared by both sides. On the agent side its classes must travel **inside** the agent module's jar (§3.3) |
-| agent | `--release 8` (main and test code) | `skillroy-agent-api`, `skillroy-protocol` (`provided`); the application's jars (`provided`); `skillroy-agent-bootstrap` (`provided`, only if a class calls `EmbeddedAgent` directly) | Nothing is bundled: the agent API comes from the agent home's `lib/`, the application's classes from the host loader. No third-party classes (§7). The sample's POM: `samples/skillroy-sample-lending-agent/pom.xml` |
-| plugin | `--release 8` | the application's plugin API (`provided`); nothing of the agent if it calls `EmbeddedAgent` by reflection | Its jar goes on the **application's** class path, not into `modules/` |
-| web | `--release 8` | `skillroy-agent-api` (`provided`); for its tests the `skillroy-agent-web` test-jar (the contract kit, §10.5) | No vendor artifact in any scope (P4 §3) |
-| pack | `--release 25` | `skillroy-scenario`, `skillroy-data`; the constants | The sample's POM: `samples/skillroy-sample-lending-pack/pom.xml` |
-| scenarios | `--release 25` | the pack; `skillroy-junit`; `skillroy-agent-dist` as type `zip` at test scope with every transitive dependency excluded (§4.5); optionally `skillroy-cdp`, `skillroy-telemetry`, `skillroy-inference`, `skillroy-vision` at test scope | Pattern: `samples/skillroy-sample-lending-scenarios/pom.xml` |
-| tenant pack | `--release 25` | the product pack, `skillroy-scenario` | Pattern: `samples/skillroy-sample-lending-pack-branch/pom.xml` |
+| constants | `--release 8` | nothing | Shared by agent and controller. Embed its classes inside the agent module jar (§3.3). |
+| agent | `--release 8` | `skillroy-agent-api`, `skillroy-protocol` (`provided`); application jars (`provided`); `skillroy-agent-bootstrap` (`provided`, only if linking `EmbeddedAgent` directly) | Bundle zero third-party libraries (§7). Reference: `samples/skillroy-sample-lending-agent/pom.xml`. |
+| plugin | `--release 8` | application plugin API (`provided`); zero agent compile dependencies when invoking `EmbeddedAgent` reflectively | Deployed on the **application's** class path, never in `modules/`. |
+| web | `--release 8` | `skillroy-agent-api` (`provided`); `skillroy-agent-web` `test-jar` (`test`) | No browser vendor artifacts in any scope (§10.5). |
+| pack | `--release 25` | `skillroy-scenario`, `skillroy-data`, constants | Reference: `samples/skillroy-sample-lending-pack/pom.xml`. |
+| scenarios | `--release 25` | product pack, `skillroy-junit`, `skillroy-agent-dist` (`zip`, `test` scope with transitive exclusions); optionally `skillroy-cdp`, `skillroy-telemetry`, `skillroy-inference`, `skillroy-vision` (`test`) | Reference: `samples/skillroy-sample-lending-scenarios/pom.xml`. |
+| tenant pack | `--release 25` | product pack, `skillroy-scenario` | Reference: `samples/skillroy-sample-lending-pack-branch/pom.xml`. |
 
 ### 3.2 Naming
 
-The `ai.skillroy` groupId family is the owner's (B2, confirmed B33). Give the layer a sub-namespace of its own:
+- **Coordinates:** `ai.skillroy.<product>` (and `ai.skillroy.<product>.<tenant>`), with artifact ids `skillroy-<product>-agent`, `skillroy-<product>-pack`, etc.
+- **Java packages:** `ai.skillroy.<product>.*`, **outside `ai.skillroy.testjava`**. The base treats `ai.skillroy.testjava.protocol.` and `ai.skillroy.testjava.agent.api.` as parent-first in module loaders and denies hooks on `ai.skillroy.testjava.agent.` and `ai.skillroy.testjava.protocol.`.
+- **Domain id:** short, lowercase, neutral, and stable (`pack:` in YAML, `<domain>.*` primitives, `<domain>_*` MCP tools). Primitive segments use lowerCamelCase (`<namespace>.<verb>[.<sub>]`).
+- **Overlay ids:** `[a-z][a-z0-9-]*`, typically `<product>-<tenant>` (e.g. `lending-branch`).
 
-- groupId `ai.skillroy.<product>` (and `ai.skillroy.<product>.<tenant>` for tenant modules), artifact ids
-  `skillroy-<product>-agent`, `skillroy-<product>-pack` and so on, mirroring the base's `skillroy-*` names;
-- Java packages under `ai.skillroy.<product>`, **outside `ai.skillroy.testjava`**. The base's loaders treat its own
-  prefixes specially: `ai.skillroy.testjava.protocol.` and `ai.skillroy.testjava.agent.api.` are parent-first in every
-  module loader, and `ai.skillroy.testjava.agent.` and `ai.skillroy.testjava.protocol.` are on the hook engine's deny-list
-  (P1 §2.2; design §2.6, "Hook policy"). A separate root keeps the layer clear of every such rule;
-- the domain id (module, pack and primitive namespace): short, lower case, neutral, and stable, because it is in every
-  scenario's `pack:` key, every committed plan and every MCP tool name. Primitive names follow
-  `<namespace>.<verb>[.<sub>]` in lower camel segments (P1 §4, `PrimitiveSpec`); MCP replaces the dots (P5 §9.3);
-- overlay ids `[a-z][a-z0-9-]*`, by convention `<product>-<tenant>` (the sample: `lending-branch`).
+### 3.3 Rules from the agent's class-loader hierarchy
 
-### 3.3 Rules that follow from the agent's class loaders
+The agent home creates one loader for `lib/` and **one child-first loader per jar in `modules/`**:
 
-The agent home has one agent loader for `lib/` and **one child-first loader per module jar** (P1 §2.2). Three rules
-follow for the agent module:
+- **Sibling module jars cannot see each other's classes.** Shade your constants module's classes directly into your agent module jar.
+- **Every jar in `modules/` must register an `AgentModule`** (`META-INF/services/ai.skillroy.testjava.agent.api.AgentModule`). A jar without one records a `FAILED` module entry in `agent.info`, keeping mutating calls `NOT_READY` (when no `ProductionMarker` is set) unless `allowFailedModules=true`. Never drop plain helper jars into `modules/`.
+- **`install(AgentContext)` must not touch application classes or AWT** and must never block on the EDT or startup thread, because `JAVAAGENT` runs `install` inside `premain` before the application's `main`.
 
-- **Code shared by two of your module jars must be inside each.** Two module jars do not see each other's classes. Embed
-  the constants module's classes in the agent module's jar (for example with the shade plugin; this is the layer's own
-  code, not third-party code).
-- **Every jar in `modules/` must be an agent module.** A jar there without a
-  `META-INF/services/ai.skillroy.testjava.agent.api.AgentModule` entry is a `FAILED` record in `agent.info`. When no
-  `ProductionMarker` is in place and any module `FAILED`, the target never becomes ready and mutating calls answer
-  `NOT_READY`, unless the option `allowFailedModules=true` is set (S14, P1 §5 "Modules"). Do not drop helper jars there.
-- **`install` must not touch the application or AWT**, and must not wait for the event-dispatch thread or the thread
-  that called the start: it runs before the application's `main` in `JAVAAGENT` mode (P1 §4, `AgentModule.install`).
+### 3.4 Tenant overlays: in-repo vs separate repository
 
-### 3.4 Tenant overlays: modules or repositories
-
-Keep a tenant's overlay in the product repository when the same team maintains both and the tenant's facts may be
-shared with everyone who can read the product layer; give it a repository of its own when the tenant's names, schema or
-hook targets must stay with fewer readers. Either way the overlay is a **second jar** that depends on the product pack
-(B26 Q4), with its own scenarios module or test JVM (§2.5), its own environments in `credentials.yaml` and bindings, and
-the product's leak check extended to the tenant's own names where a tenant repository must not leak into the product's.
+Keep tenant overlays in the product repository when the same team maintains both; split a tenant into its own repository when tenant identifiers, schema details, or hook targets have stricter access controls. Either way, ship the overlay as a second jar with its own test JVM (§2.5), its own `credentials.yaml` and bindings, and its own leak-check deny-list (§13).
 
 ---
 
 ## 4. Consuming the base
 
-### 4.1 What to depend on
+### 4.1 Base artifacts
 
-Coordinates are `ai.skillroy:<artifactId>:<version>` (parent `ai.skillroy:skillroy-test-java-parent`; no BOM). The ones
-a layer uses:
+Coordinates are `ai.skillroy:<artifactId>:<version>` (parent `ai.skillroy:skillroy-test-java-parent`):
 
 | Artifact | Side | Used for |
 |---|---|---|
-| `skillroy-agent-api`, `skillroy-protocol` | agent (Java 8) | the SPIs of §6; `provided` scope |
-| `skillroy-agent-bootstrap` | agent | `EmbeddedAgent`, only for a plugin class that links against it (§5.3) |
-| `skillroy-agent-web` (its `test-jar`) | agent tests | the adapter contract kit, for a new `WebEngineAdapter` (§10.5) |
-| `skillroy-agent-dist` (type `zip`) | build | the agent home (§4.5) |
-| `skillroy-scenario`, `skillroy-data` | controller (Java 25) | the `DomainPack` SPI, resolution, data channels, credentials |
-| `skillroy-controller` | controller | the client, attach, `TargetLauncher` (reached through `skillroy-scenario`) |
-| `skillroy-junit` | scenarios | `ScenarioTests`, one dynamic test per scenario (§8.10) |
-| `skillroy-cdp` | scenarios, optional | the CDP path for web verbs (§10.3) |
-| `skillroy-inference`, `skillroy-mcp`, `skillroy-vision`, `skillroy-telemetry` | scenarios or tools, optional | the AI layer, the MCP server, the vision loop, OpenTelemetry export |
+| `skillroy-agent-api`, `skillroy-protocol` | agent (Java 8) | Agent SPIs (§6); `provided` scope |
+| `skillroy-agent-bootstrap` | agent | `EmbeddedAgent`, only if linking directly rather than reflectively (§5.3) |
+| `skillroy-agent-web` (`test-jar`) | agent tests | `WebEngineAdapterContract` test kit (§10.5) |
+| `skillroy-agent-dist` (`zip`) | build / ITs | Versionless agent home assembly (§4.4) |
+| `skillroy-scenario`, `skillroy-data` | controller (Java 25) | `DomainPack` SPI, `BaseDomainPack`, resolution, data channels, credentials |
+| `skillroy-controller` | controller | `AgentClient`, attach, `TargetLauncher` (transitively via `skillroy-scenario`) |
+| `skillroy-junit` | scenarios | `ScenarioTests` JUnit 5 `@TestFactory` harness and `OutputScan` (§8.10) |
+| `skillroy-cdp` | scenarios, optional | Playwright CDP path for `web.*` verbs (§10.3) |
+| `skillroy-inference`, `skillroy-mcp`, `skillroy-vision`, `skillroy-telemetry` | scenarios / tooling, optional | LLM resolvers, MCP server, V1–V3 vision loop, OpenTelemetry span export |
 
-The CLI distribution (`bin/skillroy`, `bin/skillroy.bat`, `lib/`) is a build output of `controller/skillroy-cli`
-(`target/skillroy-cli/` and `target/skillroy-cli.zip`) and is **not attached as a Maven artifact**; the agent home zip
-is (`skillroy-agent-dist`, type `zip`, no classifier). 0.1.0 is released as the tag `v0.1.0` only: the owner chose on
-2026-10-12 to publish neither the zips nor the jars, so both are built from the tag
-([`release-notes/0.1.0.md`](../release-notes/0.1.0.md) §1).
+The CLI distribution (`bin/skillroy`, `bin/skillroy.bat`, `lib/`) is built under `controller/skillroy-cli/target/skillroy-cli/` (and `skillroy-cli.zip`); `skillroy-agent-dist` is attached as a Maven `zip` artifact.
 
-### 4.2 Obtaining a release
+### 4.2 Building and installing the base locally without polluting `~/.m2`
 
-`0.1.0` is in no Maven repository: build it from the tag `v0.1.0` and install or deploy it as §4.3 says. Once a
-release is published, depend on it through the organisation's repository manager if there is one. Pin the version once
-in the layer's parent POM. The CLI distribution and the agent home come from the same release.
+**Do not run `mvn install` inside a base development working tree.** Partial reactor builds in the base resolve `skillroy-agent-dist` from `~/.m2` if a snapshot is installed there, which can shadow fresh reactor changes with stale jars.
 
-### 4.3 Until a release is published: the `mvn install` trap and the safe ways
+Safe ways for a private layer repository to consume the base before artifacts are hosted in a shared Maven repository:
 
-**Never `mvn install` in the base's working tree** (TODO "Environment notes"; README "Build"). The base builds partial
-reactors with `mvn -o verify -pl <module> -am`; a module whose tests unpack the agent home takes the
-`skillroy-agent-dist` zip from the reactor only when it declares it. An installed copy of the version the base's working tree
-carries (on `main` a `-SNAPSHOT`) in the local Maven repository shadows the reactor where it does not: on 2026-10-07 a partial build of the CLI module took a
-stale zip from there, unpacked jars older than the HMAC handshake into its test agent home, and failed with a 401 on
-`/ping`. An install into the default `~/.m2` therefore breaks the base's own development on the same machine.
+1. **Dedicated local repository from a clean tag/commit checkout:** Clone or check out a tagged commit in a separate directory, verify and install into an isolated local repo (`mvn verify install -DskipTests -Dmaven.repo.local=<layer-m2-dir>` after a clean `mvn verify`), and point the layer's builds at `-Dmaven.repo.local=<layer-m2-dir>`.
+2. **Internal artifact repository:** Deploy the verified tag from a clean checkout to your organization's internal Maven repository (Nexus, Artifactory, GitHub Packages) and resolve normally.
+3. **Distinct local version:** If using `~/.m2`, set a dedicated version string in the clean checkout first (`mvn versions:set -DnewVersion=0.2.0-local1`) so it never collides with `0.2.0-SNAPSHOT` in the base working tree.
 
-Safe ways for a layer to obtain the base before it is published:
+Always use the **same base build** for the agent home zip, the CLI distribution, and the controller Maven dependencies.
 
-1. **A separate clone or worktree of a release tag** (`v0.1.0`), never the working tree someone develops in, built with
-   `mvn verify` and installed from there **into a dedicated local repository** that only the layer's builds use
-   (`-Dmaven.repo.local=<dir>` for both the install and the layer's builds, or `<localRepository>` in a settings file
-   the layer's builds name; it fills from the network or the organisation's mirror on first use). The base's working
-   tree and its `~/.m2` stay untouched.
-2. As (1), but **deployed to an internal repository** that the layer's builds resolve from; the layer's CI then needs
-   no clone of the base.
-3. If the default `~/.m2` must be used, give the installed build a version of its own in the clone first (for example
-   with `mvn versions:set`), so that it can never be mistaken for the working tree's own version; delete it when a
-   published release arrives.
+### 4.3 Version alignment
 
-Whichever way: record the base commit the layer builds against (in the layer's parent POM or its README), and take the
-agent home zip, the CLI distribution and the base jars of the pack **from the same build**.
+- **Keep agent and controller on the same base version.** Mixing versions across the wire is unsupported.
+- **Protocol vs module versions:** `/ping` enforces matching `Protocol.VERSION` major (`0.2`). To guard against mismatches between your own `AgentModule` and `DomainPack`, bump `AgentModule.version()` whenever primitives/SPIs change and check `agent.info` in a `PreflightCheck` if desired.
+- **Plan format (`planVersion` 7):** If you commit pre-compiled `plan.json` files alongside `.yaml` scenarios, re-run `skillroy compile` (or `-Dskillroy.plans.update=true` if using a test like `PlansUpToDateTest`) whenever upgrading the base or changing `DomainPack.version()`.
 
-### 4.4 Keep versions aligned
+### 4.4 Assembling an agent home
 
-- **One base version for everything**: the agent home the target loads, the CLI or the JUnit glue that drives it, and
-  the `skillroy-scenario` the pack was compiled against. Mixing them is not a supported configuration.
-- **The handshake checks the protocol, not your module.** Every connection begins with `/ping`, which carries the
-  protocol version (`Protocol.VERSION`, `0.2`) and must report the same major on both sides (P1 §3, §7); a mismatch is
-  refused. Nothing checks that the product's agent module and pack belong together: `agent.info` reports every module's
-  `version()`, so a pack can check it in a `PreflightCheck` (a layer practice, not a base feature).
-- **Bump `AgentModule.version()` whenever the module's primitives or SPIs change**, as the sample does
-  (`LendingModule.VERSION`, P1 §9.2), and the pack's `version()` whenever a compiled plan would change; plans record
-  `packVersion`, and a different version at run time is logged, not an error (P2 §8.3, Q13).
-- **Plan versions move with the base**: each phase that changed the plan format raised `planVersion` (version 6 since
-  Phase 7, P7 §8.2; **version 7 since Phase 8**, P8 §8.2, *(Phase 8, built 2026-10-19, EX)*, whose reader also refuses
-  an unknown step or call key). After a base upgrade, recompile and commit the plans (`skillroy compile`, or the sample's
-  `-Dskillroy.plans.update=true` pattern, TODO "Environment notes", Phase 7 build).
+Unpack `skillroy-agent-dist:<version>:zip` and copy `skillroy-<product>-agent.jar` into `modules/` (see `unpack-agent-home` and `lending-module-into-agent-home` in `samples/skillroy-sample-lending-scenarios/pom.xml`):
 
-### 4.5 Assembling an agent home for the application
-
-The agent home is the unpacked `skillroy-agent-dist` zip (P1 §2.1). The application's agent module joins it as a jar in
-`modules/`; jar names in the home carry no version. The sample's scenarios module shows the whole assembly in its POM
-(`maven-dependency-plugin` executions `unpack-agent-home` and `lending-module-into-agent-home`):
-
-```
-target/skillroy-agent/                    unpacked from ai.skillroy:skillroy-agent-dist:<version>:zip
-  skillroy-agent-bootstrap.jar            the -javaagent and attach jar; on the host class path in EMBEDDED mode
-  skillroy-agent-spy.jar                  appended to the bootstrap path by the hooks module only
-  lib/        skillroy-protocol.jar skillroy-agent-api.jar skillroy-agent-core.jar
-  modules/    skillroy-agent-swing.jar skillroy-agent-data.jar skillroy-agent-web.jar
-              skillroy-<product>-agent.jar          <- the layer's module, copied in
-  optional/   skillroy-agent-hooks.jar skillroy-agent-byteman.jar skillroy-agent-byteman-sys.jar
+```text
+target/skillroy-agent/
+  skillroy-agent-bootstrap.jar            -javaagent / attach entry; host class path in EMBEDDED mode
+  skillroy-agent-spy.jar                  appended to bootstrap path on first hook.install only
+  lib/        skillroy-protocol.jar  skillroy-agent-api.jar  skillroy-agent-core.jar
+  modules/    skillroy-agent-swing.jar  skillroy-agent-data.jar  skillroy-agent-web.jar
+              skillroy-<product>-agent.jar
+  optional/   skillroy-agent-hooks.jar  skillroy-agent-byteman.jar  skillroy-agent-byteman-sys.jar
 ```
 
-Alternatives to copying the module in: the agent option `modules=<jar>,…` (each jar must pass the shared jar rule
-`JarTrust`: not writable by anyone but its owner, P1 §2.4), or `skillroy attach … --module <jar>` (§5.5). There is no
-upload of a module over the channel (design §3.6 mentions `POST /modules`; it is not built).
+Alternatively, pass external module paths via the agent option `modules=<jar>,…` (verified owner-writable-only by `JarTrust`) or `skillroy attach <pid> --module <jar>`.
 
 ---
 
@@ -358,1446 +239,433 @@ upload of a module over the channel (design §3.6 mentions `POST /modules`; it i
 
 ### 5.1 Three load modes, identical primitives
 
-| Mode | How | `Instrumentation` (hooks, Byteman) | Use it for |
+| Mode | How | `Instrumentation` (hooks, Byteman) | Typical use |
 |---|---|---|---|
-| `EMBEDDED` | the application's own plugin mechanism calls `EmbeddedAgent.start` | none: `hook.engine` is `UNAVAILABLE("no Instrumentation in EMBEDDED mode")`; self-attach is not built | suites without hooks where the launch command cannot change |
-| `JAVAAGENT` | `-javaagent:<home>/skillroy-agent-bootstrap.jar[=<options>]`, or the same through `JAVA_TOOL_OPTIONS` | yes | CI and services; hooks; Java 21+ targets (no JEP 451 warning) |
-| `ATTACH` | `skillroy attach <pid> --home <home>` | yes | ad-hoc work on a running target; not CI |
+| `EMBEDDED` | Application plugin calls `EmbeddedAgent.start` / `startAsync` | No (`hook.engine` is `UNAVAILABLE`) | Suites without hooks when launch flags cannot be edited |
+| `JAVAAGENT` | `-javaagent:<home>/skillroy-agent-bootstrap.jar[=<options>]` (or via `JAVA_TOOL_OPTIONS`) | Yes | CI and services; hook suites; Java 21+ targets (no JEP 451 warning) |
+| `ATTACH` | `skillroy attach <pid> --home <home>` | Yes | Ad-hoc exploration on an already-running local JVM |
 
-The handshake reports the mode in use; the capability matrix states every difference (design §1.3, §2.2; P1 §2.3, §7).
-CI loads the agent at launch and starts the target once per suite, never attaching (design §6).
+CI should always load the agent at launch (`JAVAAGENT` or `EMBEDDED`) and start the target once per suite (design §6).
 
-### 5.2 The enable flag and where options come from
+### 5.2 The enable gate and option precedence
 
-The agent does nothing unless it is enabled, checked before any thread or port exists (design §2.2 step 7; B13):
+The agent starts zero threads and binds zero sockets unless explicitly enabled:
 
-- `JAVAAGENT`: only the system property `-Dskillroy.agent.enabled=true` or the environment variable
-  `SKILLROY_AGENT_ENABLED=true`. Neither the `-javaagent` argument string nor the options file it names can enable it,
-  because `JAVA_TOOL_OPTIONS` may hand them to JVMs that never asked for the agent.
-- `EMBEDDED`: also `enabled=true` in the `Properties` passed to `EmbeddedAgent.start`.
-- `ATTACH`: also `enabled=true` in the attach options (attaching is itself a deliberate act by a same-user process).
+- `JAVAAGENT`: `-Dskillroy.agent.enabled=true` or `SKILLROY_AGENT_ENABLED=true` (never accepted from the `-javaagent` option string or options file, protecting child processes when `JAVA_TOOL_OPTIONS` is set).
+- `EMBEDDED`: also accepts `enabled=true` in the `Properties` passed to `EmbeddedAgent.start`.
+- `ATTACH`: also accepts `enabled=true` in attach options.
 
-Options, lowest to highest precedence: defaults; system properties `skillroy.agent.<key>`; the options file named by
-`t=` or `config=` (Java properties); the argument string `k=v;k=v` or the `EMBEDDED` `Properties` (P1 §2.4). Keep the
-argument string short and put the rest in the options file: the attach protocol refuses an argument of 1025 bytes or
-more. An options file is read only when it is a regular file of the current user that nobody else may write (and, when
-it holds a `token`, read); a refusal starts nothing.
+Option precedence (lowest to highest): built-in defaults -> `skillroy.agent.<key>` system properties -> options file (`t=` or `config=`, owner-writable-only, and `0600` if it contains `token`) -> argument string `k=v;k=v` or `EMBEDDED` `Properties`. Keep argument strings short (< 1024 bytes for HotSpot attach) and place longer settings in the options file.
 
-### 5.3 `EMBEDDED`: through the application's plugin mechanism
+### 5.3 `EMBEDDED` mode
 
-If the application loads plugins or includes of its own (a class named in a configuration file or a system property),
-a small plugin class can start the agent with the application's own objects in hand (P1 §2.3; design §2.2):
+- `EmbeddedAgent.start(Properties options, ClassLoader hostLoader, Object hostContext)` waits up to 60 s for startup; `EmbeddedAgent.startAsync(...)` returns immediately and is preferred on the EDT or latency-sensitive startup hooks. Both are idempotent, never throw, and use JDK types only so a host plugin can invoke them reflectively without compile-time coupling.
+- `hostContext` is exposed via `AgentContext.hostContext()` so your `AgentModule` receives live application references cleanly rather than scraping statics.
+- Place `skillroy-agent-bootstrap.jar` from inside the unpacked agent home on the host class path (`home` defaults to that jar's directory). Never hardcode `enabled=true` inside the plugin itself.
+- Worked example: `SkillroyLendingPlugin` in `samples/skillroy-sample-lending-agent`.
 
-- `EmbeddedAgent.start(Properties options, ClassLoader hostLoader, Object hostContext)` blocks until the agent serves or
-  refused (bounded by the start timeout, 60 s); `EmbeddedAgent.startAsync(…)` with the same arguments returns at once and
-  is the form for a hook that must return quickly or runs on the event-dispatch thread. Both are idempotent and
-  re-entrant, never throw, and use JDK types only, so the plugin can call them by reflection
-  (`Class.forName("ai.skillroy.testjava.agent.bootstrap.EmbeddedAgent").getMethod("start", Properties.class,
-  ClassLoader.class, Object.class)`) and link without the bootstrap jar.
-- `hostContext` reaches the module as `AgentContext.hostContext()`: hand it the application object the module needs,
-  instead of letting the module find it through statics.
-- `EmbeddedAgent.stop()` stops the agent this bootstrap started; the plugin should stop only what it started.
-- The bootstrap jar must be on the host class path. Use the one **inside the agent home**: the option `home` defaults to
-  the bootstrap jar's directory, which is how the agent finds `lib/` and `modules/`.
-- The plugin never enables the agent itself (the sample's does not): leaving it configured is then harmless.
+### 5.4 `JAVAAGENT` mode
 
-Worked example: `samples/skillroy-sample-lending-agent/src/main/java/ai/skillroy/testjava/samples/lending/agent/embedded/SkillroyLendingPlugin.java`,
-started through the sample application's `lending.plugins` property (`LendingPlugin`). The sample keeps the plugin class
-inside the agent module's jar; a layer may keep it in a module of its own (§3.1).
+Use `-javaagent:<home>/skillroy-agent-bootstrap.jar=<options>`. When injecting via `JAVA_TOOL_OPTIONS`, always set `mainClassGuard=<mainClassOrJar>` so build tools or helper JVMs ignore the agent. Programmatic test launches can use `TargetLauncher.javaAgent(home, options)` (and `.viaJavaToolOptions(true)`).
 
-### 5.4 `JAVAAGENT`
+### 5.5 `ATTACH` mode
 
-`premain` keeps `Instrumentation` and starts the core on a thread `skillroy-start` while the JVM waits (bounded). When
-the launch command cannot be edited, put the flag in `JAVA_TOOL_OPTIONS` and set `mainClassGuard=<main class or jar
-path>` so that only the target JVM of a process tree starts the agent; the guard must match the whole launch target
-(S17, P1 §2.4). A Java 25 target loaded this way prints no JEP 451 warning and shows the same capability matrix as a
-Java 8 target (P6 §8). With the hooks module and a Java 25 target, one class-data-sharing warning line appears on the
-target's standard error the first time the spy jar is appended (B26 Q14; `SECURITY.md`). `TargetLauncher` (in
-`skillroy-controller`, builder methods `javaAgent(home, options)` and `viaJavaToolOptions(true)`) launches a target this
-way from a test.
+`skillroy attach <pid> --home <home> [--module <jar>]… [--option k=v]…` writes an owner-only options file, waits out the 5 s JVM startup margin, maps JDK 8's `"0"` response, and completes the mutual `/ping` handshake. On JDK 21+, dynamic attach emits a JEP 451 warning unless the target started with `-XX:+EnableDynamicAgentLoading`.
 
-### 5.5 `ATTACH`
+### 5.6 Common agent options
 
-`skillroy attach <pid> --home <agent home> [--module <jar>]… [--option key=value]… [--discovery-dir <dir>]` loads the agent
-into a running JVM through the JDK attach API and proves it with `/ping` (P1 §7; `AttachSession`). The controller writes
-the token, nonce and options into an owner-only options file and passes only `t=<file>`. It gives a JVM younger than 5 s
-that long first (the attach signal can end a JVM that is starting up) and maps Java 8's bare `0` reply. A JDK 21+
-target prints the JEP 451 warning and will be refused by a future JDK unless launched with
-`-XX:+EnableDynamicAgentLoading`: prefer `JAVAAGENT` there (`SECURITY.md`). Same OS user only; on Windows also the same
-logon session, integrity level and bitness (§5.9). After attach, connect with `--pid <pid>` (or `--port` and
-`--token-file`).
-
-### 5.6 Options a layer sets
-
-The full table is P1 §2.4. The ones a layer meets:
-
-| Option | Default | What it does |
+| Option | Default | Purpose |
 |---|---|---|
-| `enabled` | `false` | see §5.2 |
-| `home` | the bootstrap jar's directory | the agent home |
-| `modules` | – | extra module jar paths, each checked by `JarTrust` |
-| `optionalModules` | – | stems of jars under `optional/` to load: `skillroy-agent-hooks`, `skillroy-agent-byteman` (§9) |
-| `discoveryDir` | `${java.io.tmpdir}/skillroy-<user>` (fallback `<user.home>/.skillroy/run` when another user owns that) | where the discovery file and the token file are written, owner-only (P1 §2.5) |
-| `tokenFile` | `<discoveryDir>/skillroy-<pid>-<startMs>.token` | the shared secret's file; the token never travels (HMAC, H2) |
-| `token` | generated (32 random bytes) | a supplied token must have at least 16 characters; generate it |
-| `port` | `0` (ephemeral) | the loopback port; fix it per target instance when a remote CI step connects with `--port` |
-| `readOnly` | `false` | refuses mutating and script primitives |
-| `requireProductionMarker` | `false` | §5.7 |
-| `allowFailedModules` | `false` | §3.3 |
-| `mainClassGuard` | – | §5.4 |
-| `readyTimeoutMs` | `120000` | how long readiness may take before `target.ready` is reported `UNAVAILABLE` (polling continues) |
-| `redact` | – | a regular expression of further secret keys (the module's own `RedactionKeys` is better, §6.11) |
-| `robot` | `false` | one half of the Robot opt-in (§11.6); never commit it |
-| `byteman.jar` | – | the user-supplied Byteman jar (§9.6) |
-| `hooks.*` | see P1 §2.4 | the hook engine's bounds (§9.3) |
-| `web.jxbrowser.chainInjectJs` | off | §10.2 |
+| `enabled` | `false` | Master enable switch (§5.2) |
+| `home` | bootstrap jar directory | Agent home path |
+| `modules` | – | Comma-separated external module jars (`JarTrust`-checked) |
+| `optionalModules` | – | Optional module stems under `optional/`: `skillroy-agent-hooks`, `skillroy-agent-byteman` (§9) |
+| `discoveryDir` | `${java.io.tmpdir}/skillroy-<user>` | Owner-only directory for discovery and token files |
+| `tokenFile` | `<discoveryDir>/skillroy-<pid>-<startMs>.token` | Shared 32-byte HMAC secret file (never sent over the wire) |
+| `port` | `0` (ephemeral) | Loopback HTTP port |
+| `readOnly` | `false` | Blocks all `mutating` and `script` primitives and `STUB` hooks |
+| `requireProductionMarker` | `false` | Refuses to serve if no `ProductionMarker` is registered (§5.7) |
+| `allowFailedModules` | `false` | Allows readiness even if a jar in `modules/` failed to load (§3.3) |
+| `mainClassGuard` | – | Exact launch main-class / jar prefix required in `premain` (§5.4) |
+| `readyTimeoutMs` | `120000` | Deadline before `target.ready` reports `UNAVAILABLE` (polling continues) |
+| `redact` | – | Regex of extra secret property/option keys (prefer `RedactionKeys` SPI, §6.11) |
+| `robot` | `false` | Agent half of V3 `java.awt.Robot` double opt-in (§11.6) |
+| `byteman.jar` | – | Path to user-supplied Byteman jar (§9.6) |
+| `hooks.deny` | – | Operator class deny-list patterns for hooks and Byteman (§9.3) |
+| `web.jxbrowser.chainInjectJs` | `false` | Opt-in chaining of JxBrowser `InjectJsCallback` for document-start scripts (§10.2) |
 
-Unknown keys are kept and visible to modules (`AgentContext.options()`, `option(key)`): a layer may define its own,
-prefixed with its id (`<product>.<name>`), as the web host does with `webhost.mask`.
+Custom `<product>.*` keys are preserved in `AgentContext.options()` / `AgentContext.option(key)`.
 
 ### 5.7 Refusing production
 
-A test agent enabled on a live installation is the risk `ProductionMarker` exists for (design §2.2 step 7; P1 §4, §5):
+Register a fast, non-blocking `ProductionMarker` in your `AgentModule` that returns a non-null reason string (or throws) if the target environment looks like production (e.g. production licence flag, missing test mode marker, or live cluster hostname), and set `requireProductionMarker=true` in your options file so the agent also shuts down if your module failed to load. On production JVMs that must never accept same-user dynamic attach, pass `-XX:+DisableAttachMechanism`.
 
-- A `ProductionMarker` returns non-null ("this looks like production because …") or throws, and the agent refuses to
-  serve and shuts down, with the reason in `skillroy.agent.error`. It is evaluated once the target is ready, before any
-  module's `onTargetReady`; until it passes, only read-only primitives are served.
-- With no marker in place the agent serves and logs a warning. The sample has none (it is a sample); **a
-  product layer must**: decide what identifies production for the application (a licence mode, a configuration flag, a
-  host naming rule, the absence of a test-only setting) and make the marker cheap and non-blocking.
-- Set `requireProductionMarker=true` in the layer's options file, so that the agent refuses to serve when no marker is
-  in place at all, which is what happens when the layer's own module failed to load. An options file without a token
-  may stay readable by others (P1 §2.4).
-- `-XX:+DisableAttachMechanism` closes the same-user attach route on a JVM that must never be instrumented
-  (`SECURITY.md`, "Attach is the platform's trust boundary").
+### 5.8 Target Java 8 through 25
 
-### 5.8 Target Javas 8 to 25
+Compile both main and test code in agent modules with `<release>8</release>` (no `var`, records, `List.of`, `String.isBlank`, etc.) and run agent tests on both a real Java 8 JVM and Java 25 (`ci/run-in-linux.sh`).
 
-The agent is Java 8 bytecode and runs on targets from Java 8 to 25 (B4); the gates are a Java 8 and a Java 25 target in
-every load mode (design §6; Java 21 is no longer run as a gate). The layer's agent module is held to the same level:
-`--release 8` for main and test code, so no `var`, records, `List.of`, `String.isBlank` and the like (P1 §1). Run the
-agent module's own tests on a real Java 8 JVM as the base does (`-Djvm=<java 8>`, README "Build"); surefire reports
-"Tests run: 0" for some configurations on Java 8, so read counts, not exit codes (TODO "Environment notes", Phase 6).
+### 5.9 Windows notes
 
-### 5.9 Windows
+Windows support (`bin\skillroy.bat`, `ci\run-on-windows.cmd`, NTFS single-ACE `SecureFiles`) is implemented and unit-tested where portable, but **unverified on a live Windows host** (`SECURITY.md`):
 
-The Windows path is built where Linux can test it and **not verified on a Windows host** (README "Windows"; P6 §9;
-threat model §8). What a layer must know:
-
-- **`JAVAAGENT` is the path for services and CI**, with the agent loaded in the logged-on user's session. That load with
-  the `SEMANTIC`, `ACTION`, `COMPONENT`, `DISPATCH` rungs and `PAINT` capture is Phase 6's open exit criterion: it waits
-  for a Windows host (design §8, Phase 6 row; P6 §13.3).
-- `ATTACH` needs the same user, logon session, integrity level and bitness; across sessions it is not supported and not
-  detected (P1 §2.5 "Windows").
-- Owner-only files use an ACL with one entry for the current user; on a Windows whose built-in account names are not
-  English the checks fail closed, with the `icacls` remedy in `SECURITY.md`; FAT and exFAT volumes are refused.
-- `bin\skillroy.bat` is the launcher; `ci\run-on-windows.cmd` runs the base's `mvn verify` with a Java 8 and a Java 25
-  target from an interactive session (`JAVA_HOME` a JDK 25, `SKILLROY_JDK8_HOME` a JDK 8).
-- Run outputs on Windows inherit the parent directory's access list (S144) and a directory junction in the output tree
-  is followed (S142): give `--out` a directory under the user's profile (`SECURITY.md`).
-
-A product layer that ships on Windows should plan its own verification run early and report the result to the base in
-neutral terms (§13).
+- Prefer `JAVAAGENT` in an interactive user logon session (never Session 0 for display/Robot tests).
+- `ATTACH` requires matching user, logon session, integrity level, and bitness.
+- Non-English localized Windows built-in account names cause `SecureFiles` to fail closed (see `icacls` guidance in `SECURITY.md`); FAT/exFAT volumes are rejected.
+- Place `--out` inside a private directory under the user's profile.
 
 ---
 
 ## 6. The agent-side SPIs
 
-All live in `agent/skillroy-agent-api`: the module types in `ai.skillroy.testjava.agent.api`, the SPIs in
-`ai.skillroy.testjava.agent.api.spi` (and `….spi.web`, `….spi.hook`). The contract is P1 §4, with the later additions
-marked there; the design's table is design §2.6.
+All agent SPIs live in `agent/skillroy-agent-api` (`ai.skillroy.testjava.agent.api` and `….spi`, `….spi.web`, `….spi.hook`; design §2.6).
 
 ### 6.1 Writing an `AgentModule`
 
-- `id()`, `version()`, `requires()` (module ids that must install first; an unknown id keeps the module from installing).
-- `install(AgentContext)`: on the agent's start thread, possibly before the application exists. Add primitives,
-  SPI implementations (through `ctx.spi()`, the `SpiRegistry`) and capabilities (`ctx.capabilities()`). Touch no
-  application singleton and no AWT, wait for no thread, initialise no `java.util.logging`.
-- `onTargetReady(AgentContext)`: once every `ReadinessSource` reports ready, on an agent thread. Wire listeners here (or,
-  as the sample does, at the first quiescent point the readiness source finds, §6.3).
-- `uninstall()`: reverse everything, never throw, never block for long. Keep the handles that the registration and
-  declaration methods return and close them (A18; the sample's `LendingModule.uninstall`).
-- Agent threads are daemon threads named `skillroy-*` with the host loader as context class loader (S34): a thread host
-  code creates on them inherits both, so an SPI call must not lazily start host infrastructure that spawns threads
-  (pools, timers); route such a call through `ThreadPolicy.APP` instead.
-- Log through `ctx.log()` (`AgentLog`), never `System.out`.
-- One service file: `META-INF/services/ai.skillroy.testjava.agent.api.AgentModule`.
+- `install(AgentContext)`: register primitives (`ctx.primitives()`), SPIs (`ctx.spi()`), and capabilities (`ctx.capabilities()`). Do not touch application singletons, AWT, or `java.util.logging`.
+- `onTargetReady(AgentContext)`: runs on an agent worker once all `ReadinessSource`s pass. Attach application listeners and chain seams here, saving registration handles.
+- `uninstall()`: close registration handles, detach listeners, restore chained seams, and never throw.
+- Route calls that might lazily initialize application thread pools or timers through `ThreadPolicy.APP` so spawned host threads do not inherit `skillroy-*` daemon status.
+- Log via `ctx.log()` (`AgentLog`), never `System.out`, and register `META-INF/services/ai.skillroy.testjava.agent.api.AgentModule`.
 
 ### 6.2 The SPI map
 
-| SPI | What it is for | When a layer needs it | Thread | Sample | Contract |
-|---|---|---|---|---|---|
-| `ReadinessSource` | "domain singletons may be touched now"; polled every 250 ms | always | agent worker; cheap, non-blocking | `LendingModule.Readiness` | P1 §4; design §2.2 step 3 |
-| `ThreadPolicyProvider` | the application thread a domain call must run on (`ThreadPolicy.APP`), and the threads the agent must never block or run on; (Phase 8, built 2026-10-19, ET) `quiescentPoint()`: the point the application's idle callback drives, for `APP_QUIESCENT` | whenever domain state is confined to an application thread | any agent thread; thread-safe; `quiescentPoint()` cheap, non-blocking, the same instance each call | `LendingWorker` | P1 §4 (A19 `available()`); P8 §4.1 |
-| `AppStateProvider` | the `app{…}` section of a snapshot and `app.state`: state name, prompt, accepted inputs | always | `ThreadPolicy.APP` | `LendingModule.AppState` | P1 §4; design §2.5 |
-| `NameEnricher` | a stable name for a component whose accessible name is empty | image-only buttons, painted keys | EDT; fast | `LendingWidgets` | P1 §4 |
-| `LocatorResolver` | locators in the application's vocabulary (`{action: "DUE"}`), and `describe` for the hit-test | custom widgets without stable names | EDT | `LendingWidgets` | P1 §4; P7 §3.7 |
-| `ActionFirer` | the `ACTION` rung: fire a custom widget's action without focus | widgets that ignore `doClick()` unfocused | EDT | `LendingWidgets` | P1 §4; design §3.7 |
-| `DialogTextExtractor` | title, text and buttons of a custom-painted dialog | dialogs the generic reader cannot read | EDT | `LendingWidgets` | P1 §4 |
-| `DialogLocator` | dialogs drawn inside another window (glass pane, internal frame); whether they block input | in-window dialogs | EDT | – (P1 §4, A27) | P1 §4 |
-| `RegionResolver` | stable region ids inside a custom-painted component (a key pad's keys) | vision steps and pointer steps on painted surfaces | EDT | `LendingRegions` | P7 §3.7 |
-| `CaptureMask` | which components show a secret: blanked in captures, text withheld from every reader | every component that can show a secret, and every control that feeds one | EDT; fast, lock-free | `LendingCaptureMask` | P7 §3.6 |
-| `InputVeto` | the components the agent must never deliver input to, on any route, `force` included; readers flag them `vetoed` | every control whose action ends the JVM or cannot be undone in a test (Phase 8, built 2026-10-19, EA) | EDT; fast, lock-free; never changes the tree | `LendingInputVeto` | P8 §3.2 |
-| `MaskPolicy` | masks values `data.query` returns, `CAPTURE` hook values and Byteman bindings, and (Phase 8) every event payload at publish, `event:<topic>` | personal or secret columns and event fields | agent workers, the hooked thread, or the thread that publishes an event; never blocks, never waits on the EDT | `PasswordMask` | P1 §4; P6 §4.3; P8 §5.1 |
-| `RedactionKeys` | the application's own secret-looking keys in JVM arguments, properties, options | always worth one | any; thread-safe | `LendingSecrets` | P1 §4 (A21) |
-| `DataSourceProvider` | an in-process, credential-free read channel (`data.query`); (Phase 8, built 2026-10-19, ET) the five-argument `query()` with a `QueryControl`, `enforcesTimeout()`, `lane()`, `columns(table)` | resolvers and stored-row checks against the application's own data | agent workers, or the source's lane; `lane()`, `enforcesTimeout()`, `columns()` non-blocking | `LendingDataSource`; `LendingRowsSource` (positional, on a lane) | P1 §4, §6; P8 §4.2-§4.4 |
-| `DeviceAdapter` | peripherals as snapshot nodes and `device.*` actions | printers, scanners, readers, displays | `state`/`act` under `APP` | `PrinterDevice` | P1 §4; P3 §3.4 |
-| `ProductionMarker` | refuse to serve on production | always (§5.7) | agent worker, once | – (core tests: `ProductionGateTest`) | P1 §4, §5 |
-| `BrowserRegistryAdapter` | seeds for embedded browsers the Swing tree cannot see | cached, hidden or view-less browsers | agent workers; cheap | `WebHostModule` | P4 §3, §9.2 |
-| `BrowserMask` | (Phase 8) names (TRUE) or releases (FALSE) a browser by its seed tag or vendor object | a browser that shows a secret without a component a `CaptureMask` could name, or a pre-loaded view-less page a scenario must read while masks are registered | agent workers; fast, never calls the vendor object | `DetachedRelease`, `BackTagMask` (web host) | P4 §3 (A79); P8 §5.2 |
-| `WebEngineAdapter` | one per browser technology | an engine other than JCEF or JxBrowser | agent workers | built-ins `jcef`, `jxbrowser` | P4 §3, §4.5 |
-| `SurfaceSource` | non-Swing areas of the tree, for captures and hit-tests | rarely (the web module supplies one) | EDT | web module | P7 §3.7 |
-| `HookEngine` | hooks from Java instead of a catalogue | rarely (§9.5) | agent threads only | – | P6 §3.6 |
-| `ClassDeny` *(Phase 8, built 2026-10-19, EH)* | refuse a class by name before any module changes its bytecode (§9.3) | a hot path, a licensed or timing-sensitive class | agent workers, under the engine's or the Byteman module's lock; cheap, never blocks | `LendingClassDeny` (behind the agent option `lending.hooks.deny`) | P8 §6.5 |
+| SPI | Purpose | When needed | Thread | Sample reference |
+|---|---|---|---|---|
+| `ReadinessSource` | Signals when domain singletons are safe to access (polled every 250 ms) | Always | Agent worker (non-blocking) | `LendingModule.Readiness` |
+| `ThreadPolicyProvider` | Routes `ThreadPolicy.APP`, flags forbidden threads, and optionally exposes `quiescentPoint()` for `APP_QUIESCENT` | Whenever domain state has thread-affinity rules | Any agent thread (thread-safe) | `LendingWorker` |
+| `AppStateProvider` | Populates `app.state` and `UiSnapshot.app` | Always | `ThreadPolicy.APP` | `LendingModule.AppState` |
+| `NameEnricher` | Supplies stable names for components with empty accessible names | Icon-only buttons, custom widgets | EDT (fast) | `LendingWidgets` |
+| `LocatorResolver` | Custom domain locator keys (`{action: "DUE"}`) and `describe()` for hit-testing | Custom widgets | EDT | `LendingWidgets` |
+| `ActionFirer` | Fires custom widgets on the `ACTION` rung without focus | Focus-sensitive custom buttons | EDT | `LendingWidgets` |
+| `DialogTextExtractor` | Extracts title, message, and options from custom dialogs | Non-standard dialogs | EDT | `LendingWidgets` |
+| `DialogLocator` | Finds in-window modal overlays (glass panes, internal frames) | In-window modal prompts | EDT | `DialogLocator` Javadoc |
+| `RegionResolver` | Maps coordinates inside custom-painted surfaces to stable region ids | Painted keypads, canvases | EDT | `LendingRegions` |
+| `CaptureMask` | Blanks sensitive components in captures and withholds their text across readers | Password/PIN fields, secret screens, secret-feeding keypads | EDT (fast, lock-free) | `LendingCaptureMask` |
+| `InputVeto` | Blocks input delivery to dangerous controls on every route (`force` included) | Exit/shutdown/irreversible buttons | EDT (fast, lock-free) | `LendingInputVeto` |
+| `MaskPolicy` | Masks columns in `data.query`, hook captures, Byteman bindings, and `event:<topic>` payloads | PII / secret columns and event fields | Worker, hooked, or publishing thread | `PasswordMask` |
+| `RedactionKeys` | Extra secret key patterns for JVM args, system properties, and options | Application-specific secret properties | Any (thread-safe) | `LendingSecrets` |
+| `DataSourceProvider` | In-process read-only SQL channel (`open()` or cancellable 5-arg `query` with `QueryControl`, `lane()`, `columns()`, `exposesErrorText()`) | Resolvers and `db.*` checks over target DB | Worker or declared lane | `LendingDataSource`, `LendingRowsSource` |
+| `DeviceAdapter` | Peripherals (`device.list`, `device.state`, `device.act`) with optional rung ladders | Simulated/physical scanners, printers | `ThreadPolicy.APP` | `PrinterDevice`, `ScannerDevice` |
+| `ProductionMarker` | Shuts agent down if environment is production | Always (§5.7) | Agent worker (once) | `ProductionGateTest` |
+| `BrowserRegistryAdapter` | Seeds (with optional tags) for embedded browsers outside the Swing tree | Cached, hidden, or view-less browsers | Agent worker (non-blocking) | `WebHostModule` |
+| `BrowserMask` | Masks (`TRUE`) or releases (`FALSE`) browsers by seed tag or vendor instance | Sensitive or detached embedded browsers | Agent worker | `DetachedRelease`, `BackTagMask` |
+| `WebEngineAdapter` | Reflective adapter for an embedded browser engine | Engines other than JCEF or JxBrowser | Agent worker | Built-in `jcef`, `jxbrowser` |
+| `SurfaceSource` | Marks non-Swing surfaces for captures and hit-tests | Custom native surfaces (web module built in) | EDT | `skillroy-agent-web` |
+| `HookEngine` | Programmatic hook management from Java via `ctx.hooks()` | Rarely (prefer YAML catalogues, §9) | Agent workers only | §9.5 |
+| `ClassDeny` | Denies bytecode instrumentation of named classes before bytes are read | Hot, licensed, or timing-critical classes | Agent worker under lock | `LendingClassDeny` |
 
-`SyncPolicy` is **not** an agent SPI: it is the pack's (§8.2). The module's part is to publish the topics it names.
+### 6.3 Readiness and `APP_QUIESCENT`
 
-### 6.3 Readiness and the quiescent point
+- Attach non-thread-safe application listeners at a quiescent point (for example when the engine first blocks waiting for input). If the application boots into a modal prompt before reaching quiescence, report ready with the input capability `UNAVAILABLE(reason)` so the agent can answer the prompt first, then attach the listener and emit a ready event (`ListenerSlot` in `skillroy-sample-lending-agent`).
+- When state is confined to an application thread and safe to inspect only between inputs, declare primitives with `ThreadPolicy.APP_QUIESCENT` and a millisecond budget (`quiescentBudgetMs`, 1–1000 ms, default 50 ms). Expose a `QuiescentPoint(allowanceMs, capacity)` from `ThreadPolicyProvider.quiescentPoint()` and drive `runOne(availableMs)` from the application's idle callback (closing it in `uninstall()`). Quiescent tasks must never touch AWT, block, or call back into `ThreadBroker` (`lending.engine.view` in the sample).
 
-Touching application singletons too early can create stray instances or deadlock start-up, so `install` only declares
-and `onTargetReady` waits for every `ReadinessSource` (design §2.2 steps 3 and 4). After `readyTimeoutMs` the agent
-reports `target.ready` `UNAVAILABLE` once and keeps polling.
+### 6.4 Thread discipline and named lanes
 
-Many applications allow a listener to be added only at a quiescent point, for example while their engine thread waits
-for input, because their listener lists are not thread-safe. The sample shows the full pattern (P1 §9.2, "When the
-engine listener is attached"; `ListenerSlot`):
+`ThreadPolicy` routes each primitive to `CALLER`, `EDT_SYNC` (bounded `invokeAndWait` for reads), `EDT_ASYNC` (`invokeLater` for UI actions so modal dialogs never deadlock workers), `WORKER`, `APP`, `APP_QUIESCENT`, or `LANE`.
 
-- the readiness source attaches the listener at the first poll that finds the engine waiting for input, so the module is
-  ready exactly when its listener is in place;
-- an application that sits in a **modal question** has no quiescent point until somebody answers, and only a ready
-  agent may answer: the module reports ready without its listener, its input primitive's capability says
-  `UNAVAILABLE` with a reason naming the prompt, and a watcher thread attaches the listener once the question is
-  answered, then publishes one ready event so that a waiting controller has its event;
-- detaching makes the listener inert at once and removes it at the next quiescent point (bounded), under a JVM-wide
-  monitor shared by every class-loader copy of the module, because a disabled agent and its successor can meet.
+- Implement `ThreadPolicyProvider.isForbidden(thread)` cheaply for every application thread the agent must never block.
+- Keep `APP` calls fast because they serialize on a single application lane. Never hop to `APP` for slow I/O or queries: declare an isolated worker lane via `ThreadBroker.declareLane("<module>.<name>", threads, queue)` (1–4 daemon threads, max 8 lanes per agent) and bind slow primitives (`PrimitiveSpec.Builder.lane(name)`) or `DataSourceProvider.lane()` to it.
 
-**Running a task at the idle point (Phase 8, built 2026-10-19, ET; P8 §4.1).** When state is confined to the
-application's own thread and is consistent only between inputs (a pending quantity, a sub-step), a primitive declares
-`ThreadPolicy.APP_QUIESCENT` with a budget (`PrimitiveSpec.Builder.quiescentBudgetMs`, 1 to 1000 ms, default 50). The
-provider creates one `QuiescentPoint(allowanceMs, capacity)`, returns it from `quiescentPoint()`, calls
-`runOne(availableMs)` from the application's idle callback (an application listener, as the sample's
-`EngineEvents.idle`, or the `EventSink` of an `OBSERVE` hook on the idle method) and closes it in `uninstall`; the core
-closes it too on `agent.disable` and close, before any module's `uninstall`. A task runs exactly once or never: at the
-FIFO head, only when its budget fits both what the application says is free and what its caller has left; it is never
-interrupted, an overrun is counted, and a primitive whose task ran past twice its budget answers
-`CAPABILITY_UNAVAILABLE` until `agent.capabilities {reprobe: true}`; so does a module's own `callQuiescent` (or
-`call(APP_QUIESCENT, …)`) after such an overrun, for that module only (fix wave, L2-F3). The thread rules for a
-quiescent task: it runs on
-the application's thread (not the EDT), touches no AWT, does not block, takes no application lock the idle point does
-not already hold, and never waits for agent work (`ThreadBroker.call*` and `QuiescentPoint.await` are refused
-`FORBIDDEN_THREAD`; `EventBus.await` is forbidden and not checked); `AgentLog` and `EventBus.publish` are fine; its
-result is JSON-able like any primitive's. The sample: `lending.engine.view` (budget 20 ms) reads `Engine.idleView()`.
-A layer that offers no point makes such a primitive `CAPABILITY_UNAVAILABLE`; it never falls back to another thread.
+### 6.5 The semantic input seam and sync topics
 
-### 6.4 The thread rule
+Expose your application's native input seam as a mutating primitive `<product>.input` (the `SEMANTIC` rung):
 
-`ThreadPolicy` (P1 §4) says where each primitive runs: `CALLER`, `EDT_SYNC` (a bounded `invokeAndWait`, for reads),
-`EDT_ASYNC` (`invokeLater`, returns once posted, for actions, because an action may open a modal dialog), `WORKER`, or
-`APP` (the first `ThreadPolicyProvider`'s thread). `ThreadBroker.call` applies the bound and throws
-`RpcException(TIMEOUT)` on expiry and `RpcException(FORBIDDEN_THREAD)` on a thread the provider forbids.
+- **Chain, never replace** any existing input source or prompt handler, restoring the prior occupant in `uninstall()`.
+- **Pre-check validity** against current state and fail fast with `INPUT_REJECTED` (`reason: notAccepted | inboxFull`) rather than silently dropping invalid inputs.
+- **Return `InputResult` conventions:** `{accepted, inputId, consumed: CONSUMED | QUEUED, taken?, answeredBy?}`, emitting caveats via `inv.warn(...)` (`VALUE_COERCED`, `VALUE_DROPPED`, `ANSWERED_NESTED`, or `<packId>.<NAME>`).
+- **Correlate acknowledgements by `inputId`:** Mint (or echo) a unique `inputId`, include `{inputId}` in your acknowledgement event payload (using the 4-argument `events().publish(topic, source, payload, correlationId)` when publishing asynchronously from an application callback), and enable `SyncPolicy.ackByInputId` in your `DomainPack` (§8.2) so late acknowledgements from queued inputs never satisfy a subsequent step's wait.
 
-For the provider:
+### 6.6 Application state for snapshots
 
-- `isForbidden(thread)` names every thread the agent must never block or run work on: the application's engine or
-  state-machine thread, a thread that holds application locks, a device thread. It must be cheap.
-- `callOnAppThread(task, timeoutMs)` runs a domain call where the application allows one and waits at most the bound.
-  The sample runs domain calls on one daemon worker of its own (`skillroy-lending-worker`) because the application
-  publishes immutable snapshots any thread may read; an application whose state may be read only on its own thread
-  needs a provider that posts to that thread and waits with the bound, or (Phase 8, built 2026-10-19, ET) a
-  `QuiescentPoint` for `APP_QUIESCENT` (§6.3).
-- `available()` answers false while the application thread does not exist yet: read-only `APP` primitives then run on a
-  worker and mutating ones answer `NOT_READY` (A19); an `APP_QUIESCENT` primitive answers `NOT_READY` either way.
-- One `APP` lane: everything under `APP` queues behind the provider's thread, so keep `APP` calls short. **Corrected
-  (Phase 8, built 2026-10-19, ET; P8 §4.8 defect 3):** `data.query` itself runs on `WORKER`, not `APP` (P1 §6); the real
-  hazard is a provider that hops to `APP` itself for a slow read. Never hop to `APP` for a slow read: declare a lane
-  (`ThreadBroker.declareLane(name, threads, queue)`, by convention `<module id>.<word>`, 1 to 4 threads and a queue of
-  0 to 16, at most 8 lanes per agent, retired with the module) and name it in the source's `lane()`, or run a
-  primitive there with `PrimitiveSpec.Builder.lane(name)` (`ThreadPolicy.LANE`). A lane whose every thread is held by a
-  task whose caller gave up answers `BUSY "lane stuck"` at once; `APP` stays unbounded (gap 136).
+`AppStateProvider.appState()` returns a small, side-effect-free JSON-compatible map under `ThreadPolicy.APP` containing key state at a glance (current screen/mode, open prompt, active transaction summary, edition/variant). Keep launch-ephemeral values (ports, timestamps) out of `EnvFingerprinter` (§8.5).
 
-### 6.5 The input seam and the sync topics
+### 6.7 Custom widgets, dialogs, visibility, and `InputVeto`
 
-The fastest and most dependable input path is the application's own: the `SEMANTIC` rung is a primitive of the
-module (`<product>.input` by convention; `lending.input` in the sample) that hands an input to the application the way
-its UI would and returns the application's acknowledgement (design §3.7; P1 §9.2). There is no SPI for it: it is a
-primitive the module adds (§6.14).
+- Supply `NameEnricher`, `LocatorResolver` (including `describe()`), `ActionFirer`, `DialogTextExtractor`, `DialogLocator`, and `RegionResolver` for custom Swing components so snapshots, semantic clicks, modal checks, and vision grounding work seamlessly.
+- **Effective visible area:** Locators and snapshots automatically skip *collapsed* components (zero effective area after ancestor clipping, while preserving components scrolled off-screen inside a `JViewport` or `ScrollPane`).
+- **`InputVeto`:** Register an `InputVeto` for every control that exits the JVM or triggers an irreversible external side effect. `refuse(component, route)` is checked on the target and every ancestor up to the window (including popup invokers and `ENTER` default buttons). Answer `Route.ANY` with a non-null reason whenever any route is vetoed so snapshots mark `vetoed: true` and models/recorders never target it. Because keyboard mnemonics/accelerators and `web.*` DOM actions inside embedded browsers are not traced back to Swing menu items, veto the enclosing window when needed.
 
-- **Chain, never replace.** If the application offers its own test-input or automation seam (an input source slot, a
-  scripted-input interface, a prompt answerer, a single-slot callback), the module chains to the previous occupant and
-  restores it on detach (design §2.2 step 4). The agent must leave the host as it found it, and another tool may own
-  that slot. The JxBrowser adapter's opt-in to chain `InjectJsCallback` follows the same rule (P4 §3, rule 2).
-- **Pre-check and reject explicitly.** Check whether the current state accepts the input and answer the error
-  `INPUT_REJECTED` with the state and the valid inputs instead of queueing an input the application would drop
-  silently (P1 §9.2; A33).
-- **Publish the topics the pack's `SyncPolicy` names** from the seam itself: an acknowledgement topic when an input was
-  taken (`input.acked` in the sample) and a ready topic when the application waits for input again
-  (`input.requested`), plus `prompt.waiting` when it asks a question. "Ready" is then a fact the application states,
-  not a guess from quiet time (design §2.5). Generic topic names are in `Topics` (P1 §3); a module adds its own.
-- An input typed or clicked in the window produces no acknowledgement through the seam; UI steps therefore wait for the
-  ready topic, or name the event they wait for (`await:` on `click`, `type`, `press`; A32).
+### 6.8 Embedded browsers outside the Swing tree
 
-*(Phase 8, built 2026-10-19, ES; P8 §7.1, §7.2, §7.4.)* **What the input primitive answers.** Adopt the semantic-input
-result convention (`InputResult`): `accepted`, an `inputId` the module mints (opaque, `[A-Za-z0-9._:-]{1,64}`, unique
-within the agent's life; echo one the caller supplies), `consumed: CONSUMED` (the application consumed the input
-before the call returned) or `QUEUED` (it took it and has not consumed it yet), `taken` with the value the application
-consumed when it differs from the one sent (never for a secret parameter, `Invocation.secretParams()`), `answeredBy`
-when another question consumed it. Report the caveats as warnings (`inv.warn`, §6.14): `VALUE_COERCED` with `taken`,
-`VALUE_DROPPED`, `ANSWERED_NESTED` with `answeredBy`, or a code of your pack `<packId>.<NAME>` that the pack declares;
-the executor derives `INPUT_QUEUED` itself. `INPUT_REJECTED` keeps meaning "refused before it was handed over", with
-`data.reason` `notAccepted` or `inboxFull`; a caveat is never an error and an error never a warning. **Acknowledge by
-input**: put the `inputId` in the acknowledgement's payload (never the value), publish an acknowledgement that comes
-after the call from the application's own callback (keep the input in a bounded pending table, at most 256, cleared
-on detach; exactly one acknowledgement per input; the four-argument `publish` of §6.13 with the call's correlation id),
-and let the pack set `SyncPolicy.ackByInputId` (§8.2). For an acknowledgement that is not the pack's ack topic, or a pack
-that cannot opt in, the **EVENT pattern**: the verb mints a deterministic literal at compile time (`"L" +
-ctx.sourceLine() + "." + <position>`), passes it as the primitive's `inputId` parameter and awaits `EVENT` on the
-acknowledgement topic with `match: {inputId: <the literal>}`; only literals or `$slot` values can be matched.
+Return `BrowserSeed.of(browserOrEngine, tag)` from `BrowserRegistryAdapter.seeds()` for cached, hidden, or pre-loaded browsers without creating or initializing an engine. Whenever any `CaptureMask` or `BrowserMask` is registered, **view-less browsers default to masked** (URLs/titles hidden, DOM reads refused, page event payloads stripped); register a `BrowserMask` returning `Boolean.FALSE` for specific benign tags (`"detached".equals(tag) ? Boolean.FALSE : null`) if scenarios inspect them, or `Boolean.TRUE` to mask sensitive browsers by tag or object identity.
 
-### 6.6 Application state for the snapshot
+### 6.9 In-process data channel (`DataSourceProvider`)
 
-`AppStateProvider.appState()` returns a JSON-able map: cheap, no side effects, under `APP`. Put there what scenarios
-and people need to see at a glance: the state name, the open prompt, whether a transaction is open, the variant
-(§2.6), the business date, and diagnostics such as the module's listener count (the sample's `lending` section, P1 §9.2).
-Values that change from launch to launch (ports, dates) must stay out of the fingerprint (§8.5).
+`DataSourceProvider` backs `data.query` (single guarded `SELECT` / `WITH`, <= 200 rows, bounded timeout) using either:
 
-### 6.7 Custom widgets and dialogs
+- `open()`: returns a JDBC `Connection` configured read-only, rolled back, and closed by the agent; or
+- `query(sql, params, maxRows, timeoutMs, QueryControl)`: executes against a custom data API, registering cancellation hooks on `control.onCancel(...)` and optionally running on a dedicated `lane()` and supplying `columns(table)` for positional sources.
 
-The snapshot names a Swing node by the first non-empty of `NameEnricher`, the accessible name and `Component.getName()`
-(design §2.5). For each custom widget class:
-
-- give it a name (`NameEnricher`) and, where the application has a vocabulary for it, a locator strategy
-  (`LocatorResolver`, with `describe` so that the hit-test proposes the domain locator first, P7 §3.7);
-- give it an `ActionFirer` when it ignores `doClick()` without focus; the `fired` of a click means "posted", so observe
-  the effect, not the call's answer;
-- read custom dialogs with a `DialogTextExtractor`; report in-window dialogs with a `DialogLocator`, so that
-  `swing.dialogs` lists them, `swing.dismiss` presses their buttons, and input aimed past them answers `MODAL_OPEN`;
-- give a custom-painted surface a `RegionResolver` if vision or pointer steps will act on it.
-
-Prefer a locator in the application's vocabulary, then an explicitly set name, then name, text and class, with the
-child-index `path` last (design §3.7, "Locators"). The click rungs (`ACTION` by default, `COMPONENT` with window
-activation on request, `DISPATCH`) are the base's; the scenario key `ui` chooses (B12, A28, A29).
-
-**Input vetoes, the visible area, heavyweight containers, AWT controls (Phase 8, built 2026-10-19, EA; P8 §3).**
-
-- Register an `InputVeto` for every control whose action ends the JVM or cannot be undone in a test (§7 rule 4).
-  `refuse(component, route)` answers null to allow, else one line why (cut at 200 characters); it is asked on the EDT
-  for the component and each ancestor up to its window, so one answer for a panel or a window vetoes everything in it.
-  A popup is asked with its invoker's chain (fix wave of the Phase 8 review, FA): a window veto covers its menus'
-  items whether their popup is drawn inside the window or as a window of its own, a vetoed combo covers its open
-  list, and a vetoed menu covers its items. A veto that discriminates routes **must answer the route `ANY` with a refusal whenever it refuses any route**: the
-  readers ask `ANY` to flag `vetoed: true`, so that the recorder and a model are never offered the component; a veto
-  that answers `ANY` with null is still enforced, but invisible until it acts. Keep it fast and lock-free: it runs
-  inside the agent's bounded EDT read, and a throwing veto refuses (fail closed, logged once).
-- Key bindings, mnemonics and menu accelerators are not followed: a key delivered to one component may fire an action
-  another component owns (only the delivery target's chain and ENTER's default buttons are asked: every root pane's
-  up to the window, for `swing.key ENTER`, `swing.type {enter}` and a newline in DISPATCH text; a root pane placed off
-  that walk and outside a `JInternalFrame` is not asked, gap 154), so **veto the
-  window, or the bound control**; a menu item's own veto does not cover the keyboard of an open menu, so for a menu
-  item veto the window (fix wave of the Phase 8 review, FA). A drag released on a vetoed item of an open menu is
-  refused at the release (Phase 8 security fix, S155); on the Robot route the release is asked again just before it
-  happens and goes to the press point unless allowed, and a popup the application shows after that question is not
-  seen (gap 153). **A veto on a window or panel does not cover `web.*` input into a browser inside
-  it**; a layer that must keep page input out vetoes nothing more for that in Phase 8 (gap 126).
-- A veto that depends on application state and refuses inside the posted task leaves the step `fired: true` (the
-  call already answered "posted"; the refusal is logged and counted in the Swing module's `vetoWithheld`, which
-  `skillroy info` shows): the step's `sync` or an expectation on the effect is what fails it.
-- "On screen" is more than `isShowing()`: a component whose effective area is empty (a zero-width pane of a frame set,
-  a component clipped away by its parent, one not yet laid out) is *collapsed*: locators skip it, snapshots leave it
-  out, a click on it is `INVALID_PARAMS collapsed`, and an in-window dialog root without an area blocks nothing (report
-  the component that has the area). A component scrolled out of a `JViewport` stays on screen; a custom scroller that
-  moves its child without a viewport makes a scrolled-out child collapsed (gap 130).
-- The routed pointer reaches components inside a heavyweight container (an application drawn inside one AWT `Panel`):
-  its events are sourced from the innermost heavyweight at the point that no `SurfaceSource` claims.
-- AWT `Button` and `Checkbox` are fired semantically on the `ACTION` and `COMPONENT` rungs (one `ActionEvent` or
-  `ItemEvent`); `DISPATCH` stays a mouse click, whose effect on an AWT control depends on the toolkit's peer (the X
-  peers act on it, Windows' are not known to). Other AWT controls have no semantic rung (gap 129).
-
-### 6.8 Embedded browsers the Swing tree cannot see
-
-The web module finds browsers by scanning the Swing tree and from the seeds every `BrowserRegistryAdapter` returns
-(`BrowserSeed.of(object)` or `BrowserSeed.of(object, tag)`). Hand in browsers that are cached, hidden or have no view in a
-window; a tag gives scenarios a stable selection (`browser: {tag: …}`). `seeds()` returns objects the application
-already holds: it must never create, initialise or configure a browser or an engine, and must not block (P4 §3, §9.2;
-`WebHostModule`). Section 10 has the rest.
-
-(Phase 8, built 2026-10-19, EW; P8 §5.2.) While a layer registers any `CaptureMask` or `BrowserMask`, a browser the
-adapter reports no Swing component for (a pre-loaded or never-shown page) is **masked by default**: listed with no URL or
-title, its reads refused, its events without page data. A layer that masks anything and must read such a page registers
-a `BrowserMask` answering `FALSE` for it (the release form: `tag == "detached" ? Boolean.FALSE : null`); one that must
-mask a browser no `CaptureMask` can name answers `TRUE` by tag or by vendor object (compared by identity, never called).
-A `FALSE` never overrides a `CaptureMask` that names the browser's component once it has one. (Phase 8 security fixes,
-FE.) A tag lasts while the seed gives it: when the registry stops tagging a browser, a release by that tag ends at the
-next rebuild, and while a registry fails a kept tag can mask, never release (S169). Answer a `CaptureMask` by a stable
-container: a browser that becomes masked while open (its view moved into the masked container) is judged again by the
-next call or selection, or within about 2 s of its events (S172).
-
-### 6.9 The in-process data channel
-
-`DataSourceProvider` gives `data.query` (one guarded `SELECT` or `WITH`, at most 200 rows, a timeout) a connection to the
-application's own data without credentials leaving the target (P1 §4, §6; design §3.9). Implement one form:
-
-- `open()`: a JDBC `Connection` the agent sets read-only, uses for one query in a transaction it rolls back itself, and
-  closes; it may come from the application's pool, whose auto-commit and read-only flags the agent restores;
-- `query(sql, params, maxRows, timeoutMs)`: for a data layer with its own statement API (columns may be unnamed).
-
-`exposesErrorText()` defaults to `true` so that SQL syntax and schema errors are immediately visible in
-`error.data.message` during scenario authoring and debugging (even when a `MaskPolicy` is registered); override it to
-return `false` only if a driver echoes sensitive values in its exception messages that should be withheld from the
-controller. Add a `MaskPolicy` for personal
-columns: it runs on every value before it leaves the JVM. The statement guard is a safety net, not the boundary: the
-connection's account should be read-only (`SECURITY.md`). Not provided: a "prepared read" that runs a procedure and a
-select on one session (gap 13).
-
-**(Phase 8, built 2026-10-19, ET; P8 §4.2-§4.4.)** `data.query` hands the provider's work to the source's lane
-(`lane()`) or a nested worker task and waits the call's remaining time less 250 ms. Override the five-argument
-`query(sql, params, maxRows, timeoutMs, QueryControl control)` to be stoppable: register the means with
-`control.onCancel(action)` (a statement's `cancel`, the application's own abort; at most 4, run once, off the
-dispatching worker, 2 s each), read `control.remainingMs()` and `control.cancelled()`. Close the handle when the read
-ends: an action never starts once `close()` has returned (S159), but it can run between the end of the read and that
-close, so gate an application-level abort on the read's own state, as the sample's `ReadHandle` does. The JDBC form is
-cancelled by
-the agent itself while its statement is open. `enforcesTimeout()` says the read ends within its `timeoutMs` + 1 s
-whatever the source does. On expiry the module answers `TIMEOUT {source, lane, waitedMs, cancelled, cancelPending?,
-stillRunning, enforcesTimeout}`; without a lane a read that outlives its call makes the next read of that source
-`BUSY` until it ends, so one stuck source blocks only itself. `open()` still has no timeout: bound any pool wait in the
-provider. Columns the provider leaves unnamed take the labels of the statement's select list (the alias, or a bare
-column's name), and for `SELECT * FROM <table>` the provider's `columns(table)` (the table's columns in declared order,
-answering the same relation `query()` reads), so a positional source is read by name and its zero-row answers keep
-their width; the controller's allow-list check (D100) needs `columns(table)` from such a source. **Version skew:** a
-provider that overrides only the five-argument form needs a Phase 8 agent (on a 0.1.0 one the four-argument default
-answers null and the read falls to `open()`); mixed versions are unsupported (§4.4).
+`exposesErrorText()` defaults to `true` so SQL syntax and schema errors appear directly in `error.data.message` during scenario authoring and debugging (even when a `MaskPolicy` is active); override it to return `false` only if a database driver echoes sensitive literals in exception messages. Always pair `DataSourceProvider` with a `MaskPolicy` and a read-only database account.
 
 ### 6.10 Devices
 
-A `DeviceAdapter` presents each peripheral as a snapshot node with `state()` and named `act(action, args)` actions,
-reached through `device.list`, `device.state` and `device.act` and the base fact root `devices` (P3 §3.4). Input devices
-inject where the real device hands data to the application; output devices report what the application sent, as events,
-and as rendered text where a simulator gives it. Prefer the application's own device simulators in CI (design §3.9). The
-sample's printer: `PrinterDevice`, with the slips as a fact root.
-
-*(Phase 8, built 2026-10-19, ES; P8 §7.6.)* An action with a physical path and a shortcut declares its ladder,
-`DeviceAdapter.rungs(action)` (best first; `PHYSICAL`, `SEMANTIC`, or names of your own matching `[A-Z][A-Z0-9_]{0,31}`):
-`device.list` and the `devices` root show it. Such an action reports the rung that acted (`RungResult`: `rung`,
-`requestedRung`, `fidelity`, `reason`), refuses to act below a `minRung` argument (`CAPABILITY_UNAVAILABLE {rung,
-minRung, capability?}`, before anything reaches the application) and echoes `minRung` in its result when it received
-one: the executor fails closed without the echo. The sample's scanner: `ScannerDevice`, `PHYSICAL` through the desk's
-scanner driver, `SEMANTIC` through its inbox, with the capability `lending.scanner.physical`.
+Implement `DeviceAdapter` for simulated or physical peripherals (`PrinterDevice`, `ScannerDevice`), exposing `state()`, `act(action, args)`, and optional fidelity ladders via `rungs(action)` (`PHYSICAL`, `SEMANTIC`). Actions with ladders return `RungResult`, enforce `minRung` (`CAPABILITY_UNAVAILABLE` if unmet), and echo `minRung` in their result.
 
 ### 6.11 Masking and redaction
 
-Four mechanisms, each for one route out of the JVM:
-
-| Route | Mechanism | Rule |
+| Surface | Mechanism | Key guidance |
 |---|---|---|
-| rows from `data.query`, values a `CAPTURE` hook copies, Byteman bindings | `MaskPolicy` | thread-safe, cheap, never takes an application lock; a throwing policy redacts |
-| pixels and text of a component (captures, snapshot, hit-test, marks, dialog reader) | `CaptureMask` | name **every** component that can show a secret, and every control that feeds one (the sample masks its number pad while the entry field is masked); a password field is masked without one; a throwing mask masks |
-| secret-looking keys in JVM arguments, system properties, agent options | `RedactionKeys` | the application's own keys (`lending.pin` in the sample); a throwing provider makes every key secret |
-| rows read over the controller-side JDBC channel | `DomainPack.rowMasks()` | the controller-side twin of `MaskPolicy` (§8.5) |
-| event payloads (Phase 8, P8 §5.1) | `MaskPolicy` with `sourceId` `event:<topic>` and the dotted column (`detail.lines.name`; a list element adds no segment); the key rule always | mask before you publish; the ring pass is the backstop, and the pass is what `evt.query`, waits and run outputs see |
-
-**Migration (Phase 8).** A `MaskPolicy` written for rows that ignores `sourceId` now also masks event fields whose key
-equals a column it masks: check `sourceId.startsWith("event:")` (or the exact data source id) in each rule. Do not mask
-a field a wait or the executor matches on (a prompt's `id`, an acknowledgement's `inputId`, `web.tap`'s `name`). A
-browser without a view is masked while any mask is registered (§6.8); release it with a `BrowserMask`.
-
-What masking cannot do is in `SECURITY.md` ("Redaction hides a rectangle, not a value"; "A page's pixels are masked as a
-whole or not at all"): a mask blanks a rectangle, the layout stays visible, and a component no mask names reaches a
-model as rendered. An application's own Paste control is an ordinary click: mask it (threat model §7).
-
-**Parity of a name-keyed `MaskPolicy` (Phase 8, built 2026-10-19, ET, with the Phase 8 security fixes S160, S162,
-S163, FB; P8 §4.4).** A row policy keyed by column name sees the label the statement gives: a caller who renames a
-column (`password AS p`) defeats it on a JDBC source, and on a positional source too now that its columns take the
-statement's labels, no weaker. Cover every source id the module registers (the sample's `PasswordMask` covers `lending`
-and `lending-report`), and compare column names without regard to case: a driver reports a label as
-its database folds it, a positional source keeps the statement's spelling (and `columns(table)` the provider's); the
-agent also asks a policy under a derived label's upper- and lower-case forms. On a positional source a column the
-select list leaves unnamed is asked under the names its item reads (`(password)`, `LOWER(password)`, `password COLLATE
-x`), and while any policy is registered the cells of a column no name can be given are withheld as `<redacted>`: a
-`t.*` item, a `*` over a join, a sub-query, `WITH` or a set operation, a list the result is wider than, or a
-`columns(table)` answer of another width. Name such columns in the statement (or have the provider name them) when a
-caller needs their values. A provider's `columns(table)` receives a quoted part in double quotes: fold an unquoted part
-as the database does, compare a quoted one exactly (S162).
+| `data.query` rows, `CAPTURE` hooks, Byteman bindings | `MaskPolicy` | Thread-safe, lock-free, case-insensitive on column labels; inspect `sourceId` to distinguish data sources from `event:<topic>`. Unnamed expressions on positional sources redact to `<redacted>` while any policy is registered. |
+| Captures, snapshots, hit-tests, dialog text | `CaptureMask` | Mask every secret-displaying component *and* input pads feeding it (`JPasswordField` is masked automatically). |
+| JVM args, system properties, agent options | `RedactionKeys` | Add product-specific secret key patterns (`lending.pin`). |
+| Controller-side JDBC rows and provenance samples | `DomainPack.rowMasks()` | Mirror agent-side row masking rules on the controller (§8.5). |
+| Agent event ring (`EventBus`) | Secret-key filter + `MaskPolicy` (`event:<topic>`) | Mask sensitive values before publishing; avoid masking correlation keys (`id`, `inputId`, `name`) that waits match on. Verify with `OutputScan` (`Scope.EVENTS`). |
 
 ### 6.12 Capabilities and probes
 
-Declare a capability for everything a scenario may depend on: `ctx.capabilities().declare(id, probe)` with a bounded
-`Probe` that runs after the target is ready and again on `agent.capabilities {reprobe}`, or `set(…)` for states known
-without probing (P1 §4). States are `OK`, `DEGRADED(reason)` and `UNAVAILABLE(reason)`; a primitive that names a
-capability fails fast with `CAPABILITY_UNAVAILABLE`. Scenarios use the ids in `requires:` (missing means
-`PRECONDITION_FAILED`) and in guards (§8.8). The sample declares one capability per primitive, plus `lending.sql` and
-`lending.loan.authorisations`, which guarded expectations point at. Keep the handles to withdraw them in `uninstall()`
-(A18). `skillroy caps` shows the matrix; each run archives it as `capabilities.json` (P6 §6.4).
-
-*(Phase 8, built 2026-10-19, EP; P8 §9.1, §9.4.)* A fact only the environment holds (a setting row, a table's
-contents) has a second source: the **pack** evaluates it at run start, `DomainPack.capabilities()` (§8.1), reading
-through the run's data channel, overlay-aware through `settings()`, honoured in `replay`, costing no agent change and no
-capability golden. Application configuration a scenario depends on is a capability either way: the decision and the
-choice between the two sources are in §8.8.
+Declare capabilities via `ctx.capabilities().declare(id, probe)` (or `set(...)`) on the agent, or via `DomainPack.capabilities()` (`PackCapability`, source `pack:<packId>`, evaluated over the data channel at run start and honoured in `replay`) on the controller. Use capability ids in `requires:` for hard preconditions (`PRECONDITION_FAILED`) or in `capability:` expectation guards (`DEGRADED`). Avoid declaring the same capability id in both the agent module and the pack; check the merged table with `skillroy caps --pack <jar>`.
 
 ### 6.13 Events
 
-`ctx.events().publish(topic, source, payload)` may be called from any thread, the EDT and application threads
-included, and never blocks; the bus is a bounded ring with increasing sequence numbers, read by `sync.await`,
-`evt.query` and the SSE stream (P1 §4, §5). Publish with your module id as `source` and small payloads (the ring is also
-bounded by characters, `eventRingChars`). A call's result carries the events published on its thread during the call and
-its `seq.before`, so waiting "since `seq.before`" never misses a consequence of the call (P1 §3). Event sinks run on
-the publishing thread and must not block. (Phase 8, built 2026-10-19, EW; P8 §5.1) Every payload is masked before it is stored: a value under a
-secret-looking key becomes `<redacted>`, and the registered `MaskPolicy`s see every scalar as `event:<topic>`; mask
-personal values before you publish all the same, and prove it with `skillroy-junit`'s `OutputScan` (`Scope.EVENTS`)
-over a run. *(Phase 8 security fix, S152, FD.)* A planted value that is not digits only is found wherever a non-letter,
-non-digit bounds it (so `{name=Smith}`, `(Smith)` and a name with a space inside a sentence are found); a digits-only
-value is found only as a whole string or a separated token, so plant a word or a name, not a number, when the output
-may hold it in Java's map form or `key=value` text. `Scope.EVENTS` reads the `events`-root and `hooks`-root
-expectations, checks and observations, `warning` and `run-end` records besides the call, prompt, capture and step
-records.
+`ctx.events().publish(topic, source, payload)` is non-blocking and safe from any thread (use the 4-argument overload with `Invocation.correlationId()` for asynchronous callbacks). Keep event payloads small and structured so neither `eventRing` count nor `eventRingChars` truncates the run window when scenarios query the `events` fact root (`events[*topic=...]`).
 
-*(Phase 8, built 2026-10-19, ES; P8 §7.4.)* An event that belongs to an earlier call but is published later, from the
-application's own callback (a late acknowledgement of an input), uses `publish(topic, source, payload, correlationId)`
-with the call's `Invocation.correlationId()` kept for it, so that telemetry links it to that call; it never blocks.
+### 6.14 Custom primitives and composites
 
-*(Phase 8, built 2026-10-19, EX; P8 §8.6.)* The base fact root `events` reads the ring for the run's window, so a
-scenario can count your events, compare against a count captured earlier and assert that one never happened
-(`events[*topic=…][*payload.source=…]`, `{size: 0}`). Publish small, structured payloads with the fields a scenario
-filters on at the top level or one level down (a list for membership, `{has: x}`); a chatty module that publishes more
-than `eventRing` events in a run makes every such expectation `ERROR` (the root refuses rather than under-counts), and
-a JSON string in a payload is read with `[json]` at a cost. *(Phase 8 security fix, S151, FC.)* So does one event of
-the run's window whose payload was cut at publish (`truncated: true` at its root: over the ring's 10,000 scalars while
-a policy is registered, over `eventRingChars`, or cut by its module, a `web.console` text over its cap included): keep
-payloads small enough never to be cut.
-
-### 6.14 Primitives of the module's own
-
-`Primitives.of(PrimitiveSpec.builder("<product>.<verb>")…build(), body)` and `ctx.primitives()`. A spec declares its
-parameters, its `ThreadPolicy`, its timeout (default 10 s), its capability, and whether it is `mutating`, `destructive`
-(needs `confirm`) or `script` (evaluates a caller's expression) (P1 §4). Read-only mode refuses mutating and script
-primitives. Typical set, after the sample: an input seam, a state read, the current transaction, the open prompt and an
-answer to it, a decision-code check for verifiers (`lending.access.check`), dry runs of the application's own rules for
-cross-checks (`lending.waiver.evaluate`). `skillroy schema` lists what a target offers; `skillroy call <primitive>`
-calls one by hand.
-
-*(Phase 8, built 2026-10-19, ES; P8 §7.1, §7.5.)* **Warnings.** `inv.warn(code, message, data)` reports a caveat of a
-call that did what it was asked; it travels in the result's envelope, never in the value. A code is a base code or
-`<packId>.<NAME>` your pack declares; a malformed one throws to your primitive (a module bug). At most sixteen per
-call; never put a secret value in the message or the data (the dispatcher redacts the call's secret parameters, the
-executor's secret-echo check fails a result that still carries one). **Composites.** Logic that depends on which
-question the application asks next belongs in **one primitive that owns its nested questions** (plans stay linear): it
-is `mutating`, bounded (every wait within `inv.remainingMs()` less a margin, never on the EDT or a forbidden thread),
-takes every nested answer as a parameter (a secret one through the credential join), never answers a question it does
-not own (it returns and leaves the question to the step's prompt check), and reports with `CompositeResult`: `composite
-{branch, answered: [{question: {topic, id?, text?, seq?}, by: <parameter name>, choice?, inputId?}]}`, plus `inputId`,
-`inputIds` and `consumed`. List the `seq` of every prompt event you answered: the executor expects exactly those that
-fall inside the call's window. Check a result with `CompositeResult.problems` in your module tests. The sample:
-`lending.signOn`, `lending.scanChecked` (`LendingComposites`).
+Build domain primitives with `Primitives.of(PrimitiveSpec.builder("<product>.<verb>")...build(), body)`, marking `mutating`, `destructive` (requires `confirm`), or `script` accurately. When an operation involves dynamic application sub-prompts (such as optional password-expiry or induction questions during sign-on or item scan), encapsulate the branch inside **one bounded composite primitive** (`CompositeResult`, listing the `seq` of every prompt answered within the call window; see `LendingComposites`) so scenario plans stay linear and deterministic.
 
 ---
 
 ## 7. Safety rules a layer must keep
 
-The base's rules bind a layer's code as much as the base's, because the module runs inside the host and the pack's code
-runs in the controller with the token (threat model §3: the pack is reviewed code, and a wrong pack is a defect the
-framework must survive without harming the host).
-
-1. **Never throw into, block or slow the host.** Every wait is bounded; actions on the EDT are posted (`invokeLater`);
-   reads are a bounded `invokeAndWait`; a thread the application forbids is never used; nothing in `install` touches
-   the application or AWT (`CLAUDE.md`; design §2.2, §3.7 "EDT discipline"; P1 §4).
-2. **No sleeps.** Wait on events (`sync.await`, the sync topics) and on `swing.settle`, in primitives, verbs and recovery
-   alike (`CLAUDE.md`; the sample's `recover` is bounded and waits for the application's own event after every action,
-   P1 §9.3).
-3. **No third-party classes inside the target JVM.** The agent module compiles against the application at `provided`
-   scope and bundles nothing else; the base's one carve-out (shaded Byte Buddy in the optional hooks module) is the
-   base's (B4, B26 Q1; `CLAUDE.md`).
-4. **Never route an action or an assertion through application code that can end the JVM** (an application test API's
-   shutdown or restart, an exit on error): no primitive calls application code known to end the JVM (design §2.2 step
-   7). Recovery returns the application to idle; it does not restart it (design §3.6, `recover`). **(Phase 8, built
-   2026-10-19, EA; P8 §3.2)** Register an `InputVeto` for every such control, so that no route of the base (a click on
-   any rung, a key, typing, the pointer, a dialog's dismissal) reaches it, `force` included; key bindings are not
-   followed: veto the window or the bound control; a window veto does not cover `web.*` input into a browser inside it
-   (gap 126).
-5. **Chain seams, never replace them** (§6.5), and restore them on detach.
-6. **Keep hooks optional and small.** Zero hooks on the default path; the first fallback of every hook is a public seam;
-   never retransform very large classes (the engine refuses above 256 KiB of class file or 2,000 methods); scope a
-   catalogue to the application's own packages; third-party targets are off by default and a licence question
-   (design §2.6 "Hook policy"; P6 §3.3, §5.1; §9).
-7. **Byteman stays user-supplied and optional.** It is LGPL-2.1-or-later and host-visible; the base never bundles it,
-   and neither may a layer (B8; P6 §7).
-8. **Loopback and token only.** The agent binds loopback; every request and reply is HMAC-signed with the token, which
-   never travels; the token file is owner-only (H1, H2; threat model §4). Do not add another listener to the target.
-   Bind a JDWP port of a test configuration to loopback (design §6, "Security").
-9. **Mask before anything leaves.** `MaskPolicy`, `CaptureMask`, `RedactionKeys` and `rowMasks()` before any value can
-   reach a report, a prompt or a model; credentials only in `credentials.yaml`, never in a fixture, a scenario or a
-   prompt (P2 §4, §11.4; P5 §6; P7 §11). (Phase 8) Events too: mask personal values before you publish; the ring masks
-   every payload by key and by your `MaskPolicy`s (`event:<topic>`) as the backstop (P8 §5.1).
-10. **A model proposes, a person confirms.** Destructive primitives need `confirm`, which a model's or an MCP client's
-    request never supplies; a layer's verbs and tools must not route around that (threat model §5; P5 D87; P6 D158).
-11. **Production is refused** (§5.7), and the enable flag is never set by the layer's code.
-12. **Run outputs are sensitive.** They hold screenshots, UI text, events and row samples; on a shared host run under
-    `umask 077` with `--out` in a directory you own (`SECURITY.md`, "Run outputs take the process umask").
+1. **Never throw into, block, or slow the host application.** Bound every wait, post UI actions via `invokeLater`, use bounded `invokeAndWait` for EDT reads, respect `isForbidden(thread)`, and touch nothing of the host or AWT inside `install()`.
+2. **Zero sleeps.** Synchronize strictly on events (`sync.await`, `SyncPolicy` topics) and `swing.settle` across primitives, verbs, and `recover()`.
+3. **Zero third-party libraries in the target JVM.** Compile agent modules against host jars at `provided` scope and bundle no third-party classes.
+4. **Never trigger JVM exit or restart.** Register an `InputVeto` on every quit/shutdown/irreversible control; implement `recover()` to return the UI to idle without restarting the process.
+5. **Chain host seams and restore on detach** (§6.5).
+6. **Keep hooks optional, small, and backed by public seams.** Default path uses zero hooks; scope catalogues to application packages (`packages` + `codeSource`) and `deny:` sensitive classes (§9).
+7. **Never bundle Byteman.** Byteman is LGPL-2.1-or-later and stays user-supplied via `byteman.jar` (§9.6).
+8. **Loopback and `Skillroy-HMAC` only.** Never open unauthenticated listeners in the target JVM, and bind any test JDWP port strictly to `127.0.0.1`.
+9. **Mask data before it leaves.** Configure `MaskPolicy`, `CaptureMask`, `BrowserMask`, `RedactionKeys`, and `rowMasks()`, and store secrets exclusively in uncommitted `0600` `credentials.yaml` files.
+10. **Models propose; humans confirm.** Never bypass `confirm: true` or `CallPolicy` restrictions in pack verbs.
+11. **Refuse production** (`ProductionMarker` + `requireProductionMarker=true`, §5.7) and never self-enable the agent in code.
+12. **Protect run outputs.** Treat `--out` directories (screenshots, snapshots, `run.jsonl`) as sensitive application data (`umask 077` on shared hosts).
 
 ---
 
 ## 8. The controller side: the domain pack
 
-### 8.1 `DomainPack` members
+### 8.1 `DomainPack` members and `BaseDomainPack`
 
-`ai.skillroy.testjava.scenario.pack.DomainPack`, found by `ServiceLoader`
-(`META-INF/services/ai.skillroy.testjava.scenario.pack.DomainPack`). The worked example is `LendingPack`. For early
-bring-up or PoC work before a custom pack exists, the base provides a built-in zero-code pack,
-`BaseDomainPack` (`id = "base"`, `version = "1"`), which is selected automatically when a scenario names `pack: base`
-or omits `pack:` with no custom `DomainPack` on the class path, giving immediate access to all built-in base steps and
-fact roots.
+`DomainPack` (`ai.skillroy.testjava.scenario.pack.DomainPack`) is discovered via `ServiceLoader`. For immediate bring-up or PoC exploration before writing any Java pack code, the framework includes `BaseDomainPack` (`id = "base"`, `version = "1"`), selected automatically when a scenario sets `pack: base` or omits `pack:` with no custom pack on the class path.
 
-| Member | Default | Contributes | Contract |
-|---|---|---|---|
-| `id()`, `version()` | – | the namespace; the version recorded in every plan | P1 §8.3 |
-| `steps()` | – | the `StepLibrary`: the pack's verbs (§8.2) | P1 §8.3; P5 §9.5 |
-| `syncPolicy()` | – | the ack, ready and prompt topics and their timeouts (§8.2) | P1 §8.3 |
-| `facts()` | – | `FactProvider`s: fact roots for expectations (§8.3) | P1 §8.3, §8.4 |
-| `promptPolicy()` | `PromptPolicy.FAIL` | what to do with a prompt no step expected, unless `on_prompt: {unexpected: fail}` | P1 §8.3; P8 §9.2 |
-| `preflight()` | none | `PreflightCheck`s run before each scenario; scope `SUITE` once per suite and agent start; a failure is `ENVIRONMENT` | P1 §8.3; P8 §9.3 |
-| `capabilities()` | none | `PackCapability`s: environment facts the pack contributes to the matrix, ids `<packId>.<name>`, source `pack:<packId>`, honoured in `replay` (§6.12, §8.8) | P8 §9.1 |
-| `recover(agent)` | nothing | return the application to idle after a scenario that did not pass | P1 §8.3 |
-| `resolution()` | empty | the `ResolutionCatalogue`: query kinds, resolvers, verifiers, oracles, cross-checks, value loaders (§8.4) | P2 §6; P3 §5 |
-| `fingerprinter()` | none | the `EnvFingerprinter` (§8.5) | P2 §6.6, §8.2 |
-| `storedTables()` | none | the tables `verify:` may read (`db.<table>`) (§8.5) | P2 §7.4 |
-| `rowMasks()` | none | masks for rows read over controller-side JDBC (§8.5) | P2 §7.3 |
-| `sqlAllowLists()` | none | what model-written SQL may read (§11.3) | P5 §5.2 |
-| `assistAnswerPrimitive()` | null | the primitive an in-application assistant overlay answers through (§11.5) | P5 §12.4 |
-| `hooks()` | the resource `META-INF/skillroy/hooks/<id>.yaml` | the hook catalogue (§9.2) | P6 §5.2 |
-| `settings()` | empty | `PackSettings`, the constants an overlay may change (§2.2) | P6 §11.1 |
-| `screenLegend()` | null | a legend of the screen for a model that looks at captures (§11.6) | P7 §12.3 |
+| Member | Default | Contributes |
+|---|---|---|
+| `id()`, `version()` | – | Pack/primitive namespace and version recorded in compiled plans |
+| `steps()` | – | `StepLibrary` compiling domain verbs to `PlannedCall`s (§8.2) |
+| `syncPolicy()` | – | Ack, ready, and prompt topics, timeouts, and `ackByInputId` (§8.2) |
+| `facts()` | – | `FactProvider` roots for expectations alongside the 8 base roots (§8.3) |
+| `promptPolicy()` | `PromptPolicy.FAIL` | Deterministic handler for unexpected prompts when `on_prompt` is `pack` |
+| `preflight()` | empty | `PreflightCheck`s (`SCENARIO` or `SUITE` scope) failing fast as `ENVIRONMENT` |
+| `capabilities()` | empty | Environment-backed `PackCapability` probes (`<packId>.*`), honoured in `replay` |
+| `warningCodes()` | empty | Declared `<packId>.<NAME>` warning codes usable in `accept:` |
+| `recover(agent)` | no-op | Bounded, event-driven cleanup returning the application to idle after failure |
+| `resolution()` | empty | `ResolutionCatalogue` of queries, resolvers, verifiers, oracles, and cross-checks (§8.4) |
+| `fingerprinter()` | none | `EnvFingerprinter` components guarding frozen bindings (§8.5) |
+| `storedTables()` | empty | Allow-listed `db.<table>` definitions for `verify:` checks (§8.5) |
+| `rowMasks()` | empty | Controller-side row masks for JDBC reads and provenance samples (§8.5) |
+| `sqlAllowLists()` | empty | Schema catalogue and personal-column flags for `llm-sql` (§11.3) |
+| `assistAnswerPrimitive()` | `null` | Target primitive used by `OverlayBridge` for in-app assistant replies (§11.5) |
+| `hooks()` | `META-INF/skillroy/hooks/<id>.yaml` | Bytecode hook catalogue (§9.2) |
+| `settings()` | empty | `PackSettings` map overridable by `DomainPackOverlay` (§2.2) |
+| `screenLegend()` | `null` | Concise UI layout legend supplied to vision grounding prompts (§11.6) |
 
-Two further contribution points sit beside the pack, found by `ServiceLoader` on the pack's class loader:
-`ResolverContributor` (a module contributes resolvers, as `skillroy-inference` contributes `inference.sql`, P5 §5.5) and
-`CapabilityContributor` (controller-side capabilities merged into the matrix; ids must start with `inference.`, P7 §8.5).
-A pack's own capabilities are not contributors: they are the member `capabilities()`, their ids start with
-`<packId>.` and their source is `pack:<packId>` (Phase 8, built 2026-10-19, EP; P8 §9.1).
+### 8.2 Verbs and synchronization
 
-There is no MCP tool-pack member (design §3.6 lists one as "later"): the MCP server projects the pack's verbs as tools
-named `<domain>_<verb>` with schemas from `StepLibrary.argsSchema`, and the base primitives by policy (P5 §9.3, §9.5).
+`StepLibrary.compile(verb, args, ctx)` emits linear `PlannedCall`s with a `Sync` mode (`NONE`, `ACK`, `READY`, `SETTLE`, or `EVENT` with scalar / `{has: scalar}` `PayloadMatch`) and optional `CompileContext.addCleanup(...)` hooks executed in reverse at scenario end.
 
-### 8.2 Verbs and sync
+- Enable `SyncPolicy.ackByInputId` once your `<product>.input` primitive echoes `inputId` in its ack events (§6.5).
+- Pass credential-joined `$slot`s into sign-on/authorise verbs so passwords resolve from `credentials.yaml` at bind time with `_meta.secretParams` protection.
+- Declare rung ladders on device/input calls (`PlannedCall.withRungs(...)`, forwarding `ctx.minRung()`) and pre-accepted warnings (`PlannedCall.withAccept(...)`) where appropriate.
 
-A verb compiles to planned calls: `StepLibrary.compile(verb, args, ctx)` returns `PlannedCall`s
-(`primitive, args, sync, timeoutMs, await, capture, literalArgs`), and `CompileContext.addCleanup` adds calls the
-executor runs in reverse order at scenario end (P1 §8.3). Base verbs are a closed set; unknown argument keys are errors.
-Each call carries a `Sync` level the verb chooses:
+### 8.3 Facts, prompts, pre-flight, and recovery
 
-| `Sync` | The executor then |
-|---|---|
-| `NONE` | returns when the call returns |
-| `ACK` | awaits the pack's ack topic since `seq.before` |
-| `READY` | awaits the ack topic (if the pack has one), then the first ready topic |
-| `SETTLE` | calls `swing.settle` (the UI processed the input; no window opened or closed) |
-| `EVENT` | awaits the event the call's `AwaitSpec` names, with a payload match (*Phase 8, built 2026-10-19, EX; P8 §8.9:* each value a scalar, equal by text, or `{has: scalar}`, a list member equal by text; anything else a compile error); for acknowledgements that mean only "consumed", or primitives that publish none |
-
-`SyncPolicy(ackTopic, readyTopics, promptTopics, ackTimeout, readyTimeout)`: `ackTopic` may be null (the web host has
-none and waits on `web.ready`), and `promptTopics` are the ready topics that mean "the application asks a question", to
-which the `PromptPolicy` applies (design §2.5). The sample:
-`SyncPolicy(ack = input.acked, ready = [input.requested, prompt.waiting], prompts = [prompt.waiting])` (P1 §9.3).
-
-Verb guidance from the sample: the sign-on verb takes a `$slot` whose slot declares a `credential`, so the password
-reaches the call from `credentials.yaml` at bind time and the call carries `_meta.secretParams` (A34; P2 §13.3); a verb
-that answers a prompt is marked as handling it; a verb that opens a session adds the cleanup call that closes it.
-
-*(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.4, §7.6.)* `SyncPolicy` has a sixth component, `ackByInputId`: when it is
-true, every `ACK` and `READY` acknowledgement wait matches `{inputId: <the result's inputId>}`, so the acknowledgement
-of an earlier, queued input never ends a later wait, and a call result without an `inputId` is an `ERROR` /
-`ENVIRONMENT` ("the pack's acknowledgements are correlated by inputId; P returned none"). Turn it on once your module
-puts the id in its acknowledgement (§6.5); the sample's pack does. A planned call carries `accept` (warning codes the
-step tolerates), `rungs` (the call's ladder, `Rung(name, capability)`, two to eight, best first) and `minRung` (the
-lowest rung the step allows). A verb whose call has a ladder declares it (`PlannedCall.withRungs`) and forwards
-`ctx.minRung()` to the primitive (the sample's `deviceScan` passes it in `args.minRung`); a verb that answers a
-question the application may or may not ask compiles to one composite primitive's call (`signOnAny`, `scanChecked`),
-never to a conditional step. A verb whose call always tolerates a caveat pre-accepts it on the call
-(`PlannedCall.withAccept`; the compiler checks the codes as it checks a step's `accept`). Declare your pack's warning
-codes in `DomainPack.warningCodes()` (`<packId>.<NAME>`; the compiler refuses a code that does not start with the pack's
-id).
-
-### 8.3 Facts, prompts, pre-flight, recovery
-
-- A `FactProvider` names a root (`root()`) and fetches its current value (`fetch(agent)`); expectations address it with
-  the path grammar (`loan.lines[code=$item.code].amount`, P1 §8.4). The base's own roots are `app`, `ui`, `dialogs`,
-  `caps`, `devices`, `web`, `hooks` and, *(Phase 8, built 2026-10-19, EX; P8 §8.6)*, `events`, the agent's bus for the
-  run's window (`BaseFacts`; P1 §8.4; P3 §3.4; P4 §6.2; P6 §6.3); a pack root of the same name hides a base root.
-- `PromptPolicy.onUnexpectedPrompt` answers `HANDLED`, `IGNORE` or `FAIL` for known interrupting prompts (a session
-  lock, a reminder) deterministically (design §3.5). A scenario overrides it with `on_prompt: {unexpected: fail}`;
-  `on_prompt: {unexpected: pack}` names the pack's policy explicitly; those are the two values that load (Phase 8,
-  built 2026-10-19, EP; P8 §9.2: any other value is refused, where it used to select the pack's policy silently). A
-  prompt a composite primitive answered is not unexpected (Phase 8, built 2026-10-19, ES; P8 §7.5): the executor reads
-  the `seq` of every question the result lists as answered and expects the prompt events with those `seq`s inside the
-  call's window, without asking the `PromptPolicy` (`prompt {expected: true, answeredBy}`); a listed `seq` outside the
-  window vouches for nothing and is logged (`ignoredSeqs`). An unlisted prompt goes to the policy as before, so a
-  composite cannot hide a prompt it did not list.
-- `PreflightCheck`s check the environment (backend reachable, data present, device usable) through a context that
-  offers the agent, the data channel, the environment id and the pack's settings; a failure is `ENVIRONMENT` for the
-  scenario. *(Phase 8, built 2026-10-19, EP; P8 §9.3.)* They run before each scenario (the default scope,
-  `SCENARIO`); a check whose fact belongs to the suite returns `CheckScope.SUITE` from `scope()` and runs once per
-  suite, environment and agent start (the JUnit stream, the CLI invocation, the MCP server): a `SUITE` check that failed
-  fails every later scenario of the suite without running again (`... (checked once for this suite)`), so a transient
-  failure fails the suite. Keep `SCENARIO` checks cheap, and keep `SCENARIO` for anything that may recover.
-- `recover(agent)` must be bounded and event-driven: the sample answers any open prompt, cancels an open transaction and
-  signs off, at most 20 actions and 60 s (P1 §9.3).
+- **Fact roots:** Eight base roots (`app`, `ui`, `dialogs`, `caps`, `devices`, `web`, `hooks`, `events`) are built in; custom `FactProvider`s add domain roots (`loan`, `state`, `slip`).
+- **Prompts:** `on_prompt: { unexpected: fail | pack }` selects strict failure or `DomainPack.promptPolicy()`. Prompts answered internally by a `CompositeResult` within its call window are automatically accounted for.
+- **Pre-flight:** Use `CheckScope.SCENARIO` (default) for checks that can change between tests and `CheckScope.SUITE` for one-time environment invariants cached per suite and agent start.
+- **Recovery:** Bound `recover(agent)` strictly by action count and wall-clock time (e.g. <= 20 actions, <= 60 s in `LendingPack`).
 
 ### 8.4 Resolution: queries, resolvers, verifiers, oracles, cross-checks
 
-The model (design §3.3; P2 §6; P3 §5): a scenario states what it needs; a resolver finds candidates; the application's
-own decision code verifies them; the result is frozen.
+- **Queries (`Query<T>`):** Unsealed pack-defined records registered via `QueryType.of(kind, queryClass)` (design §9).
+- **Resolvers (`Resolver`):** Return deterministic, ordered `ResolverCandidate<T>` lists (`CANONICAL_SQL`, `CANONICAL_JAVA`, or `LLM_SQL`). Slots resolve in DAG order without backtracking, so place the most constrained slot first.
+- **Verifiers (`Verifier`):** Deterministic in-JVM checks invoking the application's own logic (`lending.access.check`, `lending.deposit`) — mandatory gate for every tier.
+- **Oracles (`Oracle`) and `CrossCheck`s:** Pure unit-tested Java functions computing expected values from bound slots, guarded by `must_equal` and verified at bind time against application dry-run primitives (`ORACLE_SUSPECT` on mismatch).
+- **Credential joins:** `credential: { realm, key }` filters candidates to those present in `credentials.yaml`.
 
-- **Queries** are records the pack declares, with a kind: `QueryType.of(kind, queryClass)`; `Query` is not sealed, so
-  every pack brings its own (design §10).
-- **Resolvers** (`Resolver`): `candidates(query, ctx)` returns ordered, deterministic candidates with a non-secret
-  label; the strategy is `CANONICAL_SQL` (`sql`) or `CANONICAL_JAVA` (`java`) for tier (a), `LLM_SQL` (`llm-sql`) for tier
-  (b) (§11.3).
-- **Verifiers** (`Verifier`) are the gate regardless of tier: deterministic, in the target JVM, normally a domain
-  primitive that runs the application's own check (the sample's `lending.access.check`, `lending.deposit`).
-- **Oracles** (`Oracle`) are committed, pure, unit-tested Java that compute expected outcomes from bindings. `must_equal`
-  makes an oracle a bind-time guard: a binding under which the scenario would not test what it claims is rejected.
-- **Cross-checks** (`CrossCheck`) compare an oracle with the application's own dry run of the same rule at bind time;
-  disagreement is `ORACLE_SUSPECT`, an `ERROR` in every mode; a guarded cross-check that cannot run makes the outcome
-  `DEGRADED` (P3 §3.1, §5.1, §6). Give every oracle a cross-check where the application can dry-run the rule
-  (`lending.waiver.evaluate`).
-- **Credential joins**: a slot with `credential: {realm, key}` joins the resolved value to an entry of
-  `credentials.yaml`; a candidate without an entry is dropped (P2 §8.4).
+### 8.5 Fingerprint, stored tables, and row masks
 
-### 8.5 Fingerprint, stored tables, row masks, allow-lists
+- **`EnvFingerprinter`:** Hash schema checksums, application build/version, data seed version, and browser engine version; exclude ephemeral ports, dates, hook catalogues, and display rendering properties.
+- **`storedTables()` and `rowMasks()`:** Declare tables queryable in `verify:` (`db.<table>`, including aggregates) and supply `RowMask`s matching your agent-side `MaskPolicy`.
 
-- **`EnvFingerprinter`** supplies named components; the base hashes them with the protocol major and the fingerprint
-  version. A mismatch in `replay` is `REBIND_NEEDED`, never a silent re-resolution. Include what makes bindings valid or
-  stale: a schema checksum of the tables the queries read, the application version and build, the data version, site
-  and device identity, the embedded-browser version. Exclude what changes from launch to launch (ports, dates), the hook
-  catalogue (D128) and rendering inputs (image baselines have render keys instead, D330). Too strict invalidates
-  constantly; too loose lets bindings go stale (design §3.4; P2 §8.2; P6 §6.5).
-- **`storedTables()`** lists the tables `verify:` may read with `db.<table>` checks (with aggregates since Phase 3), over
-  the agent's `data.query` or a controller-side read-only JDBC source named in `credentials.yaml` (P2 §7.4; P3 §3.2).
-- **`rowMasks()`** masks values read over that JDBC channel and the row samples of a provenance; the controller-side
-  JDBC rows never pass the agent's `MaskPolicy`, so supply the same rule here (design §3.6, "Closed in Phase 2").
-- **`sqlAllowLists()`**: §11.3.
+### 8.6 Scenario YAML, on-the-fly execution, and `resolveHash`
 
-### 8.6 The scenario YAML and the committed plan
+Scenarios use expressive expectations including list filters (`"loan.lines[*code=$item.code]": { size: 1 }`), `captureFacts` deltas (`{ gt: $before.qty }`), `containsWhere`, `anyOf`, `[json]`, and `events` bus counts (`"events[*topic=prompt.waiting]": { size: 0 }`), plus step modifiers `accept: [CODE]` and `minRung: NAME` (see `samples/skillroy-sample-lending-scenarios/scenarios/` for full examples).
 
-Scenarios are YAML (B5; design §3.2; P1 §8.1, with additions in P2 §3, P3 §3, P4 §7, P5 §13.1, P7 §8.1). A real
-example is the sample's scenario A,
-`samples/skillroy-sample-lending-scenarios/scenarios/return-over-limit-needs-supervisor.yaml`, in outline:
+- **Direct YAML or committed `plan.json`:** Both `skillroy run` and `ScenarioTests` compile and run `.yaml` files directly in memory, or execute pre-compiled `plan.json` files verified by `skillroy compile --check`.
+- **Resilient bindings (`resolveHash`):** `.bindings.json` files are tied to `resolveHash` (and per-slot `argsHash`) rather than `planHash`, so editing `steps:` or `verify:` expectations never invalidates committed bindings unless `resolve:` or `oracle:` changes.
 
-```yaml
-scenario: return-over-limit-needs-supervisor
-pack: lending
-requires: [lending.input, lending.state, lending.loan, lending.loan.authorisations, lending.prompt,
-           lending.prompt.answer, lending.slip]
-resolve:
-  systemMax:
-    query: SystemLimit
-    args: { type: RETURN }
-  item:
-    query: LendableItem
-    args: { deposit: { between: ["20.00", "200.00"], lte: $systemMax } }
-    strategy: [sql]
-    verify: lending.deposit
-  assistant:
-    query: StaffWithPermission
-    args: { perform: [SIGN_ON, RETURN], limit: { type: RETURN, lt: $item.deposit }, interactiveSignOn: true }
-    verify: lending.access.check
-    credential: { realm: staff, key: code }
-  # … the supervisor and the action keys
-oracle:
-  auth:
-    fn: ExpectedAuthorisation
-    args: { staffLimit: $assistant.limits.RETURN, systemMax: $systemMax, amount: $item.deposit }
-    must_equal: SUPERVISOR_PROMPT              # a binding under which no supervisor is needed is rejected, not run
-  # … returnLine
-steps:
-  - signOn: { staff: $assistant }
-  - expect: { "state.name": IDLE, "state.staff.code": $assistant.code }
-  # … the RETURN key
-  - scan: { item: $item }
-  - expectPrompt: { id: supervisor-required, within: 10s }    # its text is captured, not asserted
-  - authorise: { staff: $supervisor }
-  # … the remaining steps, ending with a waitFor that captures the posted loan's id into the slot loan
-verify:
-  - db.loan_line: { where: { loan_id: $loan.id, item_code: $item.code }, returned: true, amount: $oracle.returnLine }
-  # … three more checks
-on_prompt: { unexpected: fail }       # fail | pack (default: the pack's policy); nothing else loads
-timeouts: { step: 30s }
-```
+### 8.7 Credentials, bindings, and bind modes
 
-*(Phase 8, built 2026-10-19, EX; P8 §8.3-§8.9.)* Counts, deltas, membership and events, from the sample's
-`loan-counts-and-events.yaml`:
+- **`credentials.yaml`:** Per-environment, uncommitted, `0600` owner-only file holding user passwords/PINs, controller JDBC credentials, and optional `masking.minLengthInText`.
+- **Bind modes (`--mode` / `-Dskillroy.mode`):**
+  - `replay` (CI): zero LLM calls (asserted), re-verifies frozen bindings, fails fast as `REBIND_NEEDED` on drift.
+  - `approve` (interactive): resolves unapproved/changed slots, presents SQL/rationale/verifier proof/cost, and writes `.bindings.json` upon confirmation.
+  - `live` (authoring/dev): resolves dynamically; writes bindings only with `--write-bindings`.
+  - `re-resolve` (scheduled): batches nightly re-resolution via `skillroy re-resolve` and outputs a diff report for a PR.
 
-```yaml
-steps:
-  - signOn: { staff: $assistant }
-  - scan: { item: $item }
-  - captureFacts:                                   # read once where the step stands; a slot, as a capture is
-      slot: before
-      fields:
-        scans: { size: "events[*topic=input.acked][*payload.source=Barcode]" }
-        lines: { size: "loan.lines" }
-        qty:   "loan.lines[code=$item.code].qty"
-  - scan: { item: $item }
-  - expect:
-      "loan.lines[*code=$item.code]": { size: 1 }                          # a list filter, counted
-      "loan.lines[code=$item.code].qty": { gt: $before.qty }               # a delta of a value
-      "events[*topic=input.acked][*payload.source=Barcode]": { size: { gt: $before.scans } }
-      "loan.lines": { containsWhere: { code: $item.code, qty: 2 } }        # some line where
-  - key: { action: DUE }
-  - waitFor: { topic: input.requested, match: { state: DEPOSIT, validInputs: { has: Key.DEPOSIT } } }
-verify:
-  - { "slip.last.text": { anyOf: [ { contains: "NOT ON ANY SLIP" }, { contains: "DEPOSIT DUE" } ] } }
-  - { "events[*topic=prompt.waiting]": { size: 0 } }                       # negation is a count
-```
+### 8.8 Guarded expectations, `DEGRADED`, and failure classification
 
-Quote every key that holds `[` (a plain YAML scalar never starts with `[` or `*`). Capture counts on state that is the
-scenario's own (an open loan, the run's window), not on what an earlier run left. Put a negative check after a sync
-point or in `verify`: an expectation holds at its first true attempt. The plan is version 7.
-
-*(Phase 8 security fixes, S149, S150, S154, S173, FC; P8 §8.3-§8.7.)* Say "none" with a list filter and `{size: 0}`: a single filter that
-matches twice holds no `exists` form (it is ambiguous, `FAIL`). A regex or a `[json]` text that a bound stops (the 1 s
-budget, a text over 1 Mi characters, a regex recursing once per character such as `(.|\n)*`, a `$slot` regex that
-does not compile) decides nothing, under any `not`: the step ends `ERROR` / `ENVIRONMENT` "expectation could not be
-decided", so prefer anchored, literal-led regexes (`^override by`) and put a decided field first in a
-`containsWhere` (`topic: …` before a regex). Capture a count or a field, not a list: a captured value is at most 64 KiB
-of JSON. A check of a session, and of a model's or a client's run, reads the fact as the mask leaves it: a value that
-holds `<redacted>` holds no matcher, and a filter over a field that holds one compares nothing.
-
-The schema of what a scenario may contain for a given pack is generated by `ScenarioSchema.generate` and served to the
-planner and MCP clients as `skillroy://schema/scenario` (P5 §13.3).
-
-`skillroy compile` (or the executor) turns YAML into `plan.json`, byte-identical for the same YAML and pack version, with
-no timestamps or absolute paths (design §3.2; P1 §8.2). Both `skillroy run` and `ScenarioTests` can also execute `.yaml`
-scenarios directly by compiling them in memory on the fly. When committing pre-compiled plans beside the YAML (the
-sample: `plan/`), `skillroy compile --check` exits 1 for a missing or different plan; the sample's
-`PlansUpToDateTest` does the same in a test. `$slot` references are resolved at bind time, never at compile time, and
-committed `.bindings.json` files are gated on `resolveHash` (and per-slot `argsHash`) rather than `planHash`, so editing
-scenario steps or expectations without changing `resolve:` does not invalidate existing bindings.
-
-*(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.6.)* **Step modifiers.** Beside its one verb key a step may carry
-`accept: [CODE, …]` (warning codes the step tolerates: base codes, or codes the pack declares; `INVALID_WARNING` and
-`TOO_MANY_WARNINGS` never) and `minRung: NAME` (the lowest rung of the verb's ladder the step allows). Both are reserved
-words, never verbs; a step whose verb compiles to no call (`expect`, `aiAct`, …) refuses them, and `minRung` on a verb
-without a ladder, or naming no rung of it, is a compile error. A plan with them is written as version 7, the call
-carrying `accept` (sorted), `rungs` (`[{name, capability}]`) and `minRung`; an older reader refuses them. Without
-`accept`, a warning fails the step (`FAIL` / `ASSERTION`: "V: P reported CODE: …"); `INPUT_QUEUED` is the executor's
-own, derived from `consumed: QUEUED` when acknowledgements are not correlated. From the sample's
-`scenarios/semantic-input-warnings.yaml` and `scenarios/scanner/device-scan-physical.yaml`:
-
-```yaml
-steps:
-  - scan: { barcode: " 5000000000017 " }
-    accept: [VALUE_COERCED]          # the desk trims the barcode; the step says it does not care
-  - enter: { value: "   " }
-    accept: [VALUE_DROPPED]          # the desk ignores an entry of spaces
-  - deviceScan: { item: $item }
-    minRung: PHYSICAL                # refused at run start on a desk without the scanner driver
-```
-
-### 8.7 Credentials and bindings; the bind modes
-
-- **`credentials.yaml`**, one per environment, **never committed**, read by the controller only, owner-only (mode 600
-  on POSIX): realms of secret fields, JDBC sources (`url`, `user`, `password`, timeouts) and
-  `masking.minLengthInText` (P2 §4). Lookup: `--credentials`, the system property `skillroy.credentials`, the
-  environment variable `SKILLROY_CREDENTIALS`, else `<bindings root>/<env>/credentials.yaml`. The sample's
-  `credentials.example.yaml` documents the format. Use a read-only database role.
-- **Bindings** are `<bindings root>/<env>/<scenario>.bindings.json`: the resolved values (semantic ids, no secrets),
-  their strategy, provenance, verifier evidence and approval, oracle values, the fingerprint (P2 §9; design §3.4). They
-  are reviewed and committed like code. `skillroy diff-bindings` compares environments.
-- **Bind modes** (`--mode`, or the JUnit glue's `skillroy.mode`; `BindMode`):
-
-| Mode | Who | Model calls | Writes bindings |
-|---|---|---|---|
-| `replay` | CI, every run | none (asserted) | no; verifiers re-run; fingerprint or verifier mismatch is `REBIND_NEEDED` |
-| `approve` | a person, for a new or changed scenario | tier (b) only | yes, after the person approves (a terminal question, `--yes`, `--approved-by`) |
-| `live` | a developer or an authoring tool | allowed | only with `--write-bindings` |
-| `re-resolve` | the nightly job (`skillroy re-resolve`) | batched, budgeted | yes, for review in a pull request the pipeline opens |
-
-### 8.8 Guarded expectations, `DEGRADED` and the failure taxonomy
-
-- `requires:` names what a scenario cannot do without (missing: `PRECONDITION_FAILED`). A guard on one expectation names
-  what it can do without: `{ gte: 1, capability: hook.limit.applied }`; when the capability is not `OK` the expectation
-  is skipped and the best outcome is `DEGRADED` (B14; P1 §8.4). The sample's scenario E guards its hook expectations
-  this way and passes with hooks on, `DEGRADED` with hooks off (P6 §6.3).
-- **Application configuration a scenario depends on is a capability** (Phase 8, built 2026-10-19, EP; P8 §9.4, gap 24):
-  name it in `requires:` when the scenario cannot run without it (`PRECONDITION_FAILED` before anything mutating is
-  sent, before pre-flight, bind and the start mark), or in a guard when one piece of evidence depends on it
-  (`DEGRADED`). There is no `preconditions:` key: one matrix states everything a scenario needs, `skillroy caps` shows
-  it, each run archives it, the `caps` root reads it and the scenario schema lists the ids. Two sources, the layer's
-  choice per fact: the **agent module probes** the setting in process (`ctx.capabilities().declare(id, probe)`, or
-  `set(…)` from the application's own change notification when it can change while the target runs; one id per
-  condition, the value in the name when needed, `<module>.setting.<name>.<value>`; it costs the capability goldens an
-  id each, and a probe runs at readiness and on `reprobe` only, so a mirrored setting goes stale unless the module
-  `set()`s it on change), or the **pack evaluates** it from the environment at run start (`DomainPack.capabilities()`,
-  `PackCapability`: read-only through the data channel, overlay-aware through `settings()`, honoured in `replay`, no
-  agent change and no golden; `SUITE` scope for a slow fact). The sample: `lending.returns.ceiling` is the pack's
-  ("the desk has a system maximum return configured"), and scenario A names it in `requires:`; a guard reads the same
-  way, `"db.loan_authorisation": { where: { loan_id: $returned.id }, rows: 1, capability: lending.returns.ceiling }`.
-  Ids carry no arguments. **The namespace:** the agent module and the pack of one domain share the prefix `<packId>.`,
-  and only an id both declare is a conflict (it refuses every run naming both): give the pack's ids a leaf the module
-  never declares, and run `skillroy caps --pack <jar>` before CI, which shows both sides in one table.
-- Classification is deterministic and happens before any model sees a failure (design §3.5): `ASSERTION` and
-  `SYNC_TIMEOUT` are `FAIL`; `PRECONDITION_FAILED`, `REBIND_NEEDED`, `RESOLUTION_FAILED`, `ORACLE_SUSPECT`,
-  `TARGET_RESTARTED`, `AGENT_LOST`, `ENVIRONMENT` are `ERROR`; `MODAL_OPEN` and `INPUT_REJECTED` from a step call are
-  `FAIL` / `ASSERTION`; a click that fell back to a lower rung makes the run `DEGRADED`; a plan that needs a model while
-  steps run is `SKIPPED` in `replay` (P7 §8.6).
-
-*(Phase 8, built 2026-10-19, ES; P8 §7.6, §7.7.)* The executor checks a call's result in a fixed order: secret echo
-(a value of a secret parameter anywhere in the result is an `ERROR` / `ENVIRONMENT`, the parameter named, never the
-value), warnings (one the step did not accept is `FAIL` / `ASSERTION`; an accepted one is a `warning` record and a
-line in the summary), composite problems, the rung, then the base checks. A call that reports a lower rung of its ladder
-than the first makes the run `DEGRADED` with a `fidelity` record; a rung below the step's `minRung`, a rung missing or
-not on the ladder, or a `minRung` the device did not echo is `FAIL` / `ASSERTION`. At run start, a step with `minRung`
-whose rungs from the first to `minRung` all have a capability that is not `OK` is `PRECONDITION_FAILED` before
-anything runs (the `rungs` record).
+Use `requires:` for mandatory capabilities (`PRECONDITION_FAILED`) and `capability:` on individual expectations for optional evidence (`DEGRADED` when unavailable). Model environment/configuration switches as agent capabilities or controller `PackCapability` entries so `skillroy caps` and `capabilities.json` capture the complete run contract.
 
 ### 8.9 Image baselines and render keys
 
-`expectImage` compares one redacted capture exactly (after masks) with a committed baseline; `pointer` steps may carry an
-exact image guard (P7 §6.7, §8.1). Baselines and anchors live beside the bindings file in `<scenarioId>.images/`, keyed
-by a **render key** of the rendering inputs (JDK line, look and feel, fonts, scale), not by the fingerprint (D330); a
-rendering the project has no baseline for is `REBIND_NEEDED(IMAGE)`, and a new JDK line or font set needs one `approve`
-run per environment (gap 83). Baselines are screenshots of the application's data: mask with `expectImage`'s `mask`
-what must not be committed, and review the PNGs as you review the YAML (P7 §8.7; `SECURITY.md`). Prefer expectations on
-facts; use images only for purely visual properties.
+`expectImage` compares redacted root-pane `PAINT` captures pixel-for-pixel (after masks) against committed baselines under `<scenarioId>.images/`, keyed by the target's **render key** (JDK line, look-and-feel, font set, scale) rather than `EnvFingerprint`. Prefer structured fact expectations for business logic and reserve `expectImage` for visual layout/rendering checks.
 
-### 8.10 Running scenarios: JUnit glue and CLI
+### 8.10 Running scenarios: JUnit 5 and CLI
 
-- **Maven**: a `@TestFactory` returns `ScenarioTests.dynamicTests(ScenarioSource.classpath("scenarios"), () -> connection)`
-  (or `ScenarioSource.directory(path)`), one dynamic test per scenario, plus one `environment` test for setup failures
-  and, in `replay` when a scenario of the stream needs bindings, `skillroy: zero model calls`. System properties:
-  `skillroy.mode`, `skillroy.env`, `skillroy.bindings`, `skillroy.credentials`, `skillroy.approve`, `skillroy.hooks`,
-  the `skillroy.telemetry*` set, `skillroy.robot` (warned about when true). A CI run is
-  `mvn -pl <scenarios module> verify -Dskillroy.mode=replay -Dskillroy.env=<env>` (design §6; `ScenarioTests` Javadoc).
-- **CLI** (`skillroy --help`): `jvms`, `attach`, `info`, `caps`, `schema`, `call`, `snapshot`, `events`, `compile`,
-  `run`, `resolve`, `diff-bindings`, `re-resolve`, `mcp`, `author`, `triage`, `session`, `hooks`. Packs come in as
-  `--pack <jar>` (one option per jar); the target as `--pid`, or `--port` with `--token-file`. With `--out` each scenario
-  writes `run.jsonl`, `bindings.json`, `cost-ledger.jsonl`, `capabilities.json` and, on failure, `failure/` (README,
-  "Try the CLI").
+- **JUnit 5 (`skillroy-junit`):** Return `ScenarioTests.dynamicTests(ScenarioSource.classpath("scenarios"), () -> connection)` from a `@TestFactory` method. Run CI with `mvn -pl <scenarios-module> verify -Dskillroy.mode=replay -Dskillroy.env=<env>`.
+- **CLI (`skillroy --help`):** `jvms`, `attach`, `info`, `caps`, `schema`, `call`, `snapshot`, `events`, `compile`, `run`, `resolve`, `diff-bindings`, `re-resolve`, `mcp`, `author`, `triage`, `session`, `hooks`, `packs`.
 
 ---
 
 ## 9. Hooks
 
-Hooks are optional, catalogued bytecode observation points for facts the application exposes through no public seam
-(design §2.6 "Hook policy"; P6 §3-§6). The framework is complete without them.
+Hooks are optional bytecode observation points (`optionalModules=skillroy-agent-hooks` in `JAVAAGENT` or `ATTACH` mode, controlled per run via `--hooks auto|on|off` or `-Dskillroy.hooks=auto|on|off`).
 
-### 9.1 Turning them on
+### 9.1 Catalogue format, `codeSource`, and `deny`
 
-- The agent: `optionalModules=skillroy-agent-hooks` and a load mode with `Instrumentation` (`JAVAAGENT` or `ATTACH`).
-  The capability `hook.engine` reports the engine's state; one `hook.<id>` per installed hook reports its health.
-- The run: `--hooks auto|on|off` on `run`, `session`, `mcp` and `author`, or `-Dskillroy.hooks=auto|on|off` (default
-  `auto`: install the pack's catalogue when the hooks module is loaded). It is a run-level switch, never a scenario key
-  (P6 §6.1).
-- Installed hooks **stay installed** after a run, idempotent by catalogue hash, until `skillroy hooks remove`, the agent
-  is disabled, or the target exits (D129). A `replay` run against an armed stub is `ERROR` / `ENVIRONMENT`: CI never
-  runs against stubbed behaviour (P6 §5.3).
-
-### 9.2 The catalogue
-
-One YAML resource per pack, `META-INF/skillroy/hooks/<packId>.yaml`, read with the strict reader; the agent receives
-JSON `HookSpec`s (`ai.skillroy.testjava.protocol.hook`), never YAML (P6 §5.1). The sample's
-`samples/skillroy-sample-lending-pack/src/main/resources/META-INF/skillroy/hooks/lending.yaml` is the example:
+Place `META-INF/skillroy/hooks/<packId>.yaml` in your pack jar:
 
 ```yaml
-catalogue: <packId>                    # [a-z][a-z0-9-]*
-version: 1                             # bump on every change; part of the hash
-application: <application> <version>  # free text for the record
+catalogue: <packId>
+version: 1
+application: <application> <version>
+packages:
+  - { name: <your.app.pkg>, codeSource: '<your-app>(-[^/]*)?\.jar' }
+deny: [<your.app.pkg>.licencing.**]
 hooks:
-  - id: limit.applied                  # capability hook.limit.applied, topic hook.limit.applied
-    mode: CAPTURE                      # OBSERVE | CAPTURE | STUB
-    target: { class: <fully qualified class>, method: <name>, descriptors: ["(Ljava/lang/String;)Ljava/math/BigDecimal;"] }
+  - id: limit.applied
+    mode: CAPTURE                          # OBSERVE | CAPTURE | STUB
+    target:
+      class: <your.app.pkg>.LimitService
+      method: effectiveLimit
+      descriptors: ["(Ljava/lang/String;)Ljava/math/BigDecimal;"]
     capture: { args: [0], result: true }
-    secretArgs: []                     # argument indexes never captured
+    secretArgs: []
     secretResult: false
     fallbacks:
-      - seam: <product>.limits         # always first, always a public seam: a primitive the target serves
-    note: what the hook observes
-packages: [<the application's own packages>]   # decides the default of enabled
+      - seam: <product>.limits             # first fallback must always be a public seam primitive
+    note: Observe applied role limit
 ```
 
-Rules the reader enforces: the first fallback is a `seam`; at most 64 hooks; `capture` only on `CAPTURE`; an entry on a
-class outside `packages` is off unless written `enabled: true`, with a warning. Pin every descriptor of an overloaded
-method that reaches the behaviour. A `reflect` fallback is refused ("not in this version").
+- `codeSource` filters hooked classes by exact regex match on the loaded jar filename so third-party classes sharing a package stay untouched.
+- Class `deny` patterns (`hooks.deny` agent option, catalogue `deny:`, and `ClassDeny` SPI) are additive for the life of the agent instance and refuse matching classes before any bytecode is read.
+- `replay` fails closed with `ERROR` / `ENVIRONMENT` if any `STUB` hook is armed.
 
-**Code sources and the deny (Phase 8, built 2026-10-19, EH; P8 §6.2, §6.3, §6.8).** A `packages` item may be a map
-that names the jar the package's classes must come from, and an entry may carry the same qualifier itself; both are a
-Java regular expression matched against the **whole** code-source name (anchored: `desk-app.*` does not match
-`desk-app-scheduler.jar` unless written so), and an entry's own wins over the longest `packages` name its class is
-under. The name is the jar's file name, never a directory; for a class directory it is the directory's last segment,
-for a nested jar the outer jar and the entry inside it:
+### 9.2 Engine limits, facts, and CLI
 
-```yaml
-version: 2                             # bump on every change, as always
-packages:
-  - { name: <your package>, codeSource: '<your-app>(-[^/]*)?\.jar' }   # the IT copy and a versioned jar match
-  - <a package you share with nobody>  # the plain form stays
-deny: [<your package>.Inbox, <your package>.licensed.**]               # class patterns, at most 64
-```
+The engine refuses classes > 256 KiB or > 2,000 methods, caps hooked classes at 64, refuses strict-delegation loaders that hide bootstrap `Spy`, and byte-verifies class restoration on `skillroy hooks remove` or detach (`hooks.detachBudgetMs`, 8 s). Scenarios assert hook evidence through the `hooks` fact root (`hooks[id=limit.applied].count`, `.last.args.0`, `.last.returned`).
 
-| Where the class was loaded from | Its code-source name |
-|---|---|
-| `file:/opt/desk/lib/desk-app-1.2.jar` (a versioned jar) | `desk-app-1.2.jar` |
-| `file:/opt/it-target/desk-app.jar` (an unversioned IT copy) | `desk-app.jar` |
-| `file:/build/desk/target/classes/` (a class directory) | `classes` |
-| `jar:file:/opt/app.jar!/BOOT-INF/lib/lib.jar!/` (a nested jar) | `app.jar!/BOOT-INF/lib/lib.jar` |
-| `jar:file:C:\Users\x\plugins\desk-plugin.jar!/` (a Windows plugin loader's URL, Phase 8 security fix S178) | `desk-plugin.jar` |
-| the bootstrap loader, a generated proxy | `(none)` |
+### 9.3 Optional Byteman (`skillroy-agent-byteman`)
 
-The name is percent-decoded before it is cut, and both `/` and `\` end a directory, so a Windows native path or an
-encoded separator never leaves a directory in it (a POSIX jar whose file name holds a backslash is named by the text
-after it).
-
-A qualifier is a filter, like `loader`: a copy of the name from another jar is left alone, not a failure of the hook
-(`class from another code source: <names>` when no copy matches). `deny:` takes class patterns (`a.b.C` with its nested
-classes, `a.b.*` the package, `a.b.**` everything under it, `a.b.Input*` a glob in the last segment); an **enabled**
-entry on a denied class is an error at its `class` line, a disabled one a warning. An overlay unions both lists and can
-never lift a base deny; an enabled base entry the overlay denies must be disabled by the overlay.
-
-**Per application version.** The pack's default `hooks()` reads one catalogue. Choosing among catalogues per application
-version is the layer's: one pack build per supported application line, or a `hooks()` override that reads the right
-resource (`HookCatalogues.readResource(type, name)` or `HookCatalogues.read(reader, source)`) by something the layer
-controls, such as a pack setting. The `application:` field is for the record only; nothing selects by it (P6 §5.1).
-
-### 9.3 What the engine refuses
-
-The engine probes each spec before installing it (`hook.probe`; P6 §3.3): it never loads a target class, refuses the
-JDK's and the agent's packages and loaders, refuses a class larger than `hooks.maxClassBytes` (262144) or with more than
-`hooks.maxMethods` (2000) methods, holds at most `hooks.maxClasses` (64) classes, and refuses a class whose loader cannot
-see the bootstrap `Spy` (a strict-delegation loader, gap 50). Detach restores and verifies the original bytes within
-`hooks.detachBudgetMs` (8000) (P6 §3.5). A failed install falls back to the first `seam` the target serves; scenarios
-that need the hook name it in `requires:` or guard on it.
-
-**The class deny (Phase 8, built 2026-10-19, EH; P8 §6.4-§6.6, §6.9).** A class is refused **by name, before anything
-of it is read**, by three sources asked in order, the first refusal winning: the agent option `hooks.deny` (the
-operator's; comma-separated class patterns, read by the hooks and the Byteman modules alike), the catalogue's `deny:`
-(delivered with `hook.install` and held by the engine) and a domain module's `ClassDeny` (§6.2). The held catalogue list
-is **add-only for the agent instance's life**: it survives `hook.remove {}` and a replace, so loosening a deny needs a
-target restart; `hook.health.deny` (and `skillroy hooks status`) shows the effective list. The agent echoes the held
-list in every `hook.install` answer and the installer fails closed (`ENVIRONMENT`, "upgrade the agent") when the echo
-is missing. A run that skips the install (`--hooks off`, or no usable hooks module) records `denyNotDelivered` with the
-patterns and whether the remedy, the agent option `hooks.deny`, is in force on the target (`agentOption`, read from
-`rule.list` when the Byteman module is loaded, else `unknown`); set it on a target that runs without the hooks module.
-A hook installed before its class was denied is **flagged, not removed** (`deniedNow`; remove it yourself). The deny is
-policy (a hot path, a licence, timing-sensitive code), not checksum protection: retransformation changes neither the
-jar nor the bytes the class's resource returns.
-
-### 9.4 Reading hook facts and the CLI
-
-The base fact root `hooks` is a list, filtered by id: `hooks[id=limit.applied].count`,
-`hooks[id=limit.applied].last.args.0`, `hooks[id=limit.applied].last.returned`; `count` and `last` describe the current
-run's steps only (P6 §6.3). `skillroy hooks status|install|remove [--ids a,b] [--pack <jar>]…` shows the target's hooks
-beside the pack's catalogue, installs, or removes with verification (P6 §6.2). Hook events are evidence about
-non-adversarial application code, not a tamper-proof record (threat model §3).
-
-### 9.5 Hooks from Java
-
-A domain module that needs hooks from code finds the `HookEngine` with `ctx.hooks()` in `onTargetReady` (null without
-the hooks module), never through `requires()`, and calls it from agent threads only, never the EDT or an application
-thread: an install retransforms classes (P6 §3.6).
-
-### 9.6 Byteman (optional)
-
-For ad-hoc rules beyond the catalogue: `optionalModules=skillroy-agent-byteman` and `byteman.jar=<absolute path>` to a
-Byteman jar **the user supplies** (4.0.27 is the line the base was built and tested with), in a directory nobody else may
-write. Byteman is loaded in process on the first confirmed `rule.submit`, with no listener; `rule.check` lints without
-loading it, `rule.submit` is destructive and needs `confirm`, `rule.unload` restores, `rule.list` lists (P6 §7;
-`JAVAAGENT` or `ATTACH` only). Only rules unload; Byteman stays loaded for the JVM's life, and a rule left installed by a
-detach that ran out of time keeps running until the target restarts (`SECURITY.md`).
-
-*(Phase 8, built 2026-10-19, EH; P8 §6.7.)* The Byteman module honours the class deny of §9.3 before it loads: a rule
-whose `CLASS` or `INTERFACE` names a denied class is reported by `rule.check` and refused by `rule.submit` before the
-count and before Byteman is loaded, and a `^` or `INTERFACE` rule that reaches a denied loaded subtype is refused too;
-`rule.list.deny` shows the deny in force. A denied subtype loaded **after** a `^`/`INTERFACE` submit still receives
-Byteman's trigger at its load (gap 140): deny the supertype or write the rule on the class itself.
+For ad-hoc diagnostic rules outside the catalogue, enable `optionalModules=skillroy-agent-byteman` and point `byteman.jar=<path>` to a user-supplied Byteman 4.0.27 jar in an owner-only directory. Byteman loads in-process with `listener:false` on the first confirmed `rule.submit`, honours the class `deny` list upfront, and exposes `rule.check`, `rule.submit` (destructive, requires `confirm`), `rule.unload`, and `rule.list`.
 
 ---
 
 ## 10. Embedded web views
 
-Every web verb runs on one of two paths, and each step records which (design §3.8; P4).
+Every `web.*` verb (`webClick`, `webFill`, `webDispatch`, `webWaitFlag`, `webResize`, `webTap`) executes over either Playwright CDP (`skillroy-cdp`) or the in-process agent SPI (`skillroy-agent-web`), selectable via `web: { path: auto | cdp | agent }`.
 
-### 10.1 What the layer decides
-
-| Question | Where it is answered |
-|---|---|
-| Which engine does the application embed, which line, on which Java? | §10.2 |
-| Can every browser be found? (in the Swing tree, or only through the application's own objects) | `BrowserRegistryAdapter` (§6.8) |
-| Does the application start its engine with a remote-debugging port in test configurations? | §10.3; it must be set at engine start: the base never sets one |
-| What are the pages' readiness signals? | page flags and events: `webWaitFlag`, `webTap` (§10.4) |
-| Which pages show personal data? | mask the browser component (§10.4) |
-
-### 10.2 The in-process path: the built-in adapters
-
-One SPI (`WebEngineAdapter`, `WebBrowser`, in `….agent.api.spi.web`) with two built-in reflective adapters in
-`skillroy-agent-web`; neither has a compile-time vendor dependency, and no vendor code or licence ships (B9; P4 §3, §4.5).
-
-- **`jcef`**: in process through the browser's own DevTools methods, no debug port needed. It never creates a `CefApp`
-  (only reads an initialised one) and takes no handler slot of the application. A JCEF older than 2024-01 is served on
-  neither path (gap 43); windowed JCEF on a Java 8 target is unverified (gap 44); a hidden JCEF browser has no bitmap
-  (gap 39). The base's own web host (profile `jcef`) and the contract kit run against real JCEF in the Linux image.
-- **`jxbrowser`**: the public members lines 7, 8 and 9 share, resolved by reflection from a descriptor. The library needs
-  a commercial licence **at run time, supplied by the application**; the adapter never reads, logs or forwards a licence
-  key, and nothing of JxBrowser is in any of the base's artifacts. Enumeration is by seeds only: an engine whose browser
-  is in no window is found only through a `BrowserRegistryAdapter` seed. Only line 7 runs on a Java 8 target, and it is
-  past its end of life. Document-start init scripts need the opt-in `web.jxbrowser.chainInjectJs=true`, which chains
-  the application's `InjectJsCallback` and restores it on detach. **Verified only against JxBrowser 8.18.3 on macOS
-  arm64 with a JDK 25 test JVM (2026-10-11, the contract kit 19 of 19 in three variants)**; other lines, Linux, Windows
-  and a Java 8 test JVM are not verified (P4 §4.5 "Against the product"; TODO "Walls"; `SECURITY.md`). A layer whose
-  application embeds JxBrowser should run the kit against its own line and platform first (§10.5).
-
-The capability `web.adapter.<id>` reports which adapter and line a target uses; `web.browsers` lists the browsers with
-their refs, tags and frames.
-
-### 10.3 The CDP path
-
-`skillroy-cdp` attaches Playwright (1.63.0) to the embedded Chromium with `connectOverCDP` on a loopback
-remote-debugging port, under an external deadline with a liveness probe, and never creates a context or page
-(P4 §5). It is optional: the executor, the JUnit glue and the CLI do not depend on it. A Maven suite declares it; the CLI
-takes it and Playwright's jars as `--pack` jars (README "Embedded web views"). The scenario key
-`web: {path: auto|cdp|agent, browser: {tag: …}, frozenTargets: …}` chooses: `auto` takes CDP when a port is configured
-and `skillroy-cdp` is present, else the agent. `web.cdp.status` reports the ports the adapters found configured.
-
-- The port is per process on JCEF and per engine on JxBrowser and must be unique per target instance on a shared host.
-- Pin Playwright to what attaches to the embedded Chromium; the newest is the default, and a pack pins older only when
-  a spike shows the newest cannot attach (design §1.3, §3.8).
-- (Phase 8, P8 §5.3) **The floor.** Built and tested with Playwright 1.63.0. The CDP path runs with 1.61 and later in
-  full; with 1.60 without tracing (a traced run opens untraced); with 1.58 and 1.59 only under the operator's opt-in
-  `-Dskillroy.cdp.allowDefaultOverrides=true` on the controller (Playwright's download, focus and media overrides then
-  apply to the application's own browser context, logged at WARNING); a line below 1.58 is refused by the same rule and
-  is otherwise untried. The module's other Playwright API is older than 1.58 by its release notes, but no other line was
-  run: a layer that pins one spikes it and audits it. The `web.path` record says which line ran (`playwright`) and what
-  the attach applied (`connectOptions`).
-- Bind the port before any other process can, or run with `web.path: agent`: a process that holds the port first can
-  redirect Playwright's handshake (`SECURITY.md`, "A squatted debug port").
-- Playwright's driver inherits the controller's environment; set `PLAYWRIGHT_*`, `NODE_OPTIONS` and `DEBUG=pw:*` only on
-  purpose (README).
-
-### 10.4 Verbs, primitives, readiness and masks
-
-- Base verbs: `webClick`, `webFill`, `webDispatch`, `webWaitFlag`, `webResize`, `webTap` (P4 §7.1). Primitives:
-  `web.browsers`, `web.evaluate`, `web.waitFlag`, `web.dom.click`, `web.dom.fill`, `web.dom.text`, `web.ariaSnapshot`,
-  `web.dispatchEvent`, `web.tap`, `web.resize`, `web.bitmap`, `web.reload`, `web.initScript`, `web.cdp.status`, and
-  since Phase 7 `web.hitTest` and `web.pointer`. `web.evaluate` and `web.waitFlag` carry the `script` flag, which
-  read-only mode refuses.
-- Readiness: declare the pages' readiness contract (a flag, an event); `web.tap` installs an in-page event tap from a
-  document-load observer, so a single-fire event is not lost; the step records which signal satisfied it (design §3.8).
-  The web host's pack uses `readyTopics: [web.ready]` and no ack topic.
-- Masks: there is no mask for a DOM element. A page that shows personal data is masked by a `CaptureMask` on the whole
-  browser component while it does, and a masked browser is masked on every route: no pixels, text or tree reach a model
-  or a client (`SECURITY.md`; P7 §3.6). The web host's `FrontCardMask` is the example. (Phase 8, P8 §5.2) A
-  `BrowserMask` names or releases a browser by its seed tag or vendor object (`BackTagMask`, `DetachedRelease`); a
-  browser without a view is masked while any mask is registered; a masked browser's `web.load`, `web.ready`,
-  `web.console` and `web.tap` withhold page data (`name` and `signal` stay, so waits still complete), `by: {url|title}`
-  never selects it (select it by `tag`), and `web.pointer`, `web.dom.click` and `web.dom.fill` on it answer without page
-  data (`redact: false` is a person's argument). The CDP path hands what it cannot judge to the agent. (Phase 8 security
-  fixes, FE.) Acting on a masked browser **by locator** (`web.dom.click`, `web.dom.fill`, a `web.dispatchEvent` with a
-  selector `target`) is refused unless `redact: false`: whether a locator matched would reveal the page (S165); a
-  person's scenario that must do it uses a `call` step with `redact: false`, a pack's verb compiles `redact: false`
-  into its call (accepted on the MCP server's verb route, refused on a session's facade), and a model or a client acts
-  there with `web.pointer` at a point. A masked browser's `web.tap` events carry the tap's own pattern as `name` (the
-  glob that heard the event, under a glob), so a step there taps the exact names it waits on, or waits on the glob
-  (S170). A masked browser's view is grey in every capture and masked in the hit-test, whatever masks it (S166).
-- Navigation is the application's: scenarios drive the application, which drives its web views.
-
-### 10.5 Adding an adapter for another engine
-
-A layer may add a `WebEngineAdapter` for a technology the base does not cover, in an agent module (Java 8), added
-through `ctx.spi()` during `install` (P4 §3). Its rules, each tested by the contract kit: create, initialise or configure
-no engine; take nothing single-slot of the application (or chain and restore it on an explicit opt-in); never wait on
-the EDT; leave no enumerable global in the page; no vendor type in a signature, on the wire or in any Maven scope, no
-licence key read; a missing optional member is a missing capability, not an error.
-
-Prove it with **the adapter contract kit**, the `skillroy-agent-web` test-jar (package `ai.skillroy.testjava.agent.web.kit`):
-subclass `WebEngineAdapterContract` and implement `WebAdapterFixture` (the adapter, seeds for a visible, a hidden and
-optionally a view-less browser, page loading, the thread that must never block, the expected rendering and enumeration
-state). The kit's items cover probing, enumeration, evaluation, frames, events, init scripts, resize, bitmaps, target
-ids, closure, globals, reload, the guard, console budgets, hit-tests and pointer input (P4 §10.1; P7 §4.9). An engine
-that needs a licence is tested **in the layer's repository**, which holds the licence, never in the base: that is how the
-JxBrowser run of 2026-10-11 was made (P4 §4.5).
+- **In-process adapters (`skillroy-agent-web`):**
+  - `jcef`: Uses JCEF's in-process DevTools protocol methods (`executeDevToolsMethod` + message observer) without needing a debug port or occupying single-slot client handlers.
+  - `jxbrowser`: Reflectively resolves common APIs across JxBrowser lines 7, 8, and 9 from `BrowserRegistryAdapter` seeds (`web.jxbrowser.chainInjectJs=true` opts into chaining `InjectJsCallback` for document-start scripts). Verified against JxBrowser 8.18.3 on macOS arm64 (JDK 25); run `WebEngineAdapterContract` against your exact version and OS when adopting.
+- **Playwright CDP (`skillroy-cdp`):** Attaches to a launch-time loopback remote-debugging port (`connectOverCDP` with `noDefaults` and `isLocal`), running an upfront `/json/list` + `Runtime.evaluate("1")` liveness check under an external deadline and mapping pages by `cdpTargetId`. Built against Playwright 1.63.0 (supports >= 1.61 in full, 1.60 untraced, and 1.58–1.59 only under `-Dskillroy.cdp.allowDefaultOverrides=true`).
+- **Web masking:** Mask sensitive browser views with `CaptureMask` on the Swing component or `BrowserMask` by seed tag / vendor instance (§6.8). On masked browsers, snapshots/events withhold page data and DOM locator actions require human-only `redact: false`.
+- **Custom browser engines:** Implement `WebEngineAdapter` + `WebBrowser` (`--release 8`, zero compile-time vendor types in signatures) and validate with `WebEngineAdapterContract` from `skillroy-agent-web`'s `test-jar`.
 
 ---
 
 ## 11. AI features and policy
 
-### 11.1 CI never calls a model
-
-`replay` makes **zero model calls**, asserted by the cost ledger and, in the JUnit glue, by the test
-`skillroy: zero model calls`; the model key is absent from CI agents; a plan that needs a model while steps run is
-reported `SKIPPED` (B6; design §5, §6). Nothing in the build needs a key: every test of the AI layer runs against
-recorded or scripted gateways. The owner's key is for live work only, read from the environment
-(`ANTHROPIC_API_KEY`) and never from a file, an option or a command line (P5 §2.3).
-
-### 11.2 Inference settings
-
-`inference.yaml`, beside `credentials.yaml` (or `--inference-file`), holds no secret and may be committed; it is read
-only when nobody but the current user could have written it (P5 §4.4). The sample's
-`samples/skillroy-sample-lending-scenarios/inference.example.yaml` shows every key: `gateway: claude|recorded|none`
-(`replay` forces `none`), `recordings`, `models`, `effort`, `budget` (`scenarioUsd` 0.50 per bind, `sessionUsd` 1.00 per
-interactive session, `jobUsd` required by `re-resolve`), `thresholds.confidence` (0.6), `images` (false: the one switch
-that lets pixels leave for the provider), `logPrompts`. Every call is metered by `BudgetMeter` with a `PriceTable` and
-written to the ledger (P5 §7); a configured model id not explicitly listed in the price table opens cleanly and uses
-`PriceTable.effective(model)`'s fallback rate (`claude-opus-5-5`) unless given a custom entry under `prices:`.
-
-### 11.3 Tier (b): model-written SQL
-
-A slot with `strategy: [llm-sql]` (or `[sql, llm-sql]`) is resolved by a model in `live` and `approve` through the
-contributed resolver `inference.sql`, behind `SqlGuard` (one `SELECT`, the pack's allow-list, a deterministic
-`ORDER BY`, a row limit), the verifier, the confidence threshold, and **a person's approval** (the slot stays
-`REQUIRED` until approved) (P5 §5, §7.1). The pack declares `sqlAllowLists()`: per source and dialect, the tables and
-columns a model may read, each column marked `personal` and `sample` as it applies, with descriptions that become the
-model's catalogue. The allow-list is checked against the database at start (D100): every declared table and column must
-exist in the database, while extra unenumerated columns on the live database table are tolerated (`otherColumns` is
-optional), and `LlmSqlResolver` ignores extra selected columns (such as `ORDER BY` expressions) when decoding
-`Record`-typed candidates. The sample's scenario D is the
-worked example, with committed recordings so CI needs no key. **(Phase 8, built 2026-10-19, ET; P8 §4.4, §4.5)**
-Procedures are not served: `SqlGuard` refuses every `CALL` and `EXEC` ("no data channel runs a procedure call (gap
-119)"), and an allow-list that names procedures is refused at load and at the MCP server's start (`procedures` is
-reserved for gap 13 and must be empty). A source that answers by position needs its provider to answer
-`columns(table)` for the start check to pass.
-
-### 11.4 Data policy: what may reach a model
-
-- `PromptMask` masks before any request is built: credentials never, personal columns by the allow-list's flags and the
-  row masks, a secret-named property's whole subtree (P5 §6; threat model §5).
-- Images reach a provider only under `images: true`, only as redacted `PAINT` captures of the target's own windows,
-  never a capture of the screen glass (P7 §11).
-- What a model reads from the target is untrusted input: its tools are the target's own primitives and the pack's verbs;
-  nothing it produces reaches `data.query` except through the guard and the allow-list, nor installs hooks, submits
-  rules or runs a script primitive; it never confirms (threat model §5).
-- Choose models whose data handling suits the application's data; the design notes which are zero-data-retention
-  eligible (design §5, "Personal data").
-
-### 11.5 Approve, authoring and interactive sessions
-
-- **Approve and review**: `skillroy run --mode approve` shows value, SQL, rationale, cost and verifier evidence and
-  writes the bindings on approval; `skillroy diff-bindings` and the nightly `skillroy re-resolve` report make changes
-  reviewable; the pipeline opens the pull request (P5 §7.1, §8; `ci/examples/nightly-re-resolve.yml`).
-- **Authoring**: `skillroy author --brief <text>` runs the planner (`claude` on `PATH`, headless) against the MCP server
-  and emits a scenario that a person reviews; exported model-found slots stay `REQUIRED` until approved (P5 §10; D97).
-- **Interactive sessions**: `skillroy session` (`ask`, `do`, `call`, `resolve`, `check`, `export`) drives a live target
-  with every action journaled; `export` writes an ordinary scenario that replays with zero model calls (B15; P5 §12).
-  The MCP server (`skillroy mcp`, read-only by default, `--mutating` by flag, never destructive) is another host.
-- **An assistant inside the application**: the session service's `OverlayBridge` subscribes to `assist.requested`
-  events and answers through the primitive the pack names in `assistAnswerPrimitive()`. The overlay's presentation and
-  its agent module are a tenant layer's; no CLI command hosts the bridge, so a layer that wants one embeds it in its own
-  controller code (design §5; P5 §12.4; P7 §9.5).
-
-### 11.6 Vision tiers and the Robot opt-in
-
-`skillroy session --vision v1|v2|v3|off` (P7 §6; design §3.10): V1 (the model sees a redacted capture and answers by
-mark or ref), V2 (it answers with a pixel, mapped through `swing.hitTest` and acted through `swing.pointer` routed by
-AWT), V3 (it acts through `java.awt.Robot`). Every action is recorded as the step that will be replayed and exported as
-ordinary steps. V3 needs **both halves** of a double opt-in: the agent option `robot=true` and a person's
-`--allow-robot`; neither is ever a model's or a client's choice, and neither belongs in a committed file. A session is
-bounded to USD 1.00, 30 UI actions and 20 model turns. For a vision-friendly application: a `CaptureMask` for every
-secret, a `RegionResolver` for painted surfaces, `LocatorResolver.describe`, and a pack `screenLegend()`. Robot is
-verified on the Linux image's display only.
+- **Zero LLM calls in CI:** `replay` forces `gateway: none` and asserts an empty cost ledger. `ANTHROPIC_API_KEY` is read exclusively from the environment for live developer/authoring workflows.
+- **`inference.yaml` and pricing:** Configures `gateway` (`claude | recorded | none`), `models`, `effort`, `budget` (`scenarioUsd` default `0.50`, `sessionUsd` default `1.00`, `jobUsd` for `re-resolve`), `thresholds.confidence` (`0.6`), and `images` (`false` by default — pixels never leave for a model provider unless explicitly set `true`). Unlisted newer model IDs automatically use `PriceTable.effective(model)`'s fallback rate unless overridden under `prices:`.
+- **Tier (b) `llm-sql`:** Guarded by `SqlGuard` (`SELECT`-only; procedure `CALL`/`EXEC` calls are refused, deterministic `ORDER BY`, `LIMIT <= 200`), `AllowListCheck` (verifies declared tables/columns exist while tolerating extra unenumerated database columns), lenient `Record` candidate decoding (ignoring extra `ORDER BY` expressions), in-process `Verifier`s, and human `approve` sign-off.
+- **Authoring, interactive sessions, and vision:** `skillroy author` drafts YAML via headless `claude -p` + `skillroy-mcp`; `skillroy session` (`--vision v1|v2|v3|off`) journals live steps through `ExecutorSession` and exports replayable YAML scenarios. V3 `java.awt.Robot` requires double opt-in (`robot=true` on the agent + `--allow-robot` on the controller). `OverlayBridge` connects optional tenant-built in-app assistant UIs over existing SSE/RPC primitives.
 
 ---
 
 ## 12. CI and environments
 
-### 12.1 The Linux image
-
-The base's `ci/Dockerfile` (`eclipse-temurin:25-jdk`, Xvfb at 1024x768x24 without a window manager, fonts, Chromium's
-run-time libraries for JCEF) and `ci/run-in-linux.sh` (mounts the repository, the local Maven repository and the host's
-Maven; `SKILLROY_JDK8_HOME` mounts a Linux JDK 8 at `/opt/jdk8`; `SKILLROY_PLATFORM` and `SKILLROY_CI_IMAGE` choose an
-arm64 build) are Apache-2.0: copy them into the layer's `ci/` with their headers, or build the base's image and point
-the layer's runner at it. The script mounts the directory above its own `ci/`, so a copy works for the layer's
-repository. Display tests must skip when headless and run only in the image; never switch headless off on a desktop:
-the tests open real windows (README "Build"; `CLAUDE.md`).
-
-Lessons recorded by the base (TODO "Environment notes") that apply to a layer: keep JDKs in a durable directory, never
-under `/tmp` (macOS's clean-up emptied one); under QEMU emulation (the amd64 image on an arm64 host) run the test JVMs
-with `-Djdk.lang.Process.launchMechanism=FORK`, because the JDK's spawn helper fails now and then there; read test
-counts, not exit codes; touch restored sources before trusting an incremental build.
-
-### 12.2 The matrix
-
-Run the layer's suites the way the base gates itself (design §6; `docs/release-checklist.md` item 1): every scenario
-in `replay` against a Java 8 and a Java 25 target of the application, in each load mode the layer supports (at least
-`JAVAAGENT`, plus `EMBEDDED` if the application loads the agent that way), with hooks on and off if the pack has a
-catalogue, and the web profile if the application embeds browsers. Start the target **once per suite** with the agent
-loaded at launch; `recover` keeps it usable between scenarios. Keep live and recording profiles out of the gate (the
-base's `inference-live` and `inference-record` profiles report themselves skipped without a key).
-
-### 12.3 Windows
-
-`ci\run-on-windows.cmd` is the base's runner, to be started from the repository root in an interactive logon session
-because the tests open real windows (README "Windows"). The layer's equivalent must run its display tests the same
-way, never as a service in session 0, where `java.awt.Robot` cannot work (§5.9; design §3.7).
-
-### 12.4 Artifacts and their sensitivity
-
-A run's outputs (`run.jsonl`, `bindings.json`, ledgers, `capabilities.json`, `failure/` with a UI snapshot and a PNG,
-`captures/` of a vision session, `telemetry/spans.jsonl`) hold screenshots, UI text, events and row samples. Treat CI
-artifacts as the application's data: restrict who can read them, set retention, run under `umask 077` on shared hosts,
-and give `--out` a directory the CI user owns (`SECURITY.md`; threat model §2, A13). Bindings and image baselines are
-committed and reviewed; credentials files never are.
-
-### 12.5 OpenTelemetry
-
-Off by default; `--telemetry otlp|file` (CLI) or `-Dskillroy.telemetry=…` (JUnit glue, with `skillroy-telemetry` on the
-test class path); `http://` to loopback only, `https://` otherwise; a backend's header from an environment variable that
-`telemetry.yaml` names; attributes from an allow-list (`standard` or `minimal`), never parameters, values, rows, SQL or
-prompts (README "Exporting spans"; P6 §10). Nothing of OpenTelemetry enters the target JVM.
+- **Linux container (`ci/Dockerfile` & `ci/run-in-linux.sh`):** Runs `eclipse-temurin:25-jdk` with mounted JDK 8 (`SKILLROY_JDK8_HOME`), 24-bit `Xvfb` (`1024x768x24`, no WM), DejaVu fonts, and JCEF libraries. Copy or reuse it for your layer's CI; keep `-Dskillroy.headless=true` on developer desktops so display tests never pop up windows locally. Under cross-architecture QEMU emulation, pass `-Djdk.lang.Process.launchMechanism=FORK` to test JVMs.
+- **Verification matrix:** Gate every scenario in `replay` against Java 8 and Java 25 targets in your supported launch modes (`JAVAAGENT` and `EMBEDDED`), starting the target once per suite (`release-checklist.md`).
+- **Artifacts and OpenTelemetry:** Restrict access to CI `--out` bundles (`umask 077`). Enable optional controller-side span export with `--telemetry otlp` (`https://` or loopback `http://`, auth token via env var in `telemetry.yaml`) or `--telemetry file` (`telemetry/spans.jsonl`).
 
 ---
 
 ## 13. Keeping the base neutral
 
-The base's hard rule (`CLAUDE.md`, "Neutrality rule"): nothing in the base may name or describe a customer, tenant or
-proprietary application, in code, tests, fixtures, comments or docs, and the history is permanent once pushed. The
-layer carries the responsibility for what flows back.
+Per [`CLAUDE.md`](../../CLAUDE.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md), nothing in this base repository — code, tests, fixtures, comments, docs, or git history — may ever name or describe a customer, tenant, or proprietary application:
 
-- **A generic need goes back as a generic SPI, proven on the sample.** When the layer meets a need the base cannot
-  serve, write it up in the base's terms (a *target application*, a *domain pack*, the sample lending desk's
-  vocabulary: items, loans, deposits, waiver rules, slips, staff), add a row to TODO's "Open SPI and DSL gaps"
-  (`# | Gap | Why it matters | Proposed shape | Phase`), and propose the shape. Never the layer's names: no class,
-  package, table, column, config key, file path or product name, and no citation into the layer's sources.
-- **PoC-first iteration.** Implement and test generic base improvements directly in code and unit/integration tests
-  (`CLAUDE.md`); update `docs/` when a major architectural shift occurs, and add a sample test where it helps prove a new
-  SPI.
-- **Contributions** are Apache-2.0 under the DCO (`git commit -s`), every source file with the licence header
-  (`ci/license-headers.sh`), every new dependency in `docs/licence-audit.md`, and nothing but the JDK visible to a
-  target JVM (CONTRIBUTING).
-- **The layer keeps its own leak check against the base.** The private layer holds a deny-list of its own names (the
-  application's product, package, class and table names, tenant names, paths) and a script that greps the base against
-  it; the deny-list never enters the base. Run it on every base upgrade, on every change the layer proposes to the base,
-  and on the base's release commit (release checklist item 12). Run it on a clean export (`git archive`) of the base, not
-  on a tree with agent worktrees inside (TODO "Environment notes", Phase 6).
-- **Verification results are welcome in neutral form.** A Windows run, a JxBrowser line, a soak on a real target: report
-  what ran and what held without naming the application (the JxBrowser kit run is recorded that way, P4 §4.5).
+- Express upstream feature requests, bug reports, and pull requests strictly in generic framework terms or using the sample lending desk's domain (`lending`: items, loans, deposits, waivers, slips, staff), accompanied by unit/integration tests and DCO sign-off (`git commit -s`).
+- Maintain a **private leak-check script** in your product/tenant repository holding a deny-list of proprietary product, package, class, schema, and tenant names, and run it against a clean `git archive` export of the base before pushing upstream changes or cutting releases.
 
 ---
 
 ## 14. The first week: bringing up a new application
 
-Each step has an exit check. Steps 1-4 can be done in a throwaway spike module before the real layer exists.
-
-1. **Get the base** (§4.3): a clean clone of a tagged commit, `mvn verify`, installed into a dedicated local repository;
-   note the commit. *Done when* the layer's empty parent POM resolves `skillroy-agent-api` and `skillroy-scenario`.
-2. **Spike readiness and threads.** Read the application's start-up and threading: which thread owns domain state, which
-   threads must never be blocked, when singletons are safe, when listeners may be added, whether it can start in a modal
-   question. Write a spike module with only a `ReadinessSource`, a `ThreadPolicyProvider` and an `AppStateProvider`.
-   *Done when* `skillroy call app.state` answers on a running application and `target.ready` is `OK`.
-3. **Load the agent.** Assemble an agent home with the spike module (§4.5) and start the application with
-   `-javaagent` and `-Dskillroy.agent.enabled=true` on a test installation; try `EMBEDDED` if the application has a
-   plugin mechanism (§5.3). Add the `ProductionMarker` and `requireProductionMarker=true` now (§5.7).
-   *Done when* `skillroy info`, `skillroy caps` and `skillroy snapshot` work on a Java 8 and a Java 25 target, and the
-   agent refuses to serve on a configuration made to look like production.
-4. **Snapshot and names.** Walk the snapshot of every main screen: nodes without names, custom widgets, custom dialogs,
-   in-window dialogs, components that show secrets. Add `NameEnricher`, `LocatorResolver`, `ActionFirer`,
-   `DialogTextExtractor`, `DialogLocator`, `CaptureMask` and `RedactionKeys` as needed (§6.7, §6.11).
-   *Done when* every control a scenario will touch has a stable locator and `swing.capture` blanks every secret.
-5. **The input seam and the sync topics.** Add `<product>.input` (chained, pre-checked, publishing ack and ready
-   topics), the open-prompt read and answer, and a state read (§6.5, §6.14). *Done when* a sequence of inputs through
-   `skillroy call` is acknowledged and followed by the ready topic each time (`skillroy events`).
-6. **The pack and a first scenario in replay.** Start with `pack: base` (or no `pack:` key) to run an immediate smoke
-   scenario using built-in UI/event verbs (`click`, `type`, `expect`, `waitFor`) with zero pack code. Then add a custom
-   `DomainPack` with the `SyncPolicy`, three or four domain verbs, one fact root, a `PromptPolicy`, a pre-flight check
-   and `recover`; one scenario with fixture slots only.
-   *Done when* `skillroy run` passes it twice in a row on one target without a restart, `skillroy compile --check` is
-   clean (if committing compiled plans), and the JUnit glue runs it with `-Dskillroy.mode=replay`.
-7. **The data channel and resolution.** A `DataSourceProvider` and `MaskPolicy`; a stored table; a tier (a) resolver
-   whose verifier calls the application's own decision code; an oracle with a cross-check where the application can dry
-   run the rule; a fingerprinter; `credentials.yaml` for one environment (§6.9, §8.4, §8.5, §8.7).
-   *Done when* `--mode approve` writes bindings, `replay` passes on them, and a deliberately wrong binding fails as
-   `REBIND_NEEDED`.
-8. **Hooks, only if a fact has no seam.** One `OBSERVE` or `CAPTURE` hook in a catalogue with a seam fallback, guarded in
-   the scenario (§9). *Done when* the scenario passes with hooks on and is `DEGRADED`, not failed, with hooks off.
-9. **Web views, if any.** Identify the engine and line; seeds for browsers outside the tree; the debug port decision;
-   readiness flags; masks (§10). *Done when* one web scenario passes through the agent path, and over CDP if a port is
-   configured.
-10. **CI.** The Linux image and runner (§12.1), a replay-only job on both target Javas, artifact retention and access
-    (§12.4), and the leak check against the base (§13). *Done when* the job is green twice in a row and the test
-    `skillroy: zero model calls` is in its report.
+1. **Install the base** (§4.2) from a clean checkout into a dedicated local or internal Maven repository and verify your empty layer POM resolves `skillroy-agent-api` and `skillroy-scenario`.
+2. **Spike readiness and threading** (§6.3, §6.4): implement a minimal `AgentModule` with `ReadinessSource`, `ThreadPolicyProvider`, and `AppStateProvider`; verify `skillroy call app.state` returns `OK` (`target.ready`).
+3. **Load and guard the agent** (§4.4, §5.4, §5.7): assemble the agent home, launch with `-javaagent` and `-Dskillroy.agent.enabled=true`, add your `ProductionMarker` + `requireProductionMarker=true`, and verify `skillroy info`, `skillroy caps`, and `skillroy snapshot` on Java 8 and Java 25 targets (plus refusal on a simulated production config).
+4. **Enrich widgets and mask secrets** (§6.7, §6.11): walk `skillroy snapshot` across primary screens and add `NameEnricher`, `LocatorResolver`, `ActionFirer`, `DialogTextExtractor`, `DialogLocator`, `InputVeto`, `CaptureMask`, and `RedactionKeys` until every target control has a clean locator and `swing.capture` blanks every secret.
+5. **Wire the semantic input seam** (§6.5, §6.14): add `<product>.input` (chained, state-checked, publishing correlated `inputId` ack and ready events) and prompt read/answer primitives; verify event flow via `skillroy events`.
+6. **Run a first scenario in `replay`** (§8.1, §8.6): start immediately with `pack: base` (zero pack code) to run a smoke `.yaml` scenario using built-in UI/event verbs (`click`, `type`, `expect`, `waitFor`). Then introduce your custom `DomainPack` (`SyncPolicy`, core verbs, fact roots, `PreflightCheck`, `recover`) and verify `ScenarioTests` passes twice back-to-back without restarting the target.
+7. **Add data resolution and verification** (§6.9, §8.4, §8.5, §8.7): wire `DataSourceProvider` + `MaskPolicy`, `storedTables()`, a tier (a) resolver + in-process `Verifier`, an `Oracle` + `CrossCheck`, `EnvFingerprinter`, and `credentials.yaml`; verify `--mode approve` freezes bindings and `replay` catches tampered bindings as `REBIND_NEEDED`.
+8. **Add optional hooks if needed** (§9): define `META-INF/skillroy/hooks/<product>.yaml` with public-seam fallbacks and guard hook expectations so suites pass with hooks on and report `DEGRADED` with hooks off.
+9. **Add embedded web views if present** (§10): supply `BrowserRegistryAdapter` seeds, page readiness signals, and `CaptureMask` / `BrowserMask` rules; verify over `agent` and `cdp` paths.
+10. **Automate CI and leak checks** (§12, §13): run the `replay` matrix in the Linux container, verify `skillroy: zero model calls` in JUnit reports, and enforce your private neutrality leak check.
 
 ---
 
 ## 15. Not provided by the base, and known limits
 
-### 15.1 Needs a layer may have that have no SPI in the base
+### 15.1 Intentional boundaries (handled outside base SPIs)
 
-| Need | What exists instead |
+| Need | How it is handled |
 |---|---|
-| an SPI for the application's own input seam | a primitive of the module (the `SEMANTIC` rung, §6.5); the chaining rule is design §2.2 step 4 |
-| an agent-side overlay | options, the application's variant in `app.state`, or an additional module that adds (§2.6) |
-| choosing a hook catalogue per application version | one pack build per line, or a `hooks()` override (§9.2) |
-| an MCP tool pack per domain (`McpToolPack`, listed as "later" in design §3.6) | the MCP server projects the pack's verbs and the base primitives (P5 §9.3) |
-| module upload over the channel (`POST /modules`) | modules in the home's `modules/`, the `modules` option, or `attach --module` (§4.5) |
-| hooks in `EMBEDDED` mode (self-attach) | `JAVAAGENT` for suites that need hooks (design §2.2) |
-| hosting an in-application assistant | `OverlayBridge` exists in `skillroy-inference`; no CLI hosts it, and the overlay's presentation is the tenant layer's (§11.5) |
-| opening the nightly bindings pull request | the job writes files and a report; the pipeline opens it (P5 §8.2) |
-| the CLI distribution as a Maven artifact | the build output of `controller/skillroy-cli` (§4.1) |
-| a fluent Java API for scenarios | YAML only (README; B5) |
-| a disable flag file for the agent | `agent.disable`, `EmbeddedAgent.stop()`, the agent argument `cmd=stop` (design §2.2 step 6) |
-| pack-defined artifact kinds; a pack-contributed CLI subcommand | not built (gaps 28, 29) |
-| a model provider other than Claude; tier (c) reasoning at bind time | the `InferenceGateway` SPI has one provider implementation; tier (c) only in interactive sessions (B7; design §3.3) |
-| a mask for one DOM element | the whole browser component (§10.4) |
-| owner-only run outputs by default | `umask 077` (accepted, B28) |
+| Application input seam SPI | Implemented as a domain primitive (`<product>.input`, §6.5) chaining any host seam |
+| Agent-side variant overlay SPI | Module options (`AgentContext.option`), `app.state` variant fields, or additive module jars (§2.6) |
+| Per-application-version hook catalogues | One pack artifact per application line, or overriding `DomainPack.hooks()` via `PackSettings` (§9.1) |
+| Dynamic module upload over HTTP | Modules are loaded from `modules/`, `modules=<jar>`, or `skillroy attach --module` (§4.4) |
+| Hooks in `EMBEDDED` mode | Use `JAVAAGENT` for suites requiring `Instrumentation` (§5.1) |
+| In-application assistant UI | `OverlayBridge` runs in `skillroy-inference`; UI presentation lives in the tenant layer (§11) |
+| Opening `re-resolve` pull requests | `skillroy re-resolve` writes updated bindings and a Markdown report; CI pipelines open the PR |
+| Scenario authoring DSL | Declarative YAML (compiled to `plan.json` or executed directly, §8.6) |
+| DOM-element-granular raster masking | Mask the browser component (`CaptureMask`) or seed/instance (`BrowserMask`, §10) |
+| Non-Anthropic model gateways | Implement the `InferenceGateway` SPI in `skillroy-inference` (design §5) |
 
-### 15.2 Open gaps a layer is likely to meet
+### 15.2 Unverified platforms and configurations
 
-From TODO "Open SPI and DSL gaps" (read the row for the proposed shape). (Phase 8, built 2026-10-19, ET, ES, EX, EP:
-gaps 9-11, 18, 19, 21, 22 and 24 are taken by Phase 8, P8 §4.1-§4.3, §7, §8, §9.4, and their rows are removed here;
-the rows Phase 8 opened that a layer is likely to meet are added, tagged; P8 §16.2 has them all.)
+- **Windows hosts:** `bin\skillroy.bat`, `ci\run-on-windows.cmd`, and NTFS ACL handling in `SecureFiles` are unverified on a live Windows machine (§5.9).
+- **JxBrowser combinations:** Verified against JxBrowser 8.18.3 on macOS arm64 (JDK 25) via `WebEngineAdapterContract`; run the contract kit against other JxBrowser lines, OSes, or Java 8 targets (§10).
+- **Native `Robot` display environments:** Verified on the Linux container's 24-bit Xvfb display at scale `1.0`; macOS Accessibility, Windows desktops, Wayland, and HiDPI fractional scaling are unverified.
+- **Byteman alongside third-party agents:** Test in staging before enabling on complex multi-agent JVMs.
 
-| Gap | In short |
-|---|---|
-| 13 | no session-scoped data reads (a procedure call then a select on one connection) |
-| 35, 39, 43, 44 | a view-less browser without a seed is invisible; hidden JCEF has no bitmap; JCEF before 2024-01; windowed JCEF on Java 8 |
-| 50 | a class behind a strict-delegation loader cannot be hooked |
-| 77, 78, 81 | no Robot key input; HiDPI unverified; no key input into a page through `web.pointer` |
-| 83, 84 | one baseline per rendering; redaction hides a rectangle, not a value |
-| 126 *(Phase 8, EA)* | an `InputVeto` does not cover `web.*` input into a browser component inside the vetoed window or panel (medium; §6.7) |
-| 140 *(Phase 8, EH)* | a denied subtype loaded after a `^`/`INTERFACE` Byteman submit still receives the trigger (§9.6) |
-| 142 *(Phase 8, ES)* | no conditional planned call (`when`): a flow that cannot be one composite primitive (two packs' primitives, a base verb in the branch) has no conditional step |
-| 146 *(Phase 8, EX)* | the `events` root reads the agent's bus only: a CDP path's own events are not in it (§6.13) |
-| 152, 153, 154 *(Phase 8, FA)* | a masked window's or combo's popups are not masked; the Robot route does not see what the application shows after its release question; a root pane off ENTER's walk is not asked (§6.7) |
-| 155 *(Phase 8, FE)* | a browser that becomes masked while it is open sends page data for up to about 2 s after its next event (§6.8) |
+### 15.3 Security considerations to plan around
 
-### 15.3 Not verified
-
-From README's status paragraph, `SECURITY.md` "Known limitations" and threat model §8:
-
-- **Windows**, entirely: the ACL branches of every owner-only file, `bin\skillroy.bat`, the planner on Windows,
-  `JAVAAGENT` as the logged-on user, the input rungs, the Robot tier, the run-output ACL judgement.
-- **The `jxbrowser` adapter** beyond JxBrowser 8.18.3 on macOS arm64 with a JDK 25 test JVM: other lines, Linux, Windows,
-  a Java 8 test JVM.
-- **Robot input** off the Linux image's display (macOS with the Accessibility permission, Windows, Wayland, a locked
-  session), any display scale other than 1.
-- **Hooks on a real application**: a detach that ran out of its time budget; the retransformation pause on a painting
-  event-dispatch thread (gap 53); Byteman beside the application's own agents.
-- **Live model paths** beyond the recorded live runs; the vision loop beyond short sessions.
-- **A soak on a target other than the sample** (TODO "Not yet assigned to a phase"): the first real application will be
-  the first such target; record what it shows.
-
-### 15.4 Security limitations to plan around
-
-`SECURITY.md` "Known limitations" in full; the ones that shape a layer's environment: same-user attach is the platform's
-boundary (`-XX:+DisableAttachMechanism` where it must not happen); `StatementGuard` is a safety net (use a read-only
-role; on PostgreSQL `readOnlyMode: always`); run outputs take the umask; settings files must be the operator's own; pin
-the CI example's image and actions; a squatted debug port; a loopback `http` model base URL only for a proxy you run;
-a Windows whose account names are not English fails closed; redaction blanks rectangles; pixels leave for the provider
-only under `images: true`; the Robot opt-in must not be committed.
+Review [`SECURITY.md`](../../SECURITY.md) and [`threat-model.md`](../design/threat-model.md) when setting up environments: OS same-user attach boundaries (`-XX:+DisableAttachMechanism` on production JVMs), read-only DB roles behind `SqlGuard`, `umask 077` and private `--out` directories for run artifacts, loopback debug-port ownership before launching Chromium/CDP, rectangle-level capture redaction, opt-in `images: true` egress, and never committing `credentials.yaml` or Robot opt-ins.
 
 ---
 
 ## 16. Where to look
 
-| Topic | Source |
+| Topic | Location |
 |---|---|
-| What the base is and how to build it | [`README.md`](../../README.md) |
-| The whole design, every phase | [`base-framework-design.md`](../design/base-framework-design.md) |
-| Agent home, options, discovery, protocol, agent SPI, sample module | [`phase1-contracts.md`](../design/phase1-contracts.md) §2-§4, §9 |
-| Resolution, credentials, bindings, stored rows | [`phase2-contracts.md`](../design/phase2-contracts.md) |
-| Cross-checks, `ORACLE_SUSPECT`, devices root | [`phase3-contracts.md`](../design/phase3-contracts.md) |
-| Embedded web views, adapters, the kit | [`phase4-contracts.md`](../design/phase4-contracts.md) |
-| The AI layer, MCP, planner, sessions | [`phase5-contracts.md`](../design/phase5-contracts.md) |
-| Hooks, Byteman, Windows, telemetry, the overlay | [`phase6-contracts.md`](../design/phase6-contracts.md) |
-| Vision, pointer input, redaction, image baselines | [`phase7-contracts.md`](../design/phase7-contracts.md) |
-| Threat model and security policy | [`threat-model.md`](../design/threat-model.md), [`SECURITY.md`](../../SECURITY.md) |
-| Status, gaps, environment notes, walls | [`docs/TODO.md`](../TODO.md) |
-| Decisions and the owner's answers | [`docs/DECISIONS.md`](../DECISIONS.md) |
-| Licences of every dependency | [`docs/licence-audit.md`](../licence-audit.md) |
-| Release checklist and the 0.1.0 record | [`release-checklist.md`](../release-checklist.md), [`release-notes/0.1.0.md`](../release-notes/0.1.0.md) |
-| Background research (attach, channel, Swing driving, browsers, inference, vision) | [`docs/research/`](../research/) |
-| How to contribute | [`CONTRIBUTING.md`](../../CONTRIBUTING.md) |
+| Quick start, zero-code `pack: base`, CLI walkthrough, build | [`README.md`](../../README.md) |
+| Architecture, protocol, SPIs, resolution, vision, CI design | [`base-framework-design.md`](../design/base-framework-design.md) |
+| Trust model, actors, HMAC boundary, LLM/MCP constraints | [`threat-model.md`](../design/threat-model.md), [`SECURITY.md`](../../SECURITY.md) |
+| Third-party dependencies and licences | [`licence-audit.md`](../licence-audit.md) |
+| Pre-release verification gates | [`release-checklist.md`](../release-checklist.md) |
+| Development rules and neutrality policy | [`CLAUDE.md`](../../CLAUDE.md), [`CONTRIBUTING.md`](../../CONTRIBUTING.md) |
+| Reference Swing + HSQLDB application, agent module, pack, overlay, scenarios | `samples/skillroy-sample-lending-app`, `-agent`, `-pack`, `-pack-branch`, `-scenarios` |
+| Reference embedded JCEF host, agent module, and CDP/in-process scenarios | `samples/skillroy-sample-web-host`, `-web-host-agent`, `-web-host-scenarios` (`-Pjcef`) |
